@@ -1,4 +1,5 @@
 import os
+import os.path as osp
 import torch
 import argparse
 import imageio
@@ -18,7 +19,7 @@ def run(args):
     n_img = 0
     
     for i, id_ in enumerate(dataset.ids):
-        cls_labels = imageio.imread(os.path.join(args.sem_seg_out_dir, id_ + '.png')).astype(np.uint8)
+        cls_labels = imageio.imread(os.path.join(args.seg_out_dir, id_ + '.png')).astype(np.uint8)
         cls_labels[cls_labels == 255] = 0
         preds.append(cls_labels.copy())
         labels.append(dataset.get_example_by_keys(i, (1,))[0])
@@ -43,9 +44,11 @@ def run(args):
     
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Evaluate Pseudo Masks', add_help=False)
+    parser.add_argument("--work_space", default="results/MCTG", type=str)
     parser.add_argument("--chainer_eval_set", default="train", type=str)
     parser.add_argument('--voc12_root', default='datasets/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
-    parser.add_argument('--sem_seg_out_dir', default='results/MCTG/pseudo_mask', help='pseudo_mask directory')
+    parser.add_argument('--seg_out_dir', default='pseudo_mask', help='pseudo_mask directory')
     args = parser.parse_args()
     
+    args.seg_out_dir = osp.join(args.work_space, args.seg_out_dir)
     run(args=args)

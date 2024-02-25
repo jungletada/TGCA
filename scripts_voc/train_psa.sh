@@ -7,36 +7,32 @@ echo "  |-- COCO dataset path: datasets/MSCOCO";
 GPU=0,1
 NODES=2
 MODEL=MCTG
-
+SEG_DIR=pseudo_mask
 CUDA_VISIBLE_DEVICES=${GPU}
 OMP_NUM_THREADS=${NODES}
 WORKDIR=results_voc/${MODEL}
 
-#============= Train Pixel Semantic Affnity =============#
-torchrun --nproc_per_node=${NODES} --nnodes=1 \
-    steps_voc/train_aff.py \
-    --work_space ${WORKDIR} \
-    --batch_per_gpu 4 \
-    --seed 2 \
-    --low_alpha 1 \
-    --high_alpha 3 \
-    --model_weights checkpoints/res38_cls.pth \
+# #============= Train Pixel Semantic Affnity =============#
+# torchrun --nproc_per_node=${NODES} --nnodes=1 \
+#     steps_voc/train_aff.py \
+#     --work_space ${WORKDIR} \
+#     --batch_per_gpu 4 \
+#     --seed 2 \
+#     --low_alpha 1 \
+#     --high_alpha 3 \
+#     --model_weights checkpoints/res38_cls.pth \
 
 
 # #============= Infer with Pixel Semantic Affnity =============#
 # python steps_voc/infer_aff.py \
 #     --work_space ${WORKDIR} \
 #     --checkpoint ${WORKDIR}/res38_aff_last.pth \
-#     --infer_list configs/voc12/train.txt \
+#     --infer_list configs/voc12/train_aug.txt \
 #     --cam_out_dir cam_mask \
-#     --seg_out_dir pseudo_mask \
-#     --threshold 0.41 \
+#     --seg_out_dir ${SEG_DIR} \
 
 
-# #================== Evaluate the pseudo mask ===================#
-# python evaluation.py \
-#     --work_space ${WORKDIR} \
-#     --infer_list configs/voc12/train_id.txt \
-#     --log_file eval_pseudo_mask.log \
-#     --predict_dir ${WORKDIR}/pseudo_mask \
-#     --type png \
+#============= Evaluate =============#
+python steps_voc/eval_sem_seg.py \
+    --work_space ${WORKDIR} \
+    --seg_out_dir ${SEG_DIR} \
