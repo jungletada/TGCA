@@ -20,7 +20,7 @@ sys.path.append(osp.dirname(__file__) + os.sep + '../')
 from psa_network.tool import pyutils, imutils
 from misc import torchutils
 from psa_network.network.transform import Normalize
-from psa_network.network.resnet38_aff import Net
+from psa_network.network.resnet38_aff import ResNet38d_Aff
 from data.coco.dataloader_psa import COCOImageDataset
 cudnn.enabled = True
 
@@ -158,7 +158,7 @@ if __name__ == '__main__':
     print_args(args)
     Path(args.seg_out_dir).mkdir(parents=True, exist_ok=True)
     
-    model = Net()
+    model = ResNet38d_Aff()
     model_dict = torch.load(args.checkpoint, map_location='cpu')
     model.load_state_dict(model_dict)
     model.eval()

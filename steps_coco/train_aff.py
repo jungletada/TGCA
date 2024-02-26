@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader
 sys.path.append(os.path.dirname(__file__) + os.sep + '../')
 from psa_network.tool import pyutils, imutils, torchutils
 from psa_network.network.transform import Normalize
-from psa_network.network.resnet38_aff import Net
+from psa_network.network.resnet38_aff import ResNet38d_Aff
 from data.coco.dataloader_psa import COCOAffDatasetCRF
 cudnn.enabled = True
 
@@ -161,7 +161,7 @@ if __name__ == '__main__':
     
     print_info(args)
     
-    model = Net()
+    model = ResNet38d_Aff()
     weights_dict = torch.load(args.model_weights)
     
     param_groups = model.get_parameter_groups()

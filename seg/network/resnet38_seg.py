@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import network.resnet38d as resnet38d
 
 
-class Net(resnet38d.Net):
+class ResNet38d_Seg(resnet38d.Net):
     def __init__(self, num_classes):
         super().__init__()
         self.fc8_seg_conv1 = nn.Conv2d(4096, 512, (3, 3), stride=1, padding=12, dilation=12, bias=True)

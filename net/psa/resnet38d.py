@@ -2,6 +2,8 @@ import torch
 from torch import nn
 import numpy as np
 import torch.nn.functional as F
+from timm.models.registry import register_model
+from timm.models.layers import trunc_normal_, to_2tuple
 
 
 class ResBlock(nn.Module):
@@ -93,9 +95,10 @@ class ResBlock_bot(nn.Module):
         return self.forward(x, get_x_bn_relu=get_x_bn_relu)
 
 
-class Net(nn.Module):
-    def __init__(self):
-        super(Net, self).__init__()
+class ResNet38d(nn.Module):
+    def __init__(self, num_classes=20):
+        super(ResNet38d, self).__init__()
+        self.num_classes = num_classes
         self.conv1a = nn.Conv2d(3, 64, 3, padding=1, bias=False)
 
         self.b2 = ResBlock(64, 128, 128, stride=2)
@@ -120,11 +123,16 @@ class Net(nn.Module):
         self.b6 = ResBlock_bot(1024, 2048, stride=1, dilation=4, dropout=0.3)
         self.b7 = ResBlock_bot(2048, 4096, dilation=4, dropout=0.5)
         self.bn7 = nn.BatchNorm2d(4096)
-        self.not_training = [self.conv1a]
-        # self.normalize = Normalize()
-
+        
+        self.head = nn.Conv2d(4096, self.num_classes, kernel_size=3, stride=1, padding=1)
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        
     def forward(self, x):
-        return self.forward_as_dict(x)['conv6']
+        x = self.forward_as_dict(x)['conv6']
+        x = self.head(x)
+        x = self.pool(x)
+        x = x.view(x.shape[0], x.shape[1])
+        return x
 
     def forward_as_dict(self, x):
         x = self.conv1a(x)
@@ -155,70 +163,27 @@ class Net(nn.Module):
 
         return dict({'conv4': conv4, 'conv5': conv5, 'conv6': conv6})
 
-    def train(self, mode=True):
-        super().train(mode)
-        for layer in self.not_training:
-            if isinstance(layer, torch.nn.Conv2d):
-                layer.weight.requires_grad = False
-            elif isinstance(layer, torch.nn.Module):
-                for c in layer.children():
-                    c.weight.requires_grad = False
-                    if c.bias is not None:
-                        c.bias.requires_grad = False
 
-        for layer in self.modules():
-            if isinstance(layer, torch.nn.BatchNorm2d):
-                layer.eval()
-                layer.bias.requires_grad = False
-                layer.weight.requires_grad = False
+@register_model
+def ResNet38d_patch_224(pretrained=None, **kwargs):
+    model = ResNet38d(**kwargs)
+    if pretrained is not None:
+        weights_dict = torch.load(pretrained)
+        for keys in weights_dict.keys():
+            print(keys)
+        model.load_state_dict(weights_dict, strict=False)
+    return model
 
 
-def convert_mxnet_to_torch(filename):
-    import mxnet
-
-    save_dict = mxnet.nd.load(filename)
-
-    renamed_dict = dict()
-
-    bn_param_mx_pt = {'beta': 'bias', 'gamma': 'weight', 'mean': 'running_mean', 'var': 'running_var'}
-
-    for k, v in save_dict.items():
-
-        v = torch.from_numpy(v.asnumpy())
-        toks = k.split('_')
-
-        if 'conv1a' in toks[0]:
-            renamed_dict['conv1a.weight'] = v
-
-        elif 'linear1000' in toks[0]:
-            pass
-
-        elif 'branch' in toks[1]:
-
-            pt_name = []
-
-            if toks[0][-1] != 'a':
-                pt_name.append('b' + toks[0][-3] + '_' + toks[0][-1])
-            else:
-                pt_name.append('b' + toks[0][-2])
-
-            if 'res' in toks[0]:
-                layer_type = 'conv'
-                last_name = 'weight'
-
-            else:  # 'bn' in toks[0]:
-                layer_type = 'bn'
-                last_name = bn_param_mx_pt[toks[-1]]
-
-            pt_name.append(layer_type + '_' + toks[1])
-
-            pt_name.append(last_name)
-
-            torch_name = '.'.join(pt_name)
-            renamed_dict[torch_name] = v
-
-        else:
-            last_name = bn_param_mx_pt[toks[-1]]
-            renamed_dict['bn7.' + last_name] = v
-
-    return renamed_dict
+if __name__ == '__main__':
+    from timm.models import create_model
+    model = create_model(
+        "ResNet38d_patch_224",
+        pretrained="checkpoints/res38_cls.pth",
+        num_classes=20)
+    
+    model.eval()
+    
+    x = torch.randn(2, 3, 64, 48)
+    y = model(x)
+    print(y.shape)
