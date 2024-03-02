@@ -135,26 +135,6 @@ class VOC12DatasetMS(Dataset):
         label = torch.from_numpy(self.label_list[idx])
         rounded_size = (int(round(img.size[0] / self.unit) * self.unit), 
                         int(round(img.size[1] / self.unit) * self.unit))
-
-        # ms_img_list = [] # multi-scale image list
-        
-        # for s in self.scales: # for s scales
-        #     if s == 1:
-        #         s_img = img
-        #     else:
-        #         target_size = (round(rounded_size[0] * s), round(rounded_size[1] * s))
-        #         s_img = img.resize(target_size, resample=PIL.Image.BICUBIC)
-             
-        #     ms_img_list.append(s_img)
-
-        # if self.transform:
-        #     for i in range(len(ms_img_list)):
-        #         ms_img_list[i] = self.transform(ms_img_list[i])
-
-        # msf_img_list = [] # Flip multi-scale image for augmentation
-        # for i in range(len(ms_img_list)):
-        #     msf_img_list.append(ms_img_list[i])
-        #     msf_img_list.append(torch.flip(ms_img_list[i], [-1]))
         
         msf_img_list = []
         for s in self.scales: 
@@ -227,15 +207,15 @@ def build_dataset(is_train, make_cam, args):
 
     if args.data_set == 'VOC12':
         dataset = VOC12Dataset(
-            voc12_root=args.voc12_root,
-            infer_list=args.infer_list,
+            voc12_root='datasets/VOCdevkit/VOC2012',
+            infer_list='configs/voc12/train_aug_id.txt',
             transform=transform)
         nb_classes = 20
 
     elif args.data_set == 'VOC12MS':
         dataset = VOC12DatasetMS(
-            voc12_root=args.voc12_root,
-            infer_list=args.infer_list,
+            voc12_root='datasets/VOCdevkit/VOC2012',
+            infer_list='configs/voc12/train_aug_id.txt',
             scales=tuple(args.scales),
             transform=transform)
         nb_classes = 20

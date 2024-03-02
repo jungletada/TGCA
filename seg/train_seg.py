@@ -91,7 +91,7 @@ if __name__ == '__main__':
     pyutils.Logger(os.path.join(args.save_path, args.session_name + '.log'))
 
     criterion = torch.nn.CrossEntropyLoss(weight=None, ignore_index=255, reduction='mean').cuda()
-    model = getattr(importlib.import_module('network.' + args.network), 'Net')(num_classes=args.num_classes)
+    model = getattr(importlib.import_module('network.resnet38_seg'), 'ResNet38d_Seg')(num_classes=args.num_classes)
     weights_dict = torch.load(args.init_weights)
     model.load_state_dict(weights_dict, strict=False)
 

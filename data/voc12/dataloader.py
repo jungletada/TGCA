@@ -1,12 +1,17 @@
-
-import numpy as np
+import os
+import sys
+import cv2
 import torch
-from torch.utils.data import Dataset
-import os.path
 import imageio
-from misc import imutils
+import os.path as osp
+import numpy as np
+from torch.utils.data import Dataset
 from PIL import Image
 import torch.nn.functional as F
+
+sys.path.append(os.path.dirname(__file__) + os.sep + '../..')
+from misc import imutils
+from data.base_seg_dataset import _BaseDataset
 
 IMG_FOLDER_NAME = "JPEGImages"
 ANNOT_FOLDER_NAME = "Annotations"
@@ -153,12 +158,6 @@ class VOC12ClassificationDataset(VOC12ImageDataset):
 
     def __getitem__(self, idx):
         out = super().__getitem__(idx)
-
-        # label = torch.from_numpy(self.label_list[idx])
-        # label = torch.nonzero(label)[:,0]
-        # label = label[torch.randint(len(label),(1,))]
-        # out['label'] = label
-
         out['label'] = torch.from_numpy(self.label_list[idx])
 
         return out
@@ -280,4 +279,113 @@ class VOC12ClassificationDatasetMSF(VOC12ClassificationDataset):
                "size": (img.shape[0], img.shape[1]),
                "label": torch.from_numpy(self.label_list[idx])}
         return out
+        
+        
+class VOCAugSegmentationDataset(_BaseDataset):
+    """
+    PASCAL VOC Segmentation dataset with extra annotations
+    """
+    def __init__(self,
+                 voc12_root="datasets/VOCdevkit/VOC2012",
+                 pseudo_dir=None,  
+                 **kwargs):
+        self.root = voc12_root
+        self.img_dir = "JPEGImages"
+        self.label_dir = "SegmentationClassAug"
+        self.pseudo_dir = self.label_dir if pseudo_dir is None else pseudo_dir
+        super(VOCAugSegmentationDataset, self).__init__(**kwargs)
 
+    def _set_files(self):
+        if self.split in ["train", "train_aug"]:
+            id_list = osp.join(
+                self.root, "ImageSets/SegmentationAug", self.split + "_id.txt"
+            )
+            id_list = tuple(open(id_list, "r"))
+            id_list = [id_.rstrip() for id_ in id_list]
+            self.files = [f"/{self.img_dir}/{id_}.jpg" for id_ in id_list]
+            self.labels = [f"/{self.pseudo_dir}/{id_}.png" for id_ in id_list]
+            
+        elif self.split in ["val"]:
+            id_list = osp.join(
+                self.root, "ImageSets/SegmentationAug", self.split + "_id.txt"
+            )
+            id_list = tuple(open(id_list, "r"))
+            id_list = [id_.rstrip() for id_ in id_list]
+            self.files = [f"/{self.img_dir}/{id_}.jpg" for id_ in id_list]
+            self.labels = [f"/{self.label_dir}/{id_}.png" for id_ in id_list]
+            
+        else:
+            raise ValueError("Invalid split name: {}".format(self.split))
+
+    def _load_data(self, index):
+        # Set paths
+        image_id = self.files[index].split("/")[-1].split(".")[0]
+        image_path = osp.join(self.root, self.files[index][1:])
+        label_path = osp.join(self.root, self.labels[index][1:])
+        # Load an image
+        image = cv2.imread(image_path, cv2.IMREAD_COLOR).astype(np.float32)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
+        label = np.asarray(Image.open(label_path), dtype=np.int32)
+        return image_id, image, label
+
+
+if __name__ == "__main__":
+    import matplotlib
+    import matplotlib.pyplot as plt
+    import matplotlib.cm as cm
+    import torchvision
+    import yaml
+    from torchvision.utils import make_grid
+    from tqdm import tqdm
+
+    kwargs = {"nrow": 5, "padding": 50}
+    batch_size = 25
+
+    dataset = VOCAugSegmentationDataset(
+        root="datasets/VOCdevkit/VOC2012",
+        split="train_aug",
+        pseudo_dir=None,
+        ignore_label=255,
+        augment=True,
+        base_size=None,
+        crop_size=321,
+        scales=(0.7, 1.3),
+        flip=True,
+    )
+    print(dataset)
+    from torch.utils import data
+    loader = data.DataLoader(
+        dataset, batch_size=batch_size, shuffle=True)
+    
+    mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+    std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+    
+    for i, (image_ids, images, labels) in tqdm(
+        enumerate(loader), total=np.ceil(len(dataset) / batch_size), leave=False):
+        
+        if i == 0:
+            print(f"Input size:{images.shape}; Label size: {labels.shape}")
+           
+            images = (images * std + mean) * 255.0
+            images = images.int()
+        
+            image = make_grid(images, pad_value=-1, **kwargs).numpy()
+            image = np.transpose(image, (1, 2, 0))
+            mask = np.zeros(image.shape[:2])
+            mask[(image != -1)[..., 0]] = 255
+            image = np.dstack((image, mask)).astype(np.uint8)
+            
+            labels = labels[:, np.newaxis, ...]
+            label = make_grid(labels, pad_value=255, **kwargs).numpy()
+            label_ = np.transpose(label, (1, 2, 0))[..., 0].astype(np.float32)
+            label = cm.jet_r(label_ / 21.0) * 255
+            mask = np.zeros(label.shape[:2])
+            label[..., 3][(label_ == 255)] = 0
+            label = label.astype(np.uint8)
+
+            tiled_images = np.hstack((image, label))
+            tiled_images = cv2.cvtColor(tiled_images, cv2.COLOR_RGB2BGR)
+            cv2.imwrite("voc12.png", tiled_images)
+            # plt.imshow(np.dstack((tiled_images[..., 2::-1], tiled_images[..., 3])))
+            # plt.show()
+            break

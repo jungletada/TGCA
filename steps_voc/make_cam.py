@@ -133,7 +133,7 @@ if __name__ == '__main__':
     args.data_set = 'VOC12MS'
     dataset, num_classes = build_dataset(is_train=False, make_cam=True, args=args)
         
-    from net.mctg_v2 import MCTGCAM
+    from net.mctg import MCTGCAM
     model = MCTGCAM(num_classes=20)
     model_dict = torch.load(args.checkpoint, map_location='cpu')['model']
     

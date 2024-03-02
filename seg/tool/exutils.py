@@ -119,6 +119,7 @@ def get_data_from_chunk(chunk, args):
         img_temp = cv2.cvtColor(img_temp, cv2.COLOR_BGR2RGB).astype(np.float32)
 
         gt_temp = np.asarray(Image.open(os.path.join(args.seg_pgt_path, piece + '.png')))
+        
         img_temp = scale_img(img_temp, scale)
         gt_temp = scale_gt(gt_temp, scale)
         img_temp = flip(img_temp, flip_p)

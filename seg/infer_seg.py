@@ -17,7 +17,6 @@ sys.path.append(os.path.dirname(__file__) + os.sep + '../')
 import logging
 import utils 
 cudnn.enabled = True
-# mean, std = np.array([0.485, 0.456, 0.406]), np.array([0.229, 0.224, 0.225])
 mean = np.expand_dims(np.array([0.485, 0.456, 0.406]), axis=(0, 1))
 std = np.expand_dims(np.array([0.229, 0.224, 0.225]), axis=(0, 1))
 
@@ -50,7 +49,7 @@ def str2bool(v):
 def get_args_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default='voc')
-    parser.add_argument('--model', type=str, default='MCTformerV2')
+    parser.add_argument("--work_space", default="results_voc/MCTG", type=str)
     parser.add_argument('--gpu_id', type=str, default='0')
     parser.add_argument("--weights", default="", type=str)
     parser.add_argument("--network", default="", type=str)
@@ -76,23 +75,17 @@ def transform_image(img_temp):
     
 if __name__ == '__main__':
     args = get_args_parser()
-    
-    model_dir = utils.get_model_name(args.model)
-    dataset_dir = utils.get_dataset_dir(args.dataset)
-    
-    base_save_path = f'results/{model_dir}/{dataset_dir}'
-    utils.data_mkdir(base_save_path)
-    
+    utils.data_mkdir(args.work_space)
     session_name = "Segmentation Inference"
-    log_path = os.path.join(base_save_path, 'eval_segmentation.log')
+    log_path = os.path.join(args.work_space, 'eval_seg.log')
     utils.logger_info(logger_name=session_name, log_path=log_path)
     logger = logging.getLogger(session_name)
-    logger.info(f"Model: {model_dir}, Dataset: {dataset_dir}")
+    
     logger.info(f"Evaluation log path: {log_path}")
     logger.info(f"Multi-scale test: {tuple(args.scales)}, use CRF: {args.use_crf}")
    
     if args.save_palette: 
-        pred_save_path = os.path.join(base_save_path, 'val_ms_crf_color')
+        pred_save_path = os.path.join(args.work_space, 'val_ms_crf_color')
         utils.data_mkdir(pred_save_path)
         logger.info(f"Multi-scale Evaluation with CRF save path: {pred_save_path}")
     else:
@@ -101,7 +94,8 @@ if __name__ == '__main__':
     gpu_id = args.gpu_id
     os.environ["CUDA_VISIBLE_DEVICES"] = gpu_id
 
-    model = getattr(importlib.import_module('network.' + args.network), 'Net')(num_classes=args.num_classes)
+
+    model = getattr(importlib.import_module('network.resnet38_seg'), 'ResNet38d_Seg')(num_classes=args.num_classes)
 
     model.load_state_dict(torch.load(args.weights))
     seg_evaluator = Evaluator(num_class=args.num_classes)

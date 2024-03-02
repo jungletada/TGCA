@@ -21,7 +21,7 @@ from torch.utils.data.distributed import DistributedSampler
 import utils
 from engine import compute_mAP
 from datasets_cam import build_dataset
-import net.mctg
+import net.resnet38d
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -125,11 +125,6 @@ def get_args_parser():
     parser.add_argument('--resplit', action='store_true', default=False,
                         help='Do not random erase first (clean) augmentation split')
 
-    # * Finetuning params
-    parser.add_argument('--finetune', 
-                        default='https://dl.fbaipublicfiles.com/deit/deit_small_patch16_224-cd65a155.pth', 
-                        help='finetune from checkpoint')
-
     # Dataset parameters
     parser.add_argument('--data_set', default='', type=str, help='name of dataset')
     parser.add_argument('--checkpoint', default='', help='checkpoint for generating maps')
@@ -180,64 +175,6 @@ def init_distributed_mode(args):
         world_size=args.world_size,
         rank=args.rank)
     dist.barrier()
-    
-    
-def load_model_weight(args, model):
-    if args.finetune.startswith('https'):
-        checkpoint = torch.hub.load_state_dict_from_url(
-            args.finetune, map_location='cpu', check_hash=True)
-    else: checkpoint = torch.load(args.finetune, map_location='cpu')
-
-    try: checkpoint_model = checkpoint['model']
-    except: checkpoint_model = checkpoint
-        
-    state_dict = model.state_dict()
-    for k in ['head.weight', 'head.bias', 'head_dist.weight', 'head_dist.bias']:
-        if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
-            print(f"Removing key {k} from pretrained checkpoint")
-            del checkpoint_model[k]
-
-    # interpolate position embedding
-    pos_embed_checkpoint = checkpoint_model['pos_embed']
-    embedding_size = pos_embed_checkpoint.shape[-1]
-    num_patches = model.patch_embed.num_patches
-    Np = int(args.input_size // model.patch_embed.patch_size[0])
-    
-    if args.finetune.startswith('https'):
-        num_extra_tokens = 1
-    else:
-        num_extra_tokens = model.pos_embed.shape[-2] - num_patches
-
-    original_size = int((pos_embed_checkpoint.shape[-2] - num_extra_tokens) ** 0.5)
-
-    if args.finetune.startswith('https'):
-        extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens].repeat(1, args.nb_classes, 1)
-    else:
-        extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
-
-    pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
-
-    pos_tokens = pos_tokens.reshape( # (1, Hp, Wp, C)->(1, C, Hp, Wp)
-        -1, original_size, original_size, embedding_size).permute(0, 3, 1, 2)
-    
-    import torch.nn.functional as F
-    pos_tokens = F.interpolate(
-            input=pos_tokens,
-            size=(Np, Np),
-            mode='bicubic',
-            align_corners=False)
-    
-    pos_tokens = pos_tokens.permute(0, 2, 3, 1).flatten(1, 2)
-
-    checkpoint_model['pos_embed_cls'] = extra_tokens
-    checkpoint_model['pos_embed_pat'] = pos_tokens
-
-    if args.finetune.startswith('https'):
-        cls_token_checkpoint = checkpoint_model['cls_token']
-        new_cls_token = cls_token_checkpoint.repeat(1, args.nb_classes, 1)
-        checkpoint_model['cls_token'] = new_cls_token
-    
-    return checkpoint_model
       
 
 def ddp_print(logger, log_msg):
@@ -262,14 +199,11 @@ def train_one_epoch(model, data_loader, optimizer, device, epoch,
         with torch.cuda.amp.autocast():
             outputs = model(samples)
 
-            cls_loss = criterion(outputs[0], targets)
+            cls_loss = criterion(outputs, targets)
             metric_logger.update(cls_loss=cls_loss.item())
             
-            patch_loss = criterion(outputs[1], targets)
-            metric_logger.update(pat_loss=patch_loss.item())
-            
-            total_loss = 3 * cls_loss + patch_loss
-            
+            total_loss = cls_loss
+                        
         loss_value = total_loss.item()
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
@@ -304,8 +238,7 @@ def evaluate(data_loader, model, device):
         batch_size = images.shape[0]
 
         with torch.cuda.amp.autocast():
-            output = model(images)
-            cls_out = output[0]
+            cls_out = model(images)
             loss = criterion(cls_out, target)
             
             cls_out = torch.sigmoid(cls_out)
@@ -333,8 +266,6 @@ def main(args):
     dataset_train, args.nb_classes = build_dataset(
         is_train=True, make_cam=False, args=args)
     
-    img, label = dataset_train[0]
-    
     dataset_val, _ = build_dataset(is_train=False, make_cam=False, args=args)
     sampler_train = DistributedSampler(dataset_train)
     
@@ -358,11 +289,8 @@ def main(args):
     
     model = create_model(
         args.model,
-        pretrained=False,
-        num_classes=args.nb_classes,
-        drop_rate=args.drop,
-        drop_path_rate=args.drop_path,
-        input_size=args.input_size) 
+        pretrained="checkpoints/res38_cls.pth",
+        num_classes=args.nb_classes)
    
     best_ckpt_name = f'{args.model}_best.pth'
     utils.data_mkdir(args.work_space)
@@ -372,9 +300,8 @@ def main(args):
     logger = logging.getLogger(session_name)
     ddp_print(logger, f"Use seed: {args.seed}")
     
-    if args.finetune:
-        checkpoint_model = load_model_weight(args, model)
-        model.load_state_dict(checkpoint_model, strict=False)
+    checkpoint_model = torch.load('checkpoints/res38_cls.pth')
+    model.load_state_dict(checkpoint_model, strict=False)
     
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     ddp_print(logger, f'Number of parameters: {n_parameters}')
@@ -395,7 +322,7 @@ def main(args):
     if args.world_size > 1:
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model) 
     model = nn.parallel.DistributedDataParallel(
-        model, find_unused_parameters=True, device_ids=[args.local_rank])
+        model, find_unused_parameters=False, device_ids=[args.local_rank])
     
     for epoch in range(args.start_epoch, args.epochs):
         sampler_train.set_epoch(epoch)
