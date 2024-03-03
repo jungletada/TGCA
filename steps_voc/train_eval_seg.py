@@ -6,6 +6,7 @@ import argparse
 import random
 import numpy as np
 from tqdm import tqdm
+import PIL.Image as Image
 
 import torch
 import torch.nn as nn
@@ -15,14 +16,12 @@ import torch.nn.functional as F
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 
-from tool import imutils
-from tool import pyutils, torchutils
-from tool.metrics import Evaluator
-import PIL.Image as Image
 
 sys.path.append(osp.dirname(__file__) + os.sep + '../')
 import logging
 import utils 
+from seg_tool import imutils,  pyutils, torchutils
+from seg_tool.metrics import Evaluator
 from data.voc12.dataloader import VOCAugSegmentationDataset
 from net.resnet38d_seg import ResNet38d_Seg
 cudnn.enabled = True
@@ -42,11 +41,6 @@ classes = np.array(('background',  # always index 0
                     'sheep', 'sofa', 'train', 'tvmonitor'))
 
 
-def crf_postprocess(pred_prob, ori_img, labels=21):
-    crf_score = imutils.crf_inference_inf(ori_img, pred_prob, labels=labels)
-    return crf_score
-
-
 def str2bool(v):
     if v.lower() in ('yes','true','t','y','1','True'):
         return True
@@ -56,120 +50,35 @@ def str2bool(v):
 
 def get_args_parser():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--train', default=False, type=str2bool, help='train model')  
+    parser.add_argument('--evaluate', default=True, type=str2bool, help='evaluate model')  
     # ddp settings
     parser.add_argument('--rank', default=0, type=int, help='rank of current process')  
     parser.add_argument('--gpu_id', default=0, type=int, help="which gpu to use")
     parser.add_argument("--local_rank", type=int, help='rank in current node')  
     parser.add_argument('--device', default='cuda',help='device id (i.e. 0 or 0,1 or cpu)')
+    parser.add_argument('--num_workers', default=8, type=int)
     
     parser.add_argument("--work_space", default="results_voc/MCTG", type=str)
-    parser.add_argument("--save_path", default=None, type=str)
+    parser.add_argument("--pred_path", default=None, type=str)
 
     parser.add_argument('--seed', default=0, type=int)
-    parser.add_argument("--batch_per_gpu", default=4, type=int)
+    parser.add_argument("--batch_per_gpu", default=8, type=int)
     parser.add_argument("--num_classes", default=21, type=int)
-    parser.add_argument("--num_epochs", default=30, type=int)
-    parser.add_argument("--network", default='resnet38_seg', type=str)
+    parser.add_argument("--num_epochs", default=60, type=int)
+    parser.add_argument("--warmup_step", default=1500, type=int)
+    parser.add_argument("--init_weights", default="", type=str)
+
     parser.add_argument("--lr", default=0.0007, type=float)
     parser.add_argument("--wt_dec", default=1e-5, type=float)
-    parser.add_argument("--init_weights", default='', type=str)
-    parser.add_argument("--session_name", default="resnet38_seg", type=str)
-    parser.add_argument("--crop_size", default=321, type=int)
+    parser.add_argument("--model_name", default="resnet38_seg", type=str)
+    parser.add_argument("--crop_size", default=448, type=int)
     parser.add_argument('--print_intervals', type=int, default=50)
-    parser.add_argument("--use_crf", default=True, type=str2bool)
-    parser.add_argument("--scales", type=float, nargs='+')
+    
+    parser.add_argument("--use_crf", default=False, type=str2bool)
+    parser.add_argument("--scales", default=(1.0, ), help="Multi-scale inferences")
     args = parser.parse_args()
     return args 
-
-  
-def evaluate(args):
-    utils.data_mkdir(args.work_space)
-    session_name = "Segmentation Inference"
-    log_path = os.path.join(args.work_space, 'eval_seg.log')
-    utils.logger_info(logger_name=session_name, log_path=log_path)
-    logger = logging.getLogger(session_name)
-    
-    logger.info(f"Evaluation log path: {log_path}")
-    logger.info(f"Multi-scale test: {tuple(args.scales)}, use CRF: {args.use_crf}")
-   
-    if args.save_palette: 
-        pred_save_path = os.path.join(args.work_space, 'val_ms_crf_color')
-        utils.data_mkdir(pred_save_path)
-        logger.info(f"Multi-scale Evaluation with CRF save path: {pred_save_path}")
-    else:
-        logger.info("No to save Multi-scale Evaluation results.")
-        
-    gpu_id = args.gpu_id
-    os.environ["CUDA_VISIBLE_DEVICES"] = gpu_id
-
-    model = getattr(importlib.import_module('network.resnet38_seg'), 'ResNet38d_Seg')(num_classes=args.num_classes)
-
-    model.load_state_dict(torch.load(args.checkpoint))
-    seg_evaluator = Evaluator(num_class=args.num_classes)
-    
-    model.eval()
-    model.cuda()
-    base_img_path = args.img_path
-    name_list = open(utils.get_dataset_imglist(args.dataset)).readlines()
-    
-    dataset = VOCAugSegmentationDataset(
-        root="datasets/VOCdevkit/VOC2012",
-        split="val",
-        augment=False,
-        pseudo_dir=None,
-        ignore_label=255,
-        base_size=None,
-        crop_size=321,
-        scales=(0.7, 1.3),
-        flip=True,
-    )
-    with torch.no_grad():
-        for idx in tqdm(range(len(name_list))):
-            name = name_list[idx]
-            img_temp = cv2.imread(os.path.join(base_img_path, name.strip() + '.jpg'))
-            img_original, img_tensor = transform_image(image=img_temp)
-            N, C, H, W = img_tensor.size()
-            probs = torch.zeros((N, args.num_classes, H, W)).cuda()
-            
-            if args.scales:
-                scales = tuple(args.scales)
-                
-            for s in scales:
-                new_hw = [int(H * s), int(W * s)]
-                img_scale = F.interpolate(img_tensor, new_hw, mode='bilinear', align_corners=True)
-                prob = model(x=img_scale)
-                prob = F.interpolate(prob, (H, W), mode='bilinear', align_corners=False)
-                prob = F.softmax(prob, dim=1)
-                probs = torch.max(probs, prob)
-
-            output = probs.cpu().data[0].numpy()
-
-            if args.use_crf:
-                crf_output = crf_postprocess(output, img_original)
-                pred = np.argmax(crf_output, 0)
-            else:
-                pred = np.argmax(output, axis=0)
-
-            gt = Image.open(os.path.join(args.gt_path, name.strip() + '.png'))
-            gt = np.asarray(gt)
-            seg_evaluator.add_batch(gt, pred)
-
-            # save_path = os.path.join(args.save_path, i.strip() + '.png')
-            # cv2.imwrite(save_path, pred.astype(np.uint8))
-
-            if args.save_palette:
-                out = pred.astype(np.uint8)
-                out = Image.fromarray(out, mode='P')
-                out.putpalette(palette)
-                out_name = os.path.join(pred_save_path, name.strip() + '.png')
-                out.save(out_name)
-
-        IoU, mIoU = seg_evaluator.Mean_Intersection_over_Union()
-
-        str_format = "{:<15s}\t{:<15.2%}"
-        for k in range(args.num_classes):
-            logger.info('class {:2d} {:12} IU {:.3f}'.format(k, classes[k], IoU[k]))
-        logger.info('mIoU = {:.3f}'.format(mIoU))
 
 
 def init_distributed_mode(args):
@@ -216,21 +125,24 @@ def train(args):
     
     same_seeds(args.seed)
     pyutils.Logger(os.path.join(args.work_space, 'voc_segmentation.log'))
+    args.ckpt_path = os.path.join(args.work_space, 'seg_ckpt')
+    utils.data_mkdir(args.ckpt_path)
     
     dataset = VOCAugSegmentationDataset(
         root="datasets/VOCdevkit/VOC2012",
         split="train_aug",
         pseudo_dir=None,
         ignore_label=255,
-        augment=True,
+        is_train=True,
         base_size=None,
         crop_size=321,
-        scales=(0.7, 1.3),
-        flip=True)
-    sampler_train = DistributedSampler(dataset)
+        scales=(0.7, 1.3))
+    
+    sampler = DistributedSampler(dataset)
+    
     data_loader = DataLoader(
         dataset,
-        sampler=sampler_train,
+        sampler=sampler,
         batch_size=args.batch_per_gpu, 
         num_workers=args.num_workers,
         pin_memory=True, 
@@ -245,10 +157,10 @@ def train(args):
     model = ResNet38d_Seg(num_classes=args.num_classes)
     model.load_state_dict(torch.load(args.init_weights), strict=False)
     
-    optimizer = torchutils.PolyOptimizer_cls([
+    optimizer = torchutils.PolyOptimizerAdamW([
         {'params': model.get_1x_lr_params(), 'lr': args.lr},
         {'params': model.get_10x_lr_params(), 'lr': 10 * args.lr}
-    ], lr=args.lr, weight_decay=args.wt_dec, max_step=args.max_step)
+    ], lr=args.lr, weight_decay=args.wt_dec, max_step=args.max_step, warmup_step=args.warmup_step,)
 
     model.to(device)
     if args.world_size > 1:
@@ -263,18 +175,19 @@ def train(args):
     avg_meter = pyutils.AverageMeter('loss')
     timer = pyutils.Timer("Session started: ")
 
-    for epoch in range(args.num_epochs):
-        for iteration, (name, image, label) in enumerate(data_loader):
-            chunk = data_gen.__next__()
-            images, original_images, seg_labels, img_names = exutils.get_data_from_chunk(chunk, args)
-            b, _, h, w = original_images.shape
-            seg_labels = seg_labels.long().to(device)
+    for epoch in range(1, args.num_epochs + 1):
+        for iteration, (name, images, labels) in enumerate(data_loader):
+            labels = labels.to(device)
             images = images.to(device)
             
-            pred = model(x=images)
-            pred = F.interpolate(pred, size=(h, w), mode='bilinear', align_corners=False)
-            loss = criterion(pred, seg_labels)
-
+            pred = model(images)
+            pred = F.interpolate(
+                pred, 
+                size=images.shape[2:], 
+                mode='bilinear', 
+                align_corners=False)
+            
+            loss = criterion(pred, labels)
             avg_meter.add({'loss': loss.item()})
 
             optimizer.zero_grad()
@@ -289,10 +202,113 @@ def train(args):
                     'Fin: %s' % (timer.str_est_finish()),
                     'lr: %.5f' % (optimizer.param_groups[0]['lr']), flush=True)
                 
-        if dist.get_rank() == 0 and (epoch + 1) % 10 == 0:
+        if dist.get_rank() == 0 and epoch % 10 == 0:
             torch.save(model.module.state_dict(), 
-                    os.path.join(args.save_path, args.session_name + f'_{epoch+1}.pth')) 
+                    os.path.join(args.ckpt_path, args.model_name + f'_{epoch}.pth')) 
                  
-        if dist.get_rank() == 0 and epoch == args.num_epochs - 1:
+        if dist.get_rank() == 0 and epoch == args.num_epochs:
             torch.save(model.module.state_dict(), 
-                    os.path.join(args.save_path, args.session_name + '_last.pth'))
+                    os.path.join(args.ckpt_path, args.model_name + '_last.pth'))
+
+
+def evaluate(args):
+    session_name = "Segmentation Inference"
+    log_path = os.path.join(args.work_space, 'eval_seg.log')
+    args.ckpt_path = os.path.join(args.work_space, 'seg_ckpt')
+    
+    utils.logger_info(logger_name=session_name, log_path=log_path)
+    logger = logging.getLogger(session_name)
+    
+    logger.info(f"Evaluation log path: {log_path}")
+    logger.info(f"Multi-scale test: {tuple(args.scales)}, use CRF: {args.use_crf}")
+   
+    if args.pred_path is not None: 
+        save_pred = True
+        pred_path = os.path.join(args.work_space, args.pred_path)
+        if args.use_crf:
+            pred_path = pred_path + "_crf"
+        utils.data_mkdir(pred_path)
+        logger.info(f"Multi-scale Evaluation with save path: {pred_path}")
+    else:
+        save_pred = False
+        logger.info("Not to save Multi-scale Evaluation results.")
+
+    model = ResNet38d_Seg(num_classes=args.num_classes)
+    ckpt = os.path.join(args.ckpt_path, "resnet38_seg_last.pth")
+    model.load_state_dict(torch.load(ckpt), strict=True)
+    seg_evaluator = Evaluator(num_class=args.num_classes)
+    
+    model.eval()
+    model.cuda()
+    
+    dataset = VOCAugSegmentationDataset(
+        root="datasets/VOCdevkit/VOC2012",
+        split="val",
+        pseudo_dir=None,
+        ignore_label=255,
+        is_train=False)
+    
+    data_loader = DataLoader(
+        dataset,
+        batch_size=1, 
+        num_workers=args.num_workers,
+        pin_memory=True, 
+        drop_last=False)
+    
+    scales = tuple(args.scales)
+
+    with torch.no_grad():
+        for image_id, original_images, images_tensor, labels in tqdm(data_loader):       
+            H, W = images_tensor.shape[2:]
+            probs = torch.zeros((1, args.num_classes, H, W)).cuda()
+            for s in scales:
+                new_size = (int(H * s), int(W * s))
+                img_scale = F.interpolate(
+                    images_tensor, 
+                    size=new_size, 
+                    mode='bilinear', 
+                    align_corners=True)
+                prob = model(x=img_scale.cuda())
+                prob = F.interpolate(
+                    prob, 
+                    size=(H, W), 
+                    mode='bilinear', 
+                    align_corners=False)
+                prob = F.softmax(prob, dim=1)
+                probs = torch.max(probs, prob)
+
+            output = probs.cpu().data[0].numpy()
+            labels = np.asarray(labels.cpu().data[0].numpy())
+            
+            if args.use_crf:
+                original_image = original_images.cpu().data[0].numpy()
+                crf_output = imutils.crf_inference_inf(original_image, output, labels=args.num_classes)
+                pred = np.argmax(crf_output, 0)
+            else:
+                pred = np.argmax(output, axis=0)
+
+            seg_evaluator.add_batch(labels, pred)
+
+            if save_pred:
+                out = pred.astype(np.uint8)
+                out = Image.fromarray(out, mode='P')
+                out.putpalette(palette)
+                save_name = os.path.join(pred_path, image_id[0] + '.png')
+                out.save(save_name)
+
+        IoU, mIoU = seg_evaluator.Mean_Intersection_over_Union()
+
+        for k in range(args.num_classes):
+            logger.info('class {:2d} {:12} IU {:.3f}'.format(k, classes[k], IoU[k]))
+            
+        logger.info('mIoU = {:.3f}'.format(mIoU))
+
+
+if __name__ == '__main__':
+    args = get_args_parser()
+    
+    if args.train:
+        train(args)
+        
+    if args.evaluate:
+        evaluate(args)

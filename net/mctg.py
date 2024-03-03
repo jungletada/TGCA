@@ -152,14 +152,12 @@ class MCTG(VisionTransformer):
         sorted_x, _ = torch.sort(flatten_x, -2, descending=True)
         weights = torch.logspace(start=0, end=N-1, steps=N, base=self.decay_parameter).cuda()
         out = torch.sum(sorted_x * weights.unsqueeze(0).unsqueeze(-1), dim=-2) / weights.sum()
-        
         return out
         
     def foward_tokens(self, patch_tokens):
         """ MCTformer Plus: Weighted Patch Tokens """
         patch_tokens = self.head(patch_tokens) # B x Cls x Hp x Wp
         patch_logits = self.globalweightedpooling(patch_tokens)
-
         return patch_logits
     
     def forward(self, x):
@@ -180,7 +178,6 @@ class MCTG(VisionTransformer):
         out_spatial = self.spatial_reduce(out_spatial)
         # classification head and GWP
         pat_logits = self.foward_tokens(out_spatial)
-        
         return cls_logits, pat_logits
 
 
@@ -206,7 +203,7 @@ class MCTGCAM(MCTG):
         
         cls2pat = attn_maps[:, :Cls, Cls:].reshape([B, Cls, Hp, Wp])    # B x Cls x Hp x Wp
         
-        patch_cam = tokens.detach().clone()   # B x Cls x Wp x Hp
+        patch_cam = tokens.detach().clone()   # B x Cls x Hp x Wp
         patch_cam = F.relu(patch_cam)   # With ReLU Activation
         
         cams = torch.pow(cls2pat * patch_cam, 1/2)

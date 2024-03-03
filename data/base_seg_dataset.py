@@ -18,7 +18,6 @@ class _BaseDataset(data.Dataset):
     """
     Base dataset class
     """
-
     def __init__(
         self,
         root,
@@ -28,7 +27,6 @@ class _BaseDataset(data.Dataset):
         base_size=None,
         crop_size=321,
         scales=(0.7, 1.3),
-        flip=True,
     ):
         self.root = root
         self.split = split
@@ -39,7 +37,6 @@ class _BaseDataset(data.Dataset):
         self.base_size = base_size
         self.crop_size = crop_size
         self.scales = scales
-        self.flip = flip
         self.files = []
         self._set_files()
 
@@ -102,14 +99,20 @@ class _BaseDataset(data.Dataset):
         image = image[start_h:end_h, start_w:end_w]
         label = label[start_h:end_h, start_w:end_w]
         
-        image = image.transpose((2, 0, 1))
         return image, label
 
     def __getitem__(self, index):
         image_id, image, label = self._load_data(index)
         if self.is_train:
             image, label = self._augmentation(image, label)
-        return image_id, image.astype(np.float32), label.astype(np.int32)
+            image = image.transpose((2, 0, 1)) # HWC->CHW
+            return image_id, image.astype(np.float32), label.astype(np.int64)
+        
+        else:
+            image_tensor = (image / 255.0 - self.mean) / self.std  # Normalize for validation
+            image_tensor = image_tensor.transpose((2, 0, 1)).astype(np.float32) # HWC->CHW
+            original_image = image.astype(np.uint8)
+            return image_id, original_image, image_tensor, label.astype(np.int64)
 
     def __len__(self):
         return len(self.files)

@@ -17,7 +17,7 @@ class ResNet38d_Seg(ResNet38d):
 
 
     def forward(self, x):
-        x = super().forward(x)
+        x = self.forward_as_dict(x)['conv6']
         x_seg = F.relu(self.fc8_seg_conv1(x))
         x_seg = self.fc8_seg_conv2(x_seg)
         return x_seg
@@ -50,3 +50,11 @@ class ResNet38d_Seg(ResNet38d):
                         groups[1].append(m.bias)
 
         return groups
+
+
+if __name__ == '__main__':
+    model = ResNet38d_Seg(num_classes=21)
+    images = torch.randn(4, 3, 321, 321)
+    with torch.no_grad():
+        pred = model(images)
+        print(pred.shape)

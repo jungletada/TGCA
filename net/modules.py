@@ -209,8 +209,8 @@ class CrossAttention(nn.Module):
         # DropKey
         m_r = torch.ones_like(attn) * self.mask_ratio 
         attn = attn + torch.bernoulli(m_r) * -1e12
-        
         attn = attn.softmax(dim=-1)
+        
         attn = self.attn_drop(attn)
         x = (attn @ v).transpose(1, 2).reshape( # B x Nd x (Cls+Nt) x d
             B, (self.Cls+Nt), -1)               # B x (Cls+Nt) x Ct

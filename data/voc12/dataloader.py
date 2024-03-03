@@ -341,51 +341,62 @@ if __name__ == "__main__":
     kwargs = {"nrow": 5, "padding": 50}
     batch_size = 25
 
+    # dataset = VOCAugSegmentationDataset(
+    #     root="datasets/VOCdevkit/VOC2012",
+    #     split="train_aug",
+    #     pseudo_dir=None,
+    #     ignore_label=255,
+    #     is_train=True,
+    #     base_size=None,
+    #     crop_size=321,
+    #     scales=(0.7, 1.3))
+    # print(dataset)
+    # from torch.utils import data
+    # loader = data.DataLoader(
+    #     dataset, batch_size=batch_size, shuffle=True)
+    
+    # mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+    # std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+    
+    # for i, (image_ids, images, labels) in tqdm(
+    #     enumerate(loader), total=np.ceil(len(dataset) / batch_size), leave=False):
+        
+    #     if i == 0:
+    #         print(f"Input size:{images.shape}; Label size: {labels.shape}")
+           
+    #         images = (images * std + mean) * 255.0
+    #         images = images.int()
+        
+    #         image = make_grid(images, pad_value=-1, **kwargs).numpy()
+    #         image = np.transpose(image, (1, 2, 0))
+    #         mask = np.zeros(image.shape[:2])
+    #         mask[(image != -1)[..., 0]] = 255
+    #         image = np.dstack((image, mask)).astype(np.uint8)
+            
+    #         labels = labels[:, np.newaxis, ...]
+    #         label = make_grid(labels, pad_value=255, **kwargs).numpy()
+    #         label_ = np.transpose(label, (1, 2, 0))[..., 0].astype(np.float32)
+    #         label = cm.jet_r(label_ / 21.0) * 255
+    #         mask = np.zeros(label.shape[:2])
+    #         label[..., 3][(label_ == 255)] = 0
+    #         label = label.astype(np.uint8)
+
+    #         tiled_images = np.hstack((image, label))
+    #         tiled_images = cv2.cvtColor(tiled_images, cv2.COLOR_RGB2BGR)
+    #         cv2.imwrite("voc12.png", tiled_images)
+    #         # plt.imshow(np.dstack((tiled_images[..., 2::-1], tiled_images[..., 3])))
+    #         # plt.show()
+    #         break
+    
     dataset = VOCAugSegmentationDataset(
         root="datasets/VOCdevkit/VOC2012",
-        split="train_aug",
+        split="val",
         pseudo_dir=None,
         ignore_label=255,
-        augment=True,
-        base_size=None,
-        crop_size=321,
-        scales=(0.7, 1.3),
-        flip=True,
-    )
-    print(dataset)
-    from torch.utils import data
-    loader = data.DataLoader(
-        dataset, batch_size=batch_size, shuffle=True)
+        is_train=False)
     
-    mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
-    std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
-    
-    for i, (image_ids, images, labels) in tqdm(
-        enumerate(loader), total=np.ceil(len(dataset) / batch_size), leave=False):
-        
-        if i == 0:
-            print(f"Input size:{images.shape}; Label size: {labels.shape}")
-           
-            images = (images * std + mean) * 255.0
-            images = images.int()
-        
-            image = make_grid(images, pad_value=-1, **kwargs).numpy()
-            image = np.transpose(image, (1, 2, 0))
-            mask = np.zeros(image.shape[:2])
-            mask[(image != -1)[..., 0]] = 255
-            image = np.dstack((image, mask)).astype(np.uint8)
-            
-            labels = labels[:, np.newaxis, ...]
-            label = make_grid(labels, pad_value=255, **kwargs).numpy()
-            label_ = np.transpose(label, (1, 2, 0))[..., 0].astype(np.float32)
-            label = cm.jet_r(label_ / 21.0) * 255
-            mask = np.zeros(label.shape[:2])
-            label[..., 3][(label_ == 255)] = 0
-            label = label.astype(np.uint8)
-
-            tiled_images = np.hstack((image, label))
-            tiled_images = cv2.cvtColor(tiled_images, cv2.COLOR_RGB2BGR)
-            cv2.imwrite("voc12.png", tiled_images)
-            # plt.imshow(np.dstack((tiled_images[..., 2::-1], tiled_images[..., 3])))
-            # plt.show()
-            break
+    name, original_image, image_tensor, label = dataset[60]
+    print(f"image_id: {name}")
+    print(f"original: {original_image.shape}")
+    print(f"tensor: {image_tensor.shape}")
+    print(f"label: {label.shape}")
