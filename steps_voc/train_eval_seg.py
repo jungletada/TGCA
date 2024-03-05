@@ -20,6 +20,7 @@ from torch.utils.data import DataLoader
 sys.path.append(osp.dirname(__file__) + os.sep + '../')
 import logging
 import utils 
+from utils import str2bool
 from seg_tool import imutils,  pyutils, torchutils
 from seg_tool.metrics import Evaluator
 from data.voc12.dataloader import VOCAugSegmentationDataset
@@ -41,17 +42,11 @@ classes = np.array(('background',  # always index 0
                     'sheep', 'sofa', 'train', 'tvmonitor'))
 
 
-def str2bool(v):
-    if v.lower() in ('yes','true','t','y','1','True'):
-        return True
-    elif v.lower() in ('no','false','f','n','0','False'):
-        return False
-
-
 def get_args_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument('--train', default=False, type=str2bool, help='train model')  
-    parser.add_argument('--evaluate', default=True, type=str2bool, help='evaluate model')  
+    parser.add_argument('--evaluate', default=False, type=str2bool, help='evaluate model') 
+     
     # ddp settings
     parser.add_argument('--rank', default=0, type=int, help='rank of current process')  
     parser.add_argument('--gpu_id', default=0, type=int, help="which gpu to use")
@@ -70,13 +65,14 @@ def get_args_parser():
     parser.add_argument("--init_weights", default="", type=str)
 
     parser.add_argument("--lr", default=0.0007, type=float)
-    parser.add_argument("--wt_dec", default=1e-5, type=float)
+    parser.add_argument("--wt_dec", default=1e-4, type=float)
     parser.add_argument("--model_name", default="resnet38_seg", type=str)
-    parser.add_argument("--crop_size", default=448, type=int)
+    parser.add_argument("--crop_size", default=321, type=int)
     parser.add_argument('--print_intervals', type=int, default=50)
     
     parser.add_argument("--use_crf", default=False, type=str2bool)
-    parser.add_argument("--scales", default=(1.0, ), help="Multi-scale inferences")
+    parser.add_argument("--scales", default=1.0, 
+                        help="Multi-scale inferences", nargs='+', type=float)
     args = parser.parse_args()
     return args 
 
@@ -157,7 +153,7 @@ def train(args):
     model = ResNet38d_Seg(num_classes=args.num_classes)
     model.load_state_dict(torch.load(args.init_weights), strict=False)
     
-    optimizer = torchutils.PolyOptimizerAdamW([
+    optimizer = torchutils.PolyOptimizerSGD([
         {'params': model.get_1x_lr_params(), 'lr': args.lr},
         {'params': model.get_10x_lr_params(), 'lr': 10 * args.lr}
     ], lr=args.lr, weight_decay=args.wt_dec, max_step=args.max_step, warmup_step=args.warmup_step,)
@@ -196,19 +192,21 @@ def train(args):
 
             if (optimizer.global_step - 1) % args.print_intervals == 0 and dist.get_rank() == 0:
                 timer.update_progress(optimizer.global_step / args.max_step)
-                print('Iter: [%5d/%5d]' % (optimizer.global_step - 1, args.max_step),
-                    'Loss: %.4f' % (avg_meter.pop('loss')),
-                    'imps: %.1f' % ((iteration + 1) * args.batch_size / timer.get_stage_elapsed()),
-                    'Fin: %s' % (timer.str_est_finish()),
-                    'lr: %.5f' % (optimizer.param_groups[0]['lr']), flush=True)
+                print('Iter: [%5d/%5d],' % (optimizer.global_step - 1, args.max_step),
+                    'Loss: %.4f,' % (avg_meter.pop('loss')),
+                    'imps: %.1f,' % ((iteration + 1) * args.batch_size / timer.get_stage_elapsed()),
+                    'Fin: %s,' % (timer.str_est_finish()),
+                    'lr: %.5f,' % (optimizer.param_groups[0]['lr']), flush=True)
                 
-        if dist.get_rank() == 0 and epoch % 10 == 0:
+        if dist.get_rank() == 0:
             torch.save(model.module.state_dict(), 
-                    os.path.join(args.ckpt_path, args.model_name + f'_{epoch}.pth')) 
-                 
-        if dist.get_rank() == 0 and epoch == args.num_epochs:
-            torch.save(model.module.state_dict(), 
-                    os.path.join(args.ckpt_path, args.model_name + '_last.pth'))
+                    os.path.join(args.ckpt_path, 'last_checkpoint.pth'))
+            if epoch % 10 == 0:
+                torch.save(model.module.state_dict(), 
+                    os.path.join(args.ckpt_path, args.model_name + f'_{epoch}.pth'))
+            if  epoch == args.num_epochs:
+                torch.save(model.module.state_dict(), 
+                    os.path.join(args.ckpt_path, args.model_name + '_final.pth'))
 
 
 def evaluate(args):
@@ -234,7 +232,7 @@ def evaluate(args):
         logger.info("Not to save Multi-scale Evaluation results.")
 
     model = ResNet38d_Seg(num_classes=args.num_classes)
-    ckpt = os.path.join(args.ckpt_path, "resnet38_seg_last.pth")
+    ckpt = os.path.join(args.ckpt_path, "resnet38_seg_final.pth")
     model.load_state_dict(torch.load(ckpt), strict=True)
     seg_evaluator = Evaluator(num_class=args.num_classes)
     

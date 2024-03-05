@@ -147,7 +147,7 @@ class Grapher(nn.Module):
     Grapher module with graph convolution and fc layers
     """
     def __init__(self, in_channels, kernel_size=9, dilation=1, conv='edge', act='relu', norm=None,
-                 bias=True,  stochastic=False, epsilon=0.0, r=1, n=196, drop_path=0.0, relative_pos=False):
+                 bias=True, stochastic=False, epsilon=0.0, r=1, n=784, drop_path=0.0, relative_pos=False):
         super(Grapher, self).__init__()
         self.channels = in_channels
         self.n = n # number of patches
@@ -167,7 +167,7 @@ class Grapher(nn.Module):
         self.relative_pos = None
         if relative_pos:
             print('using relative_pos')
-            relative_pos_tensor = torch.from_numpy(np.float32(get_2d_relative_pos_embed(in_channels,
+            relative_pos_tensor = torch.from_numpy(np.float64(get_2d_relative_pos_embed(in_channels,
                 int(n**0.5)))).unsqueeze(0).unsqueeze(1)
             relative_pos_tensor = F.interpolate(
                     relative_pos_tensor, size=(n, n//(r*r)), mode='bicubic', align_corners=False)
@@ -179,14 +179,17 @@ class Grapher(nn.Module):
         else:
             N = H * W
             N_reduced = N // (self.r * self.r)
-            return F.interpolate(relative_pos.unsqueeze(0), size=(N, N_reduced), mode="bicubic").squeeze(0)
+            return F.interpolate(
+                relative_pos.unsqueeze(0), 
+                size=(N, N_reduced), 
+                mode="bicubic").squeeze(0)
 
     def forward(self, x):
         """
         residual + |FC->Graph->FC2| 
         """
         _tmp = x
-        x = self.fc1(x)
+        x = x + self.fc1(x)
         B, C, H, W = x.shape
         relative_pos = self._get_relative_pos(self.relative_pos, H, W)
         x = self.graph_conv(x, relative_pos)

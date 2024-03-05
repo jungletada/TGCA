@@ -25,7 +25,7 @@ class PolyOptimizer(torch.optim.SGD):
         self.global_step += 1
 
 
-class PolyOptimizer_cls(torch.optim.SGD):
+class PolyOptimizerSGD(torch.optim.SGD):
     def __init__(self, params, lr, weight_decay, max_step, warmup_step=1500, momentum=0.9):
         super().__init__(params, lr, weight_decay)
         self.global_step = 0

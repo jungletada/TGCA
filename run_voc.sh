@@ -6,41 +6,38 @@ echo "  |-- COCO dataset path: datasets/MSCOCO";
 # NEED TO SET
 GPU=0,1
 NODES=2
-MODEL=MCTG
+MODEL=mctgformer
 CUDA_VISIBLE_DEVICES=${GPU}
 OMP_NUM_THREADS=${NODES} 
 WORKDIR=results_voc/${MODEL}
 
 
-# # ============= Train Model ===============#
-# torchrun --nproc_per_node=${NODES} --nnodes=1 \
-#     train_res38.py \
-#     --model ResNet38d_patch_224 \
-#     --work_space results_voc/resnet38 \
-#     --seed 2 \
-#     --epoch 45 \
-#     --batch_per_gpu 16 \
-#     --data_set VOC12 \
-
-# # ============= Train Model ===============#
-# torchrun --nproc_per_node=${NODES} --nnodes=1 \
-#     train_v2.py \
-#     --model deit_small_MCTG \
-#     --seed 2 \
-#     --epoch 45 \
-#     --batch_per_gpu 16 \
-#     --work_space ${WORKDIR} \
-#     --data_set VOC12 \
+# ============= Train Model ===============#
+torchrun --nproc_per_node=${NODES} --nnodes=1 \
+    train_model.py \
+    --model deit_small_mctgformer \
+    --work_space ${WORKDIR} \
+    --seed 2 \
+    --epoch 45 \
+    --batch_per_gpu 16 \
+    --data_set VOC12 \
 
 
-# # ============= Make Class Activation Maps of Model=============#
-# python steps_voc/make_cam.py \
-#     --model deit_small_${MODEL} \
-#     --checkpoint ${WORKDIR}/deit_small_${MODEL}_best.pth \
-#     --infer_list configs/voc12/train_id.txt \
+# ============= Make Class Activation Maps of Model=============#
+python steps_voc/make_cam.py \
+    --model deit_small_${MODEL} \
+    --work_space ${WORKDIR} \
+    --checkpoint ${WORKDIR}/deit_small_${MODEL}_best.pth \
+    --infer_list configs/voc12/train_id.txt \
 
 
-# #============= Evaluate Class Activation Maps =============#
+# ============= Evaluate Class Activation Maps =============#
+python steps_voc/eval_cam.py \
+    --curve_threshold \
+    --work_space ${WORKDIR} \
+
+
+# # #============= Evaluate Class Activation Maps =============#
 # python evaluation.py \
 #     --work_space ${WORKDIR} \
 #     --infer_list configs/voc12/train_id.txt \
@@ -48,7 +45,6 @@ WORKDIR=results_voc/${MODEL}
 #     --predict_dir ${WORKDIR}/cam_mask \
 #     --type npy \
 #     --curve True \
-
 
 # #============= Train Pixel Semantic Affnity =============#
 # torchrun --nproc_per_node=${NODES} --nnodes=1 \
@@ -79,19 +75,19 @@ WORKDIR=results_voc/${MODEL}
 # cd ${WORKDIR} && zip -r ${SEG_DIR}.zip ${SEG_DIR} && cd -
 
 
-OMP_NUM_THREADS=2  \
-    torchrun \
-    --nproc_per_node=2 --nnodes=1  \
-    steps_voc/train_eval_seg.py \
-    --train True \
-    --seed 2 \
-    --num_epochs 60 \
-    --batch_per_gpu 8 \
-    --init_weights checkpoints/ResNet38d_patch_224_best.pth \
+# OMP_NUM_THREADS=${NODES}  \
+#     torchrun \
+#     --nproc_per_node=${NODES} --nnodes=1  \
+#     steps_voc/train_eval_seg.py \
+#     --train True \
+#     --seed 1 \
+#     --num_epochs 30 \
+#     --batch_per_gpu 8 \
+#     --init_weights checkpoints/res38_cls.pth \
 
 
 # python steps_voc/train_eval_seg.py \
 #     --evaluate True \
 #     --use_crf True \
-#     --scales (0.5 0.75 1.0 1.25 1.5) \
-    # --pred_path val_ms \
+#     --scales 1.0 \
+#     # --pred_path val_ms \

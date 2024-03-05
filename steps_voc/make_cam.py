@@ -1,4 +1,4 @@
-import os
+import os,sys
 import torch
 import argparse
 import importlib
@@ -8,11 +8,11 @@ import os.path as osp
 import torch.nn.functional as F
 from torch.backends import cudnn
 from torch import multiprocessing, cuda
-
-from misc import torchutils
 from torch.utils.data import DataLoader
-cudnn.enabled = True
 
+sys.path.append(os.path.dirname(__file__) + os.sep + '../')
+from misc import torchutils
+cudnn.enabled = True
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -31,7 +31,7 @@ def get_args_parser():
                         help='Drop path rate (default: 0.1)')
 
     # Dataset parameters
-    parser.add_argument('--work_space', default='results/MCTG', type=str, help='work space')
+    parser.add_argument('--work_space', default='results_voc/your_model', type=str, help='work space')
     parser.add_argument('--voc12_root', default='datasets/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
     parser.add_argument('--infer_list', default='config/voc12/train_aug.txt', type=str, 
                         help='train.txt for fast infer, train_aug.txt for full prediction')
@@ -48,17 +48,9 @@ def get_args_parser():
     parser.add_argument("--scales", default=(1.0, 0.75, 1.25), help="Multi-scale inferences")
     parser.add_argument("--cam_out_dir", default="cam_mask", type=str)
     
-    parser.add_argument('--label-file-path', type=str, default=None)
-    parser.add_argument('--attention-type', type=str, default='fused')
-    parser.add_argument('--visualize-cls-attn', action='store_true')
-    parser.add_argument('--visualize-attention', action='store_true')
-    parser.add_argument('--save-cls-attn', action='store_true')
-    parser.add_argument('--save-cam', action='store_true')
-    parser.add_argument('--save-crf', action='store_true')
-    
     args = parser.parse_args()
     return args
-
+                                                                                                                        
         
 def normalize_cam(cam_mask):
     for i in range(cam_mask.size(0)):
@@ -133,8 +125,8 @@ if __name__ == '__main__':
     args.data_set = 'VOC12MS'
     dataset, num_classes = build_dataset(is_train=False, make_cam=True, args=args)
         
-    from net.mctg import MCTGCAM
-    model = MCTGCAM(num_classes=20)
+    from net.mctg_v2 import MCTGFormer_CAM
+    model = MCTGFormer_CAM(num_classes=20)
     model_dict = torch.load(args.checkpoint, map_location='cpu')['model']
     
     model.load_state_dict(model_dict)

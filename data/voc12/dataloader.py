@@ -2,7 +2,7 @@ import os
 import sys
 import cv2
 import torch
-import imageio
+import imageio.v2 as imageio
 import os.path as osp
 import numpy as np
 from torch.utils.data import Dataset
@@ -99,9 +99,16 @@ class TorchvisionNormalize():
 
 
 class VOC12ImageDataset(Dataset):
-    def __init__(self, img_name_list_path, voc12_root,
-                 resize_long=None, rescale=None, img_normal=TorchvisionNormalize(), hor_flip=False,
-                 crop_size=None, crop_method=None, to_torch=True):
+    def __init__(self, 
+                 img_name_list_path, 
+                 voc12_root,
+                 resize_long=None, 
+                 rescale=None, 
+                 img_normal=TorchvisionNormalize(), 
+                 hor_flip=False,
+                 crop_size=None, 
+                 crop_method=None, 
+                 to_torch=True):
 
         self.img_name_list = load_img_name_list(img_name_list_path)
         self.voc12_root = voc12_root
@@ -329,6 +336,34 @@ class VOCAugSegmentationDataset(_BaseDataset):
         return image_id, image, label
 
 
+class VOCSegmentationLabelDataset(Dataset):
+    def __init__(self, data_dir, split='train'):
+        super(VOCSegmentationLabelDataset, self).__init__()
+
+        if split not in ['train', 'trainval', 'val']:
+            raise ValueError(
+                'please pick split from \'train\', \'trainval\', \'val\'')
+            
+        id_list_file = os.path.join(
+            data_dir, 'ImageSets/Segmentation/{0}.txt'.format(split))
+        self.ids = [id_.strip() for id_ in open(id_list_file)]
+        self.data_dir = data_dir
+
+    def __len__(self):
+        return len(self.ids)
+
+    def __getitem__(self, idx):
+        name_id = self.ids[idx]
+        image_path = osp.join(self.data_dir, "JPEGImages", name_id + '.jpg')
+        label_path = osp.join(self.data_dir, "SegmentationClass", name_id + '.png')
+        
+        image = cv2.imread(image_path, cv2.IMREAD_COLOR).astype(np.float32)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
+        label = np.asarray(Image.open(label_path), dtype=np.int32)
+        label[label==255] = -1
+        return {"image": image, "label": label}
+    
+    
 if __name__ == "__main__":
     import matplotlib
     import matplotlib.pyplot as plt
@@ -388,15 +423,24 @@ if __name__ == "__main__":
     #         # plt.show()
     #         break
     
-    dataset = VOCAugSegmentationDataset(
-        root="datasets/VOCdevkit/VOC2012",
-        split="val",
-        pseudo_dir=None,
-        ignore_label=255,
-        is_train=False)
+    # dataset = VOCAugSegmentationDataset(
+    #     root="datasets/VOCdevkit/VOC2012",
+    #     split="val",
+    #     pseudo_dir=None,
+    #     ignore_label=255,
+    #     is_train=False)
     
-    name, original_image, image_tensor, label = dataset[60]
-    print(f"image_id: {name}")
-    print(f"original: {original_image.shape}")
-    print(f"tensor: {image_tensor.shape}")
-    print(f"label: {label.shape}")
+    # name, original_image, image_tensor, label = dataset[60]
+    # print(f"image_id: {name}")
+    # print(f"original: {original_image.shape}")
+    # print(f"tensor: {image_tensor.shape}")
+    # print(f"label: {label.shape}")
+    
+    dataset = VOCSegmentationLabelDataset(
+        data_dir="datasets/VOCdevkit/VOC2012",
+        split='train'
+    )
+    print(dataset[10]["image"].shape)
+    
+    print(dataset[10]["label"].shape)
+    print(np.max(dataset[10]["label"]))

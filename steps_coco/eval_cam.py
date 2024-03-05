@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 
 sys.path.append(os.path.dirname(__file__) + os.sep + '../')
 from data.coco.dataloader import COCOSegmentationDataset
-from chainercv.evaluations import calc_semantic_segmentation_confusion
+from engine import calc_semantic_segmentation_confusion
 
 
 def write_msg(file, msg):
@@ -92,7 +92,7 @@ def run(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Evaluate CAMs', add_help=False)
     parser.add_argument('--mscoco_root', default='datasets/MSCOCO', type=str, help='COCO dataset path')
-    parser.add_argument('--work_space', default='results_coco/MCTG', help='cam_mask directory')
+    parser.add_argument('--work_space', default='results_coco/MCTG', help='work space directory')
     parser.add_argument('--eval_cam_dir', default='cam_mask', help='cam_mask directory')
     parser.add_argument('--log_file', default='eval_cam.log', type=str, 
                         help='log file to save the results')

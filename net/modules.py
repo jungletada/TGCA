@@ -2,17 +2,19 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from timm.models.layers import DropPath
+from net.gcn_lib import Grapher, act_layer
 
 
 """
-The code is modified based on TDRG (https://github.com/jungletada/TDRG-G/blob/master/models/TDRG.py#L198)
-and MCTformer ()
+    The code is modified based on 
+    TDRG ()
+    and MCTformer ()
 """
 
 
 def nlc2nchw(x, d_size):
     _, N, C = x.shape
-    assert d_size[0] * d_size[1] == N
+    assert d_size[0] * d_size[1] == N, f"{d_size} not equal to {N}"
     x = x.permute(0, 2, 1).reshape(-1, C, d_size[0], d_size[1]).contiguous()
     return x
 
@@ -274,11 +276,157 @@ class SpatialFuseModule(nn.Module):
         x_query = nlc2nchw(x_query, d_size=(H, W))
         
         return x_query
+                      
+            
+class SemanticGraph(nn.Module):
+    def __init__(self, kernel_size=9, num_classes=20, drop_path=0., dilation=1):
+        super().__init__()
+        
+        self.grapher = Grapher(
+            in_channels=num_classes, 
+            kernel_size=kernel_size, 
+            dilation=dilation, 
+            conv='mr', 
+            act='gelu', 
+            norm='batch',
+            bias=True, 
+            stochastic=False, 
+            epsilon=0.2, 
+            r=1, 
+            drop_path=drop_path)
     
+    def forward(self, x):
+        x = self.grapher(x)
+        return x
+        
+      
+class SemanticSpatialModule(nn.Module):
+    def __init__(self, 
+                 query_dim, 
+                 key_dim, 
+                 num_classes=20, 
+                 num_heads=8, 
+                 attn_drop=0., 
+                 proj_drop=0., 
+                 qkv_bias=True,
+                 drop_path=0., 
+                 norm_layer=nn.LayerNorm, 
+                 mask_ratio=0.1, 
+                 kernel_size=9, 
+                 dilation=1):
+        super().__init__()
+        self.norm1 = norm_layer(query_dim)
+        self.norm2 = norm_layer(key_dim)
+        self.norm3 = norm_layer(query_dim)
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.Cls = num_classes
+        self.mask_ratio = mask_ratio
+        self.num_heads = num_heads
+        self.dim = min(query_dim, key_dim)
+        self.head_dim = self.dim // num_heads
+        self.scale = self.Cls ** -0.5
+        
+        self.proj_q = nn.Linear(query_dim, self.dim, bias=qkv_bias)
+        self.proj_kv = nn.Linear(key_dim, self.dim * 2, bias=qkv_bias)
+        self.proj_cls = nn.Linear(key_dim, self.dim, bias=qkv_bias)
+        
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(self.dim, query_dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+        
+        self.graph_b = SemanticGraph(
+            kernel_size=kernel_size,
+            num_classes=num_classes,
+            drop_path=drop_path,
+            dilation=dilation)
+        
+        self.graph_s = SemanticGraph(
+            kernel_size=kernel_size,
+            num_classes=num_classes,
+            drop_path=drop_path,
+            dilation=dilation)
+        
+        self.mlp = MLP(
+            in_features=self.dim, 
+            hidden_features=self.dim * 4,
+            out_features=self.dim)
 
+    def forward_semantic_gnn(self, x_spatial, x_backbone, token_size, spatial_size):
+        """
+        Input:
+            x_spatial: spatial features from prior module->[B, (Hi * Wi), Cq]
+            x_backbone: multi-class token transformer features->[B, (Cls+N'), Ck]
+        Output:
+            x_spatial: updated spatial features 
+        """
+        B, N, _ = x_backbone.shape
+        
+        # Linear projection 
+        q = self.proj_q(x_spatial)  # B, (Hi * Wi), C
+        x_cls, x_pat = torch.split(x_backbone, [self.Cls, N-self.Cls], dim=1)
+        x_cls = self.proj_cls(x_cls)    # B, Cls, C
+        # Build semantic relation
+        relation_s = (x_cls @ q.transpose(-2, -1)) * self.scale # (B, Cls, C) (B, Ni, C) 
+        relation_s = relation_s.view(B, -1, spatial_size[0], spatial_size[1])
+        relation_s = self.graph_s(relation_s)
+        relation_s = relation_s.view(B, self.Cls, -1)
+        # print(f"semantic relation of spatial {relation_s.shape}")
+        
+        kv = self.proj_kv(x_pat).reshape(B, -1, 2, self.dim).permute(2, 0, 1, 3)
+        k, v = kv[0], kv[1] # [B, N', C]
+        # Build semantic relation
+        relation_b = (x_cls @ k.transpose(-2, -1)) * self.scale # (B, Cls, C) (B, N', C) 
+        relation_b = relation_b.view(B, -1, token_size[0], token_size[1]) # (B, Cls, H', W')
+        relation_b = self.graph_b(relation_b)
+        relation_b = relation_b.view(B, self.Cls, -1)
+        # print(f"semantic relation of backbone {relation_b.shape}")
+        
+        # GNN feature aggregator
+        spatial_guide = (relation_s.transpose(-2, -1) @ relation_b) * self.scale
+        spatial_guide = spatial_guide.softmax(dim=-1)
+        
+        m_r = torch.ones_like(spatial_guide) * self.mask_ratio 
+        spatial_guide = spatial_guide + torch.bernoulli(m_r) * -1e12
+        spatial_guide = spatial_guide.softmax(dim=-1)
+        
+        spatial_guide = self.attn_drop(spatial_guide)
+        # print(f"attention {spatial_guide.shape}")
+        # Fuse backbone relation and spatial relation
+        output = spatial_guide @ v 
+        # print(f"output {output.shape}")
+        return output
+    
+        
+    def forward(self, x_spatial, x_backbone, token_size):
+        """
+        Input:
+            x_spatial: spatial features from prior module->[B, Cq, Hi, Wi]
+            x_backbone: multi-class token transformer features->[B, (Cls+N'), Ck]
+        Output:
+            x_spatial: updated spatial features 
+        """
+        H, W = x_spatial.shape[2:]
+        x_spatial = nchw2nlc(x_spatial)
+        idendity = x_spatial.clone()
+
+        x_spatial = self.forward_semantic_gnn(
+            self.norm1(x_spatial), self.norm2(x_backbone), 
+            token_size, spatial_size=(H, W))
+        
+        x_spatial = idendity + self.drop_path(x_spatial)
+        x_spatial = x_spatial + self.drop_path(self.mlp(self.norm3(x_spatial)))
+        
+        x_spatial = nlc2nchw(x_spatial, d_size=(H, W))
+        return x_spatial
+        
+        
+    
 if __name__ == "__main__":
-    model = SpatialFuseModule(query_dim=64, key_dim=384)
-    x = torch.ones(3, 64, 128, 128)
-    y = torch.ones(3, 108, 384)
-    out = model(x, y)
-    print(out.shape)
+    H, W = 14, 14
+    Hi, Wi = 35, 24
+    model = SemanticSpatialModule(
+        query_dim=64, key_dim=384, num_classes=20,)
+    x = torch.ones(3, 64, Hi, Wi)
+    y = torch.ones(3, int(H * W + 20), 384)
+    out = model(x, y, token_size=(H, W))
+    # print(out.shape)

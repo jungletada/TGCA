@@ -21,21 +21,11 @@ from torch.utils.data.distributed import DistributedSampler
 import utils
 from engine import compute_mAP
 from datasets_cam import build_dataset
-import net.mctg
+from utils import str2bool
+import net.mctg_v2
 
 import warnings
 warnings.filterwarnings("ignore")
-
-
-def str2bool(v):
-    if isinstance(v, bool):
-        return v
-    if v.lower() in ('yes', 'true', 't', 'y', '1'):
-        return True
-    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
-        return False
-    else:
-        raise argparse.ArgumentTypeError('Boolean value expected.')
         
         
 def get_args_parser():
@@ -52,7 +42,7 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',help='device id (i.e. 0 or 0,1 or cpu)')
 
     # Model parameters
-    parser.add_argument('--model', default='deit_small_MCTG', type=str, metavar='MODEL',
+    parser.add_argument('--model', default='deit_small_mctgformer', type=str, metavar='MODEL',
                         help='Name of model to train')
     parser.add_argument('--input-size', default=448, type=int, help='images input size')
     parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
@@ -132,6 +122,7 @@ def get_args_parser():
 
     # Dataset parameters
     parser.add_argument('--data_set', default='', type=str, help='name of dataset')
+    parser.add_argument('--voc12_root', default='datasets/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
     parser.add_argument('--checkpoint', default='', help='checkpoint for generating maps')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
@@ -287,7 +278,58 @@ def train_one_epoch(model, data_loader, optimizer, device, epoch,
     
     if dist.get_rank() == 0:
         print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}        
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}  
+
+      
+# def train_one_epoch(model, data_loader, optimizer, device, epoch,
+#         loss_scaler, max_norm, set_training_mode=True):
+#     print_freq = 10
+#     model.train(set_training_mode)
+#     criterion = nn.MultiLabelSoftMarginLoss(weight=None)
+    
+#     metric_logger = utils.MetricLogger(delimiter="  ")
+#     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+#     header = 'Epoch: [{}]'.format(epoch)
+    
+#     for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
+#         samples = samples.to(device, non_blocking=True)
+#         targets = targets.to(device, non_blocking=True)
+        
+#         with torch.cuda.amp.autocast():
+#             outputs = model(samples)
+
+#             cls_loss = criterion(outputs[0], targets)
+#             metric_logger.update(cls_loss=cls_loss.item())
+            
+#             patch_loss = criterion(outputs[1], targets)
+#             metric_logger.update(pat_loss=patch_loss.item())
+            
+#             stage_cls_loss = 0
+#             for logit in outputs[2]:
+#                 stage_cls_loss += criterion(logit, targets)
+#             stage_cls_loss = stage_cls_loss / len(outputs[2])
+#             metric_logger.update(stage_loss=stage_cls_loss.item())
+        
+#             total_loss = 2 * cls_loss + patch_loss + stage_cls_loss
+            
+#         loss_value = total_loss.item()
+#         if not math.isfinite(loss_value):
+#             print("Loss is {}, stopping training".format(loss_value))
+#             sys.exit(1)
+
+#         optimizer.zero_grad()
+#         is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
+#         loss_scaler(total_loss, optimizer, clip_grad=max_norm,
+#                     parameters=model.parameters(), create_graph=is_second_order)
+#         torch.cuda.synchronize()
+#         metric_logger.update(loss=loss_value)
+#         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+#     # gather the stats from all processes
+#     metric_logger.synchronize_between_processes()
+    
+#     if dist.get_rank() == 0:
+#         print("Averaged stats:", metric_logger)
+#     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}            
          
          
 @torch.no_grad()

@@ -207,15 +207,15 @@ def build_dataset(is_train, make_cam, args):
 
     if args.data_set == 'VOC12':
         dataset = VOC12Dataset(
-            voc12_root='datasets/VOCdevkit/VOC2012',
+            voc12_root=args.voc12_root,
             infer_list='configs/voc12/train_aug_id.txt',
             transform=transform)
         nb_classes = 20
 
     elif args.data_set == 'VOC12MS':
         dataset = VOC12DatasetMS(
-            voc12_root='datasets/VOCdevkit/VOC2012',
-            infer_list='configs/voc12/train_aug_id.txt',
+            voc12_root=args.voc12_root,
+            infer_list=args.infer_list,
             scales=tuple(args.scales),
             transform=transform)
         nb_classes = 20

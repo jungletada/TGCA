@@ -116,9 +116,16 @@ class COCOClassificationDatasetMSF(COCOClassificationDataset):
 
 
 class COCOSegmentationDataset(data.Dataset):
-    def __init__(self, image_dir, anno_path, masks_path, crop_size, 
-                 img_normal=TorchvisionNormalize(), hor_flip=False, rescale=None, 
-                 crop_method='random', read_ir_label=False):
+    def __init__(self, 
+                 image_dir, 
+                 anno_path, 
+                 masks_path, 
+                 crop_size, 
+                 img_normal=TorchvisionNormalize(), 
+                 hor_flip=False, 
+                 rescale=None, 
+                 crop_method='random', 
+                 read_ir_label=False):
         self.coco = dset.CocoDetection(root=image_dir, annFile=anno_path)
         self.ids2name = {}
         self.masks_path = masks_path

@@ -103,6 +103,7 @@ def create_cam_model(args):
     print(f'Use {model_name} for making class activation maps.')
     
     return model
+  
     
 class logger_print(object):
     '''
@@ -341,3 +342,10 @@ def init_distributed_mode(args):
                                          world_size=args.world_size, rank=args.rank)
     torch.distributed.barrier()
     setup_for_distributed(args.rank == 0)
+
+
+def str2bool(v):
+    if v.lower() in ('yes','true','t','y','1','True'):
+        return True
+    elif v.lower() in ('no','false','f','n','0','False'):
+        return False

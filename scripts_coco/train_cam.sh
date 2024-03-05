@@ -23,10 +23,10 @@ WORKDIR=results_coco/${MODEL}
 #     --finetune https://dl.fbaipublicfiles.com/deit/deit_small_patch16_224-cd65a155.pth
 
 
-# ============= Make Class Activation Maps of Model=============#
-python steps_coco/make_cam_coco.py \
-    --model deit_small_${MODEL} \
-    --checkpoint ${WORKDIR}/deit_small_${MODEL}_best.pth \ 
+# # ============= Make Class Activation Maps of Model=============#
+# python steps_coco/make_cam_coco.py \
+#     --model deit_small_${MODEL} \
+#     --checkpoint ${WORKDIR}/deit_small_${MODEL}_best.pth \ 
 
 
 #============= Evaluate Class Activation Maps =============#
