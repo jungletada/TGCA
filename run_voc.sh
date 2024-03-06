@@ -12,49 +12,42 @@ OMP_NUM_THREADS=${NODES}
 WORKDIR=results_voc/${MODEL}
 
 
-# ============= Train Model ===============#
-torchrun --nproc_per_node=${NODES} --nnodes=1 \
-    train_model.py \
-    --model deit_small_mctgformer \
-    --work_space ${WORKDIR} \
-    --seed 2 \
-    --epoch 45 \
-    --batch_per_gpu 16 \
-    --data_set VOC12 \
-
-
-# ============= Make Class Activation Maps of Model=============#
-python steps_voc/make_cam.py \
-    --model deit_small_${MODEL} \
-    --work_space ${WORKDIR} \
-    --checkpoint ${WORKDIR}/deit_small_${MODEL}_best.pth \
-    --infer_list configs/voc12/train_id.txt \
-
-
-# ============= Evaluate Class Activation Maps =============#
-python steps_voc/eval_cam.py \
-    --curve_threshold \
-    --work_space ${WORKDIR} \
-
-
-# # #============= Evaluate Class Activation Maps =============#
-# python evaluation.py \
-#     --work_space ${WORKDIR} \
-#     --infer_list configs/voc12/train_id.txt \
-#     --log_file eval_seeds.log \
-#     --predict_dir ${WORKDIR}/cam_mask \
-#     --type npy \
-#     --curve True \
-
-# #============= Train Pixel Semantic Affnity =============#
+# # ============= Train Model ===============#
 # torchrun --nproc_per_node=${NODES} --nnodes=1 \
-#     steps_voc/train_aff.py \
+#     train_model.py \
+#     --model deit_small_mctgformer \
 #     --work_space ${WORKDIR} \
-#     --batch_per_gpu 4 \
 #     --seed 2 \
-#     --low_alpha 1 \
-#     --high_alpha 3 \
-#     --model_weights checkpoints/res38_cls.pth \
+#     --epoch 45 \
+#     --batch_per_gpu 16 \
+#     --data_set VOC12 \
+
+
+# # ============= Make Class Activation Maps of Model=============#
+# python steps_voc/make_cam.py \
+#     --model deit_small_${MODEL} \
+#     --work_space ${WORKDIR} \
+#     --checkpoint ${WORKDIR}/deit_small_${MODEL}_best.pth \
+#     --infer_list configs/voc12/train_aug_id.txt \
+
+
+# # ============= Evaluate Class Activation Maps =============#
+# python steps_voc/eval_cam.py \
+#     --curve_threshold \
+#     --work_space ${WORKDIR} \
+
+
+#============= Train and Infer Pixel Semantic Affnity =============#
+torchrun --nproc_per_node=${NODES} --nnodes=1 \
+    steps_voc/train_infer_aff.py \
+    --train True \
+    --work_space ${WORKDIR} \
+    --batch_per_gpu 4 \
+    --seed 2 \
+    --epoch 5 \
+    --low_alpha 1 \
+    --high_alpha 3 \
+    --weights checkpoints/res38_cls.pth \
 
 
 # #============= Infer with Pixel Semantic Affnity =============#

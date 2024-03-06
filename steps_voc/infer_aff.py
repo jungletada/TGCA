@@ -4,7 +4,6 @@ import torchvision
 import os
 import os.path as osp
 import argparse
-import importlib
 from tqdm import tqdm
 import numpy as np
 from torch.backends import cudnn
@@ -43,6 +42,10 @@ def get_args_parser():
     return args
 
 
+def HWC_to_CHW(img):
+    return np.transpose(img, (2, 0, 1))
+   
+    
 def put_palette(seg_label, out_name):
     out = seg_label.astype(np.uint8)
     out = Image.fromarray(out, mode='P')
@@ -63,7 +66,7 @@ def build_infer_dataset(args):
         transform=torchvision.transforms.Compose(
             [np.asarray,
              Normalize(),
-             imutils.HWC_to_CHW]))
+             HWC_to_CHW]))
     return infer_dataset # name, img-> C x H x W
 
 

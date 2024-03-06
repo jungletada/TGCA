@@ -26,9 +26,10 @@ def nchw2nlc(x):
   
     
 class DownConv(nn.Module):
-    def __init__(self, in_dim, out_dim, norm_layer=nn.BatchNorm2d):
+    def __init__(self, in_dim, out_dim, norm_layer=nn.BatchNorm2d, stride=2):
         super(DownConv, self).__init__()
-        self.conv = nn.Conv2d(in_dim, out_dim, kernel_size=3, stride=2, padding=1)
+        self.conv = nn.Conv2d(
+            in_dim, out_dim, kernel_size=3, stride=stride, padding=1)
         self.norm = norm_layer(out_dim)
         self.act = nn.GELU()
     
@@ -97,10 +98,13 @@ class GraphConvolution(nn.Module):
     
 
 class SpatialPriorModule(nn.Module):
-    def __init__(self, inplanes=64, embed_dims=[96, 192, 384, 768], 
-                 norm_layer=nn.BatchNorm2d, act_layer=nn.GELU):
+    def __init__(self, 
+                 inplanes=64, 
+                 embed_dims=[96, 192, 384, 768], 
+                 norm_layer=nn.BatchNorm2d, 
+                 act_layer=nn.GELU):
         super().__init__()
-        self.stem = nn.Sequential(*[
+        self.stem = nn.Sequential(*[ # downsample by 4
             nn.Conv2d(3, inplanes, kernel_size=3, stride=2, padding=1, bias=False),
             norm_layer(inplanes),
             act_layer(),
@@ -111,23 +115,23 @@ class SpatialPriorModule(nn.Module):
             norm_layer(inplanes),
             act_layer(),
             nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        ])
-        self.conv2 = nn.Sequential(*[
+        ]) 
+        self.conv2 = nn.Sequential(*[# downsample by 2
             nn.Conv2d(inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
             norm_layer(2 * inplanes),
             act_layer(),
         ])
-        self.conv3 = nn.Sequential(*[
+        self.conv3 = nn.Sequential(*[ # downsample by 2
             nn.Conv2d(2 * inplanes, 4 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
             norm_layer(4 * inplanes),
             act_layer(),
         ])
-        self.conv4 = nn.Sequential(*[
+        self.conv4 = nn.Sequential(*[ # downsample by 2
             nn.Conv2d(4 * inplanes, 4 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
             norm_layer(4 * inplanes),
             act_layer(),
         ])
-        self.conv5 = nn.Sequential(*[
+        self.conv5 = nn.Sequential(*[ # downsample by 2
             nn.Conv2d(4 * inplanes, 8 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
             norm_layer(8 * inplanes),
             act_layer(),
@@ -150,7 +154,7 @@ class SpatialPriorModule(nn.Module):
         c2 = self.fc2(c2) # 8s
         c3 = self.fc3(c3) # 16s
         c4 = self.fc4(c4) # 32s
-        c5 = self.fc5(c5) # 64s
+        c5 = self.fc5(c5) # 32s
     
         return [c2, c3, c4, c5]
 
@@ -411,7 +415,7 @@ class SemanticSpatialModule(nn.Module):
 
         x_spatial = self.forward_semantic_gnn(
             self.norm1(x_spatial), self.norm2(x_backbone), 
-            token_size, spatial_size=(H, W))
+            token_size=token_size, spatial_size=(H, W))
         
         x_spatial = idendity + self.drop_path(x_spatial)
         x_spatial = x_spatial + self.drop_path(self.mlp(self.norm3(x_spatial)))

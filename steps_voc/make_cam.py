@@ -24,7 +24,7 @@ def get_args_parser():
     parser.add_argument('--model', default='deit_small_MCTG', type=str, metavar='MODEL',
                         help='Name of model to train')
     parser.add_argument('--checkpoint', default='', help='checkpoint for generating maps')
-    parser.add_argument('--input-size', default=224, type=int, help='images input size')
+    parser.add_argument('--input-size', default=448, type=int, help='images input size')
     parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
                         help='Dropout rate (default: 0.)')
     parser.add_argument('--drop-path', type=float, default=0.1, metavar='PCT',
@@ -45,7 +45,7 @@ def get_args_parser():
 
     # generating attention maps
     parser.add_argument('--layer-index', type=int, default=3, help='extract attention maps from the last layers')
-    parser.add_argument("--scales", default=(1.0, 0.75, 1.25), help="Multi-scale inferences")
+    parser.add_argument("--scales", default=(1.0,), help="Multi-scale inferences")
     parser.add_argument("--cam_out_dir", default="cam_mask", type=str)
     
     args = parser.parse_args()
@@ -123,7 +123,8 @@ if __name__ == '__main__':
     
     from datasets_cam import build_dataset
     args.data_set = 'VOC12MS'
-    dataset, num_classes = build_dataset(is_train=False, make_cam=True, args=args)
+    dataset, num_classes = build_dataset(
+        is_train=False, make_cam=True, args=args)
         
     from net.mctg_v2 import MCTGFormer_CAM
     model = MCTGFormer_CAM(num_classes=20)

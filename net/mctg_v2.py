@@ -16,18 +16,34 @@ __all__ = ['deit_small_mctgformer']
 class MCTGFormer(VisionTransformer):
     def __init__(self, decay_parameter=0.996, input_size=448, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        
+        self.stages = 4 # fixed
+        interval = int(self.depth // self.stages)
+        self.stage_indices = tuple(i for i in range(0, self.depth + 1, interval))
+        
         self.head = nn.Conv2d(self.embed_dim, self.num_classes, kernel_size=3, stride=1, padding=1)
         
         img_size = to_2tuple(input_size)
         patch_size = to_2tuple(self.patch_embed.patch_size)
         num_patches = (img_size[1] // patch_size[1]) * (img_size[0] // patch_size[0])
-        
         self.num_patches = num_patches
-        self.stage_indices = (0, 3, 6, 9, 12)
-        self.stages = len(self.stage_indices) - 1
         
         self.spatial_dims = [self.embed_dim] * self.stages
-       
+        self.spatial_scales = (8, 16, 32, 64) # fixed
+        self.spatial_strides = (2, 2, 2) # fixed
+        self.mask_ratios = [0.4, 0.3, 0.2, 0.1]
+        self.dilations = [1, 2, 2, 2]
+        self.num_knn = [18, 14, 10, 6]    # number of knn's k
+        
+        self.spatial_sizes = [(img_size[0]//scale, img_size[1]//scale) 
+                              for scale in self.spatial_scales]
+        self.sptial_pos_embed = [nn.Parameter(
+            torch.zeros(1, self.spatial_dims[i], self.spatial_sizes[i][0], self.spatial_sizes[i][1]))
+                for i in range(self.stages)]
+        
+        for i in range(self.stages):
+            trunc_normal_(self.sptial_pos_embed[i], std=.02)
+            
         self.cls_token = nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim))
         self.pos_embed_cls = nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim))
         self.pos_embed_pat = nn.Parameter(torch.zeros(1, num_patches, self.embed_dim))
@@ -37,17 +53,13 @@ class MCTGFormer(VisionTransformer):
         trunc_normal_(self.pos_embed_pat, std=.02)
         
         self.avgpool2d = nn.AdaptiveAvgPool2d(1)
-         
-        #================== Extra Part ==================#
-        mask_ratios = [0.4, 0.3, 0.2, 0.1]
-        dilations = [1, 2, 2, 2]
-        num_knn = [18, 14, 10, 6]    # number of knn's k
-        
+       
         self.proj_cls_embed = nn.Linear(self.stages, self.num_classes)
         self.decay_parameter = decay_parameter
         
         self.spatial_prior = SpatialPriorModule(
-            inplanes=64, embed_dims=self.spatial_dims)
+            inplanes=64, 
+            embed_dims=self.spatial_dims)
         
         self.spatial_fuse = nn.ModuleList([
             SemanticSpatialModule(
@@ -60,21 +72,22 @@ class MCTGFormer(VisionTransformer):
                 drop_path=0., 
                 qkv_bias=True, 
                 norm_layer=nn.LayerNorm, 
-                mask_ratio=mask_ratios[i],
-                kernel_size=num_knn[i], 
-                dilation=dilations[i])
+                mask_ratio=self.mask_ratios[i],
+                kernel_size=self.num_knn[i], 
+                dilation=self.dilations[i])
             for i in range(self.stages)])
         
         self.down_convs = nn.ModuleList([
             DownConv(
                 in_dim=self.spatial_dims[i], 
-                out_dim=self.spatial_dims[i+1])
-                for i in range(self.stages-1)])
+                out_dim=self.spatial_dims[i+1],
+                stride=self.spatial_strides[i])
+            for i in range(self.stages-1)])
         
         self.channel_reduction = nn.Sequential(
             nn.Conv2d(self.embed_dim * 5, self.embed_dim, 1),
             nn.BatchNorm2d(self.embed_dim),
-            nn.ReLU())
+            nn.GELU())
         
     def interpolate_pos_encoding(self, x, h, w):
         npatch = x.shape[1] - self.num_classes
@@ -87,15 +100,27 @@ class MCTGFormer(VisionTransformer):
         w0 = w // self.patch_embed.patch_size[1]
         dim = x.shape[-1]
         Np = int(math.sqrt(N))
-        patch_pos_embed = nn.functional.interpolate(
+        patch_pos_embed = F.interpolate(
             patch_pos_embed.reshape(1, Np, Np, dim).permute(0, 3, 1, 2),
             size=(h0, w0),
-            mode='bicubic',
+            mode='bilinear',
             align_corners=False)
         assert h0 == patch_pos_embed.shape[-2] and w0 == patch_pos_embed.shape[-1]
         patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
         return patch_pos_embed
 
+    def interpolate_spatial_pos_encoding(self, x_spatial):
+        # out_sizes = [((H+1)//scale, (W+1)//scale) for scale in self.spatial_scales]
+        spatial_pos_embed = []
+        for i in range(self.stages):
+            spatial_pos_embed.append(
+                F.interpolate(
+                    self.sptial_pos_embed[i],
+                    size=x_spatial[i].shape[2:],
+                    mode='bilinear',
+                    align_corners=False))
+        return spatial_pos_embed
+        
     def build_class_tokens(self, x):
         """
         Input: x -> list[B x C x H^ x W^]
@@ -126,9 +151,13 @@ class MCTGFormer(VisionTransformer):
         if not self.training:
             pos_embed_pat = self.interpolate_pos_encoding(x, H, W)
             x = x + pos_embed_pat
-            
+            sptial_pos_embed = self.interpolate_spatial_pos_encoding(x_spatial)
+            for i in range(self.stages):
+                x_spatial[i] += sptial_pos_embed[i].to(x.device)
         else: 
             x = x + self.pos_embed_pat
+            for i in range(self.stages):
+                x_spatial[i] += self.sptial_pos_embed[i].to(x.device)
         
         nn_cls_tokens = self.cls_token.expand(B, -1, -1) + self.pos_embed_cls
         cls_tokens = self.build_class_tokens(x_spatial) + nn_cls_tokens
@@ -238,12 +267,20 @@ class MCTGFormer_CAM(MCTGFormer):
     
     def forward(self, x):
         H, W = x.shape[2:]
-        # basic forward
+        min_num_patches = int(((H+1) // self.spatial_scales[-1]) * ((W+1) // self.spatial_scales[-1]))
+        min_size = max(self.dilations) * max(self.num_knn)
+        if min_num_patches <= min_size:
+            x = F.interpolate(
+                input=x,
+                size=to_2tuple(min_size),
+                mode='bilinear',
+                align_corners=False)
+
         _, patch_tokens, attn_weights, x_spatials = self.forward_features(x)
-        # patch tokens
+
         patch_tokens = self.reshape_patch_tokens(patch_tokens, H, W) # B x C x Hp x Wp  
         out_spatial = [patch_tokens]
-        # spatial tokens
+     
         out_size = patch_tokens.shape[2:]
         for x in x_spatials:
             x = F.interpolate(x, size=out_size, mode="bilinear", align_corners=False)
@@ -293,9 +330,6 @@ def deit_small_mctgformer(pretrained=False, **kwargs):
 
 if __name__ == "__main__":
     x = torch.ones(2, 3, 527, 481).cuda()
-    # model = MCTGCAM(num_classes=20).cuda()
-    # out = model(x)
-    # print(f"CAM: {out.shape}")
     
     from timm.models import create_model
     model = create_model(
