@@ -7,56 +7,59 @@ echo "  |-- COCO dataset path: datasets/MSCOCO";
 GPU=0,1
 NODES=2
 MODEL=mctgformer
+SEG_DIR=pseudo_mask
 CUDA_VISIBLE_DEVICES=${GPU}
-OMP_NUM_THREADS=${NODES} 
 WORKDIR=results_voc/${MODEL}
 
 
-# # ============= Train Model ===============#
-# torchrun --nproc_per_node=${NODES} --nnodes=1 \
-#     train_model.py \
-#     --model deit_small_mctgformer \
-#     --work_space ${WORKDIR} \
-#     --seed 2 \
-#     --epoch 45 \
-#     --batch_per_gpu 16 \
-#     --data_set VOC12 \
-
-
-# # ============= Make Class Activation Maps of Model=============#
-# python steps_voc/make_cam.py \
-#     --model deit_small_${MODEL} \
-#     --work_space ${WORKDIR} \
-#     --checkpoint ${WORKDIR}/deit_small_${MODEL}_best.pth \
-#     --infer_list configs/voc12/train_aug_id.txt \
-
-
-# # ============= Evaluate Class Activation Maps =============#
-# python steps_voc/eval_cam.py \
-#     --curve_threshold \
-#     --work_space ${WORKDIR} \
-
-
-#============= Train and Infer Pixel Semantic Affnity =============#
+# ============= Train Model ===============#
+OMP_NUM_THREADS=${NODES} \
 torchrun --nproc_per_node=${NODES} --nnodes=1 \
-    steps_voc/train_infer_aff.py \
-    --train True \
+    train_model.py \
+    --model deit_small_mctgformer \
     --work_space ${WORKDIR} \
-    --batch_per_gpu 4 \
     --seed 2 \
-    --epoch 5 \
-    --low_alpha 1 \
-    --high_alpha 3 \
-    --weights checkpoints/res38_cls.pth \
+    --epoch 45 \
+    --batch_per_gpu 16 \
+    --data_set VOC12 \
+
+
+# ============= Make Class Activation Maps of Model=============#
+python steps_voc/make_cam.py \
+    --model deit_small_${MODEL} \
+    --work_space ${WORKDIR} \
+    --checkpoint ${WORKDIR}/deit_small_${MODEL}_best.pth \
+    --infer_list configs/voc12/train_aug_id.txt \
+
+
+# ============= Evaluate Class Activation Maps =============#
+python steps_voc/eval_cam.py \
+    --curve_threshold \
+    --work_space ${WORKDIR} \
+
+
+# #============= Train and Infer Pixel Semantic Affnity =============#
+# torchrun --nproc_per_node=${NODES} --nnodes=1 \
+#     steps_voc/train_infer_aff.py \
+#     --train True \
+#     --work_space ${WORKDIR} \
+#     --weights checkpoints/res38_cls.pth \
+#     --batch_per_gpu 4 \
+#     --seed 2 \
+#     --epoch 5 \
+#     --low_alpha 1 \
+#     --high_alpha 2 \
 
 
 # #============= Infer with Pixel Semantic Affnity =============#
-# python steps_voc/infer_aff.py \
+# python steps_voc/train_infer_aff.py \
+#     --inference True \
 #     --work_space ${WORKDIR} \
-#     --checkpoint ${WORKDIR}/res38_aff_last.pth \
-#     --infer_list configs/voc12/train_aug.txt \
-#     --cam_out_dir cam_mask \
+#     --infer_list configs/voc12/train.txt \
 #     --seg_out_dir ${SEG_DIR} \
+#     --beta 11 \
+#     --logt 7 \
+#     --threshold 0.47 \
 
 
 # #============= Evaluate =============#
@@ -64,23 +67,24 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
 #     --work_space ${WORKDIR} \
 #     --seg_out_dir ${SEG_DIR} \
 
+
 # # Save the generated mask to zip
 # cd ${WORKDIR} && zip -r ${SEG_DIR}.zip ${SEG_DIR} && cd -
 
-
-# OMP_NUM_THREADS=${NODES}  \
+# CUDA_VISIBLE_DEVICES=0
+# OMP_NUM_THREADS=1  \
 #     torchrun \
-#     --nproc_per_node=${NODES} --nnodes=1  \
+#     --nproc_per_node=1 --nnodes=1  \
 #     steps_voc/train_eval_seg.py \
 #     --train True \
-#     --seed 1 \
+#     --seed 2 \
 #     --num_epochs 30 \
-#     --batch_per_gpu 8 \
+#     --batch_per_gpu 4 \
 #     --init_weights checkpoints/res38_cls.pth \
 
 
 # python steps_voc/train_eval_seg.py \
 #     --evaluate True \
 #     --use_crf True \
-#     --scales 1.0 \
+#     --scales 0.5 0.75 1.0 1.25 1.5 \
 #     # --pred_path val_ms \

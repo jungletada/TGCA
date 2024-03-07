@@ -1,9 +1,11 @@
 import os, sys
 import random
+import pprint
 import argparse
 import numpy as np
 from tqdm import tqdm
 import os.path as osp
+import PIL.Image as Image
 
 import torch
 import torch.nn as nn
@@ -12,17 +14,19 @@ from torch.backends import cudnn
 from torch import multiprocessing, cuda
 from torchvision import transforms
 import torch.distributed as dist
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
+
 
 sys.path.append(osp.dirname(__file__) + os.sep + '../')
 from data.voc12.dataloader_psa import VOC12AffDatasetCRF
 from data.voc12.dataloader_psa import VOC12ImageDataset
 from net.resnet38_aff import ResNet38d_Aff
 from net.tool import pyutils, imutils, torchutils
+from misc.torchutils import split_dataset 
+from utils import str2bool, data_mkdir
 
-from utils import str2bool
-from utils import data_mkdir
 cudnn.enabled = True
 
 
@@ -121,6 +125,13 @@ def same_seeds(seed):
         torch.backends.cudnn.deterministic = True
 
 
+def put_palette(seg_label, out_name):
+    out = seg_label.astype(np.uint8)
+    out = Image.fromarray(out, mode='P')
+    # out.putpalette(data_voc.palette)
+    out.save(out_name)
+    
+    
 def build_train_dataset(args):
     train_dataset = VOC12AffDatasetCRF(
         img_name_list_path=args.train_list, 
@@ -236,15 +247,10 @@ def _work(process_id, model, dataset, args):
                 
             res = np.uint8(cam_rw_pred.cpu().data[0])[:original_shape[2], :original_shape[3]]
             
-            put_palette(res, osp.join(args.seg_out_dir, name + '.png'))
-    
-      
-def print_info(args):
-    import pprint
-    args_dict = vars(args)
-    if dist.get_rank() == 0:
-        pprint.pprint(args_dict)
-        
+            # put_palette(res, osp.join(args.seg_out_dir, name + '.png'))
+            mask = Image.fromarray(res, mode='P')
+            mask.save(osp.join(args.seg_out_dir, name + '.png'))
+            
         
 def train_affinity(args):
     init_distributed_mode(args)
@@ -264,7 +270,9 @@ def train_affinity(args):
     max_step = len(train_dataset) * args.epoch // args.batch_size 
     args.max_step = max_step
     
-    print_info(args)
+    args_dict = vars(args)
+    if dist.get_rank() == 0:
+        pprint.pprint(args_dict)
     
     model = ResNet38d_Aff()
     weights_dict = torch.load(args.weights)
@@ -337,14 +345,15 @@ def train_affinity(args):
     if dist.get_rank() == 0:
         torch.save(model.module.state_dict(), 
                    osp.join(args.work_space, 'res38_aff_final.pth'))
-
-
+    
+    
 def infer_affinity(args):
+    args.cam_out_dir = osp.join(args.work_space, args.cam_out_dir)
     args.seg_out_dir = osp.join(args.work_space, args.seg_out_dir)
     data_mkdir(args.seg_out_dir)
     args.num_classes += 1 # add background
-    print_info(args)
-    
+    pprint.pprint(vars(args))
+
     model = ResNet38d_Aff()
 
     model_dict = torch.load(
@@ -357,7 +366,7 @@ def infer_affinity(args):
     n_gpus = torch.cuda.device_count()
     
     dataset = build_infer_dataset(args)
-    dataset = torchutils.split_dataset(dataset, n_gpus)
+    dataset = split_dataset(dataset, n_gpus)
 
     print("[", end='')
     multiprocessing.spawn(_work, nprocs=n_gpus, 

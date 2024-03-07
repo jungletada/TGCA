@@ -1,29 +1,27 @@
-import os
-import os.path as osp
-import torch
+import os, sys
 import argparse
-import imageio
 import numpy as np
+import os.path as osp
+import imageio.v2 as imageio
 
-from chainercv.datasets import VOCSemanticSegmentationDataset
-from chainercv.evaluations import calc_semantic_segmentation_confusion
+sys.path.append(osp.dirname(__file__) + os.sep + '../')
+from data.voc12.dataloader import VOCSegmentationLabelDataset
+from engine import calc_semantic_segmentation_confusion
 
 
 def run(args):
-    dataset = VOCSemanticSegmentationDataset(
+    dataset = VOCSegmentationLabelDataset(
         split=args.chainer_eval_set, 
         data_dir=args.voc12_root)
-
+    
     preds = []
     labels = []
-    n_img = 0
     
     for i, id_ in enumerate(dataset.ids):
         cls_labels = imageio.imread(os.path.join(args.seg_out_dir, id_ + '.png')).astype(np.uint8)
         cls_labels[cls_labels == 255] = 0
         preds.append(cls_labels.copy())
-        labels.append(dataset.get_example_by_keys(i, (1,))[0])
-        n_img += 1
+        labels.append(dataset[i]["label"])
 
     confusion = calc_semantic_segmentation_confusion(preds, labels)[:21, :21]
 
@@ -34,7 +32,7 @@ def run(args):
     fp = 1. - gtj / denominator
     fn = 1. - resj / denominator
     iou = gtjresj / denominator
-    print("Total images=", n_img)
+
     print("False Positive: {:.4f}, False Negative: {:.4f}".format(fp[0], fn[0]))
     # print("IoU(%) for each class:")
     # for res in iou:

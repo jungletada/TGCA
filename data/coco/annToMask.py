@@ -15,6 +15,7 @@ def work(process_id, infer_dataset, coco, mask_path):
     # print(len(databin))
     for imgId in databin:
         curImg = coco.imgs[imgId]
+        filename = coco.loadImgs(imgId)[0]['file_name']
         imageSize = (curImg['height'], curImg['width'])
         labelMap = np.zeros(imageSize)
 
@@ -28,13 +29,14 @@ def work(process_id, infer_dataset, coco, mask_path):
             labelMask = coco.annToMask(imgAnnots[i]) == 1
             newLabel = imgAnnots[i]['category_id']
             labelMap[labelMask] = category_map[str(newLabel)]
-
-        imageio.imsave(os.path.join(mask_path, str(imgId) + '.png'), labelMap.astype(np.uint8))
+        
+        # imageio.imsave(os.path.join(mask_path, str(imgId) + '.png'), labelMap.astype(np.uint8))
+        imageio.imsave(os.path.join(mask_path, filename.replace('jpg', 'png')), labelMap.astype(np.uint8))
 
 
 if __name__ == '__main__':
     coco_root = "datasets/MSCOCO"
-    mask_root = "data/coco/mask"
+    mask_root = "data/coco/MaskSets"
     os.makedirs(mask_root, exist_ok=True)
     
     annFile = osp.join(coco_root, 'annotations/instances_train2014.json')
@@ -58,3 +60,10 @@ if __name__ == '__main__':
     num_per_worker = (len(ids)//num_workers) + 1
     dataset = [ ids[i*num_per_worker:(i+1)*num_per_worker] for i in range(num_workers)]
     multiprocessing.spawn(work, nprocs=num_workers, args=(dataset,coco,mask_path), join=True)
+    
+    
+    # imgId = 42
+    # curImg = coco.imgs[imgId]
+    # filename = coco.loadImgs(imgId)[0]['file_name']
+    # print(filename.replace('jpg', 'png'))
+    

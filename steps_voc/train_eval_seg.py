@@ -153,10 +153,14 @@ def train(args):
     model = ResNet38d_Seg(num_classes=args.num_classes)
     model.load_state_dict(torch.load(args.init_weights), strict=False)
     
-    optimizer = torchutils.PolyOptimizerSGD([
-        {'params': model.get_1x_lr_params(), 'lr': args.lr},
-        {'params': model.get_10x_lr_params(), 'lr': 10 * args.lr}
-    ], lr=args.lr, weight_decay=args.wt_dec, max_step=args.max_step, warmup_step=args.warmup_step,)
+    optimizer = torchutils.PolyOptimizerSGD(
+        params=[
+            {'params': model.get_1x_lr_params(), 'lr': args.lr},
+            {'params': model.get_10x_lr_params(), 'lr': 10 * args.lr}], 
+        lr=args.lr, 
+        weight_decay=args.wt_dec, 
+        max_step=args.max_step, 
+        warmup_step=0) # args.warmup_step
 
     model.to(device)
     if args.world_size > 1:
