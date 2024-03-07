@@ -1,8 +1,11 @@
+import os
+import cv2
+import sys
 import torch
 import numpy as np
-import PIL.Image
-import os.path
-import sys
+from PIL import Image
+import os.path as osp
+
 import scipy.misc
 from torch.utils.data import Dataset
 
@@ -11,14 +14,12 @@ from data.crf_utils import refine_crf_cam
 
 IMG_FOLDER_NAME = "JPEGImages"
 ANNOT_FOLDER_NAME = "Annotations"
-
 CAT_LIST = ['aeroplane', 'bicycle', 'bird', 'boat',
         'bottle', 'bus', 'car', 'cat', 'chair',
         'cow', 'diningtable', 'dog', 'horse',
         'motorbike', 'person', 'pottedplant',
         'sheep', 'sofa', 'train',
         'tvmonitor']
-
 CAT_NAME_TO_NUM = dict(zip(CAT_LIST, range(len(CAT_LIST))))
 
 
@@ -72,7 +73,7 @@ class VOC12ImageDataset(Dataset):
 
     def __getitem__(self, idx):
         name = self.img_name_list[idx]
-        img = PIL.Image.open(get_img_path(name, self.voc12_root)).convert("RGB")
+        img = Image.open(get_img_path(name, self.voc12_root)).convert("RGB")
         if self.transform:
             img = self.transform(img)
         return name, img
@@ -106,7 +107,7 @@ class VOC12ClsDatasetMSF(VOC12ClsDataset):
         for s in self.scales:
             target_size = (round(rounded_size[0]*s),
                            round(rounded_size[1]*s))
-            s_img = img.resize(target_size, resample=PIL.Image.CUBIC)
+            s_img = img.resize(target_size, resample=Image.CUBIC)
             ms_img_list.append(s_img)
 
         if self.inter_transform:
@@ -324,3 +325,24 @@ class VOC12AffDatasetCRF(VOC12ImageDataset):
         label[no_score_region] = 255 # mostly outer of cropped region
         label = self.extract_aff_lab_func(label)
         return img, label
+
+
+class VOCSegmentationLabelDataset(Dataset):
+    def __init__(self, data_dir, id_list_file):
+        super(VOCSegmentationLabelDataset, self).__init__()
+        self.ids = [id_.strip() for id_ in open(id_list_file)]
+        self.data_dir = data_dir
+
+    def __len__(self):
+        return len(self.ids)
+
+    def __getitem__(self, idx):
+        name_id = self.ids[idx]
+        image_path = osp.join(self.data_dir, "JPEGImages", name_id + '.jpg')
+        label_path = osp.join(self.data_dir, "SegmentationClass", name_id + '.png')
+        
+        image = cv2.imread(image_path, cv2.IMREAD_COLOR).astype(np.float32)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
+        label = np.asarray(Image.open(label_path), dtype=np.int32)
+        label[label==255] = -1
+        return {"name_id": name_id, "image": image, "label": label}

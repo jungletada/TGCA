@@ -17,7 +17,7 @@ import PIL.Image as Image
 from pathlib import Path
 
 sys.path.append(osp.dirname(__file__) + os.sep + '../')
-from psa_network.tool import pyutils, imutils
+from psa_network.tool import imutils
 from misc import torchutils
 from psa_network.network.transform import Normalize
 from psa_network.network.resnet38_aff import ResNet38d_Aff

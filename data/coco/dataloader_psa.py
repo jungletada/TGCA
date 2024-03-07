@@ -1,16 +1,16 @@
+import os
 import sys
+import cv2
 import torch
 import numpy as np
-import PIL.Image
-import os.path
-import scipy.misc
+from PIL import Image
+import os.path as osp
 from torch.utils.data import Dataset
 sys.path.append(os.path.dirname(__file__) + os.sep + '../')
 from data.crf_utils import refine_crf_cam
 
 TRAIN_FOLDER_NAME = "train2014"
 VAL_FOLDER_NAME = "val2014"
-
 ANNOT_FOLDER_NAME = "Annotations"
 
 
@@ -56,7 +56,7 @@ class COCOImageDataset(Dataset):
 
     def __getitem__(self, idx):
         name = self.img_name_list[idx]
-        img = PIL.Image.open(get_img_path(name, self.coco_root, is_train=self.train)).convert("RGB")
+        img = Image.open(get_img_path(name, self.coco_root, is_train=self.train)).convert("RGB")
         if self.transform:
             img = self.transform(img)
         return name, img
@@ -89,7 +89,7 @@ class COCOClsDatasetMSF(COCOClsDataset):
         for s in self.scales:
             target_size = (round(rounded_size[0]*s),
                            round(rounded_size[1]*s))
-            s_img = img.resize(target_size, resample=PIL.Image.CUBIC)
+            s_img = img.resize(target_size, resample=Image.CUBIC)
             ms_img_list.append(s_img)
 
         if self.inter_transform:
@@ -221,3 +221,34 @@ class COCOAffDatasetCRF(COCOImageDataset):
         label = self.extract_aff_lab_func(label)
         
         return img, label
+    
+
+class COCOSegmentationLabelDataset(Dataset):
+    def __init__(self, 
+                 data_dir, 
+                 id_list_file="configs/coco/train_id.txt",
+                 annotation_dir='MaskSets'):
+        super(COCOSegmentationLabelDataset, self).__init__()
+
+        self.ids = [id_.strip() for id_ in open(id_list_file)]
+        self.data_dir = data_dir
+        if "train" in id_list_file:
+            self.image_dir = osp.join(data_dir, TRAIN_FOLDER_NAME)
+            self.mask_dir = osp.join(data_dir, annotation_dir, TRAIN_FOLDER_NAME)
+        else:
+            self.image_dir = osp.join(data_dir, VAL_FOLDER_NAME)
+            self.mask_dir = osp.join(data_dir, annotation_dir, VAL_FOLDER_NAME)
+
+    def __len__(self):
+        return len(self.ids)
+
+    def __getitem__(self, idx):
+        name_id = self.ids[idx]
+        image_path = osp.join(self.image_dir, name_id + '.jpg')
+        label_path = osp.join(self.mask_dir, name_id + '.png')
+        
+        image = cv2.imread(image_path, cv2.IMREAD_COLOR).astype(np.float32)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
+        label = np.asarray(Image.open(label_path), dtype=np.int32)
+        
+        return {"name_id": name_id, "image": image, "label": label}

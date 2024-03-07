@@ -32,10 +32,10 @@ WORKDIR=results_voc/${MODEL}
 #     --seg_out_dir ${SEG_DIR} \
 
 
-# #============= Evaluate =============#
-# python steps_voc/eval_sem_seg.py \
-#     --work_space ${WORKDIR} \
-#     --seg_out_dir ${SEG_DIR} \
+#============= Evaluate =============#
+python steps_voc/eval_sem_seg.py \
+    --work_space ${WORKDIR} \
+    --seg_out_dir ${SEG_DIR} \
 
-# Save the generated mask to zip
-cd ${WORKDIR} && zip -r ${SEG_DIR}.zip ${SEG_DIR} && cd -
+# # Save the generated mask to zip
+# cd ${WORKDIR} && zip -r ${SEG_DIR}.zip ${SEG_DIR} && cd -

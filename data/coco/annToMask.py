@@ -60,10 +60,3 @@ if __name__ == '__main__':
     num_per_worker = (len(ids)//num_workers) + 1
     dataset = [ ids[i*num_per_worker:(i+1)*num_per_worker] for i in range(num_workers)]
     multiprocessing.spawn(work, nprocs=num_workers, args=(dataset,coco,mask_path), join=True)
-    
-    
-    # imgId = 42
-    # curImg = coco.imgs[imgId]
-    # filename = coco.loadImgs(imgId)[0]['file_name']
-    # print(filename.replace('jpg', 'png'))
-    

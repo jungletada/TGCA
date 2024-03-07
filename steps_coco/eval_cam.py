@@ -2,14 +2,13 @@ import os
 import sys
 import torch
 import argparse
+import datetime
 import numpy as np
 import os.path as osp
-import datetime
-from tqdm import tqdm, trange
-from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 sys.path.append(os.path.dirname(__file__) + os.sep + '../')
-from data.coco.dataloader import COCOSegmentationDataset
+from data.coco.dataloader_psa import COCOSegmentationLabelDataset
 from engine import calc_semantic_segmentation_confusion
 
 
@@ -20,21 +19,25 @@ def write_msg(file, msg):
     
 def run(args):
     f = open(args.log_file, "w")
-    dataset = COCOSegmentationDataset(
-        image_dir = osp.join(args.mscoco_root,'train2014/'),
-        anno_path= osp.join(args.mscoco_root,'annotations/instances_train2014.json'),
-        masks_path=osp.join(args.mscoco_root,'mask/train2014'),
-        crop_size=512)
+    dataset = COCOSegmentationLabelDataset(
+        data_dir=args.mscoco_root, 
+        id_list_file="configs/coco/train_id.txt",
+        annotation_dir='MaskSets')
     
     num_images = len(dataset)
-
-    def eval_curve(threshold):
+    chunk_size = 10000 # for memory efficient
+    split_indices = [(i, min(i + chunk_size, num_images)) 
+                     for i in range(0, num_images, chunk_size)]
+    
+    def eval_curve(threshold, begin_idx, end_idx):
         preds = []
         labels = []
         miou = 0.
-        for iter_, pack in enumerate(tqdm(dataset)):
-            filename = pack['name'].split('.')[0]
-            cam_dict = np.load(osp.join(args.eval_cam_dir, filename + '.npy'), allow_pickle=True).item()
+        for i in tqdm(range(begin_idx, end_idx)):
+            pack = dataset[i]
+            filename = pack['name_id']
+            cam_dict = np.load(osp.join(args.eval_cam_dir, filename + '.npy'), 
+                               allow_pickle=True).item()
             
             if len(tuple(cam_dict.keys())) == 0:
                 continue
@@ -49,8 +52,9 @@ def run(args):
             cls_labels = keys[cls_labels].astype(np.uint8)
             
             preds.append(cls_labels.copy())
-            label = dataset.get_label_by_name(filename)
-            labels.append(label)
+            labels.append(pack['label'])
+            # if  i % 100 == 0:
+            #     print("[{:5d}]".format(i))
 
         confusion = calc_semantic_segmentation_confusion(preds, labels)
 
@@ -62,10 +66,9 @@ def run(args):
         miou = np.nanmean(iou)
         
         time = datetime.datetime.now().strftime("%Y-%m-%d-%H_%M_%S")
-        print("{} Threshold: {:.2f} mIoU: {:.4f}".format(time, threshold, miou))
+        # print("{} Chunk for threshold: {:.2f} mIoU: {:.4f}".format(time, threshold, miou))
         # print('among_pred_fg_bg', float((resj[1:].sum()-confusion[1:,1:].sum())/(resj[1:].sum())))
         return miou
-    
     
     if args.curve_threshold:
         best_res = 0.
@@ -84,8 +87,15 @@ def run(args):
         
     
     else:
-        miou = eval_curve(args.threshold)
-    
+        all_slices = []
+        for idx_pair in split_indices:
+            miou = eval_curve(
+                args.threshold, 
+                begin_idx=idx_pair[0], 
+                end_idx=idx_pair[1])
+            all_slices.append(miou)
+        mean_value = np.mean(all_slices)
+        print("mean IoU for all images: {:.2f}".format(mean_value))
     f.close()
 
 
