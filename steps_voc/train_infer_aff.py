@@ -79,11 +79,6 @@ class Normalize():
         self.std = np.array(std)
 
     def __call__(self, imgarr):
-        # imgarr = np.asarray(img)
-        # proc_img = np.empty_like(imgarr, np.float32)
-        # proc_img[..., 0] = (imgarr[..., 0] / 255. - self.mean[0]) / self.std[0]
-        # proc_img[..., 1] = (imgarr[..., 1] / 255. - self.mean[1]) / self.std[1]
-        # proc_img[..., 2] = (imgarr[..., 2] / 255. - self.mean[2]) / self.std[2]
         imgarr = (imgarr / 255. - self.mean) / self.std
         return imgarr.astype(np.float32)
 

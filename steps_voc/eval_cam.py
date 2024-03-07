@@ -14,7 +14,7 @@ def run(args):
     f = open(args.log_file, "w")
     dataset = VOCSegmentationLabelDataset( 
         data_dir=args.voc12_root, 
-        id_list_file='configs/voc12/train_aug_id.txt')
+        id_list_file='configs/voc12/train_id.txt')
     
     num_images = len(dataset)
     
