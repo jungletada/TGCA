@@ -6,15 +6,15 @@ import argparse
 import numpy as np
 
 sys.path.append(osp.dirname(__file__) + os.sep + '../')
-from data.voc12.dataloader import VOCSegmentationLabelDataset
+from data.voc12.dataloader_psa import VOCSegmentationLabelDataset
 from engine import calc_semantic_segmentation_confusion
 
     
 def run(args):
     f = open(args.log_file, "w")
-    dataset = VOCSegmentationLabelDataset(
-        split=args.chainer_eval_set, 
-        data_dir=args.voc12_root)
+    dataset = VOCSegmentationLabelDataset( 
+        data_dir=args.voc12_root, 
+        id_list_file='configs/voc12/train_aug_id.txt')
     
     num_images = len(dataset)
     

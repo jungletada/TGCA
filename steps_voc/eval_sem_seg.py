@@ -5,14 +5,14 @@ import os.path as osp
 import imageio.v2 as imageio
 
 sys.path.append(osp.dirname(__file__) + os.sep + '../')
-from data.voc12.dataloader import VOCSegmentationLabelDataset
+from data.voc12.dataloader_psa import VOCSegmentationLabelDataset
 from engine import calc_semantic_segmentation_confusion
 
 
 def run(args):
     dataset = VOCSegmentationLabelDataset(
-        split=args.chainer_eval_set, 
-        data_dir=args.voc12_root)
+        data_dir=args.voc12_root,
+        id_list_file='configs/voc12/train_aug_id.txt')
     
     preds = []
     labels = []
