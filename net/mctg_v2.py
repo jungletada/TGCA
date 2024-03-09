@@ -29,11 +29,11 @@ class MCTGFormer(VisionTransformer):
         self.num_patches = num_patches
         
         self.spatial_dims = [self.embed_dim] * self.stages
-        self.spatial_scales = (8, 16, 32, 64) # fixed
-        self.spatial_strides = (2, 2, 2) # fixed
+        self.spatial_scales = (8, 16, 32, 64)   # fixed
+        self.spatial_strides = (2, 2, 2)        # fixed
         self.mask_ratios = [0.4, 0.3, 0.2, 0.1]
         self.dilations = [1, 2, 2, 2]
-        self.num_knn = [18, 14, 10, 6]    # number of knn's k
+        self.num_knn = [18, 14, 10, 6]          # number of knn's k
         
         self.spatial_sizes = [(img_size[0]//scale, img_size[1]//scale) 
                               for scale in self.spatial_scales]
@@ -267,14 +267,18 @@ class MCTGFormer_CAM(MCTGFormer):
     
     def forward(self, x):
         H, W = x.shape[2:]
-        min_num_patches = int(((H+1) // self.spatial_scales[-1]) * ((W+1) // self.spatial_scales[-1]))
-        min_size = max(self.dilations) * max(self.num_knn)
-        if min_num_patches <= min_size:
+        min_tokens = self.dilations[-1] * self.num_knn[-1]
+        scaled_size = self.spatial_scales[-1] * self.spatial_scales[-1]
+        if (H * W) // scaled_size <= min_tokens:
+            H_ = int(math.sqrt(min_tokens * H / W) * self.spatial_scales[-1] + 1)
+            W_ = int(math.sqrt(min_tokens * W / H) * self.spatial_scales[-1] + 1)
             x = F.interpolate(
                 input=x,
-                size=to_2tuple(min_size),
+                size=(H_, W_),
                 mode='bilinear',
                 align_corners=False)
+            # print(f"Originial={H, W}; Now={x.shape[2:]}")
+            H, W = H_, W_
 
         _, patch_tokens, attn_weights, x_spatials = self.forward_features(x)
 

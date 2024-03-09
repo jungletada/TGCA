@@ -33,7 +33,7 @@ def _crf_with_alpha(cam_dict, alpha, orig_img):
     return n_crf_al
 
 
-def refine_crf_cam(cam_dict, original_image, low_alpha=1, high_alpha=12,):
+def refine_crf_cam(cam_dict, original_image, low_alpha=1, high_alpha=3):
     label = {}
     crf_dict = {'low': low_alpha, 'high': high_alpha}
     for alpha, value in crf_dict.items():

@@ -62,7 +62,6 @@ def dense_knn_matrix(x, k=16, relative_pos=None):
     with torch.no_grad():
         x = x.transpose(2, 1).squeeze(-1)
         batch_size, n_points, _ = x.shape # B x N x C
-        
         #======== memory efficient implementation ========#
         n_part = 10000
         if n_points > n_part:

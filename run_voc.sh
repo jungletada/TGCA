@@ -18,7 +18,7 @@ WORKDIR=results_voc/${MODEL}
 #     train_model.py \
 #     --model deit_small_mctgformer \
 #     --work_space ${WORKDIR} \
-#     --seed 2 \
+#     --seed 1 \
 #     --epoch 45 \
 #     --batch_per_gpu 16 \
 #     --data_set VOC12 \
@@ -45,10 +45,10 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --work_space ${WORKDIR} \
     --weights checkpoints/res38_cls.pth \
     --batch_per_gpu 4 \
-    --seed 1 \
+    --seed 2 \
     --epoch 5 \
     --low_alpha 1 \
-    --high_alpha 2 \
+    --high_alpha 3 \
 
 
 #============= Infer with Pixel Semantic Affnity =============#

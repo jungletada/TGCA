@@ -12,7 +12,7 @@ from engine import calc_semantic_segmentation_confusion
 def run(args):
     dataset = VOCSegmentationLabelDataset(
         data_dir=args.voc12_root,
-        id_list_file='configs/voc12/train_aug_id.txt')
+        id_list_file='configs/voc12/train_id.txt')
     
     preds = []
     labels = []

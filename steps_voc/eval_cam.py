@@ -72,7 +72,6 @@ def run(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Evaluate CAMs', add_help=False)
-    parser.add_argument("--chainer_eval_set", default="train", type=str)
     parser.add_argument('--voc12_root', default='datasets/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
     parser.add_argument('--work_space', default='results_voc/your_model', help='work space directory')
     parser.add_argument('--eval_cam_dir', default='cam_mask', help='cam_mask directory')

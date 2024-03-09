@@ -355,6 +355,18 @@ class SemanticSpatialModule(nn.Module):
             hidden_features=self.dim * 4,
             out_features=self.dim)
 
+    def weighted_tokens(self, x, base=0.9):
+        C, N = x.shape[1:]
+        weights = torch.logspace(start=0, end=C-1, steps=C, base=base)
+        weights = weights.unsqueeze(-1)
+        x_sorted, indices = torch.sort(x, dim=1, descending=True)
+        weighted_sorted = x_sorted * weights.to(x.device)
+        result = torch.zeros_like(x).float()
+        inv_indices = indices.argsort(dim=1)
+        # Scatter the weighted values to their original positions
+        result.scatter_(1, inv_indices, weighted_sorted)
+        return result
+    
     def forward_semantic_gnn(self, x_spatial, x_backbone, token_size, spatial_size):
         """
         Input:
@@ -364,40 +376,38 @@ class SemanticSpatialModule(nn.Module):
             x_spatial: updated spatial features 
         """
         B, N, _ = x_backbone.shape
-        
+        Ni = spatial_size[0] * spatial_size[1]
         # Linear projection 
         q = self.proj_q(x_spatial)  # B, (Hi * Wi), C
         x_cls, x_pat = torch.split(x_backbone, [self.Cls, N-self.Cls], dim=1)
         x_cls = self.proj_cls(x_cls)    # B, Cls, C
         # Build semantic relation
         relation_s = (x_cls @ q.transpose(-2, -1)) * self.scale # (B, Cls, C) (B, Ni, C) 
+        # relation_s = self.weighted_tokens(relation_s, base=0.9)
+        
         relation_s = relation_s.view(B, -1, spatial_size[0], spatial_size[1])
         relation_s = self.graph_s(relation_s)
         relation_s = relation_s.view(B, self.Cls, -1)
-        # print(f"semantic relation of spatial {relation_s.shape}")
         
         kv = self.proj_kv(x_pat).reshape(B, -1, 2, self.dim).permute(2, 0, 1, 3)
         k, v = kv[0], kv[1] # [B, N', C]
         # Build semantic relation
         relation_b = (x_cls @ k.transpose(-2, -1)) * self.scale # (B, Cls, C) (B, N', C) 
+        # relation_b = self.weighted_tokens(relation_b, base=0.9)
+        
         relation_b = relation_b.view(B, -1, token_size[0], token_size[1]) # (B, Cls, H', W')
         relation_b = self.graph_b(relation_b)
-        relation_b = relation_b.view(B, self.Cls, -1)
-        # print(f"semantic relation of backbone {relation_b.shape}")
-        
+        relation_b = relation_b.view(B, self.Cls, -1) 
         # GNN feature aggregator
         spatial_guide = (relation_s.transpose(-2, -1) @ relation_b) * self.scale
         spatial_guide = spatial_guide.softmax(dim=-1)
-        
         m_r = torch.ones_like(spatial_guide) * self.mask_ratio 
         spatial_guide = spatial_guide + torch.bernoulli(m_r) * -1e12
         spatial_guide = spatial_guide.softmax(dim=-1)
         
         spatial_guide = self.attn_drop(spatial_guide)
-        # print(f"attention {spatial_guide.shape}")
-        # Fuse backbone relation and spatial relation
-        output = spatial_guide @ v 
-        # print(f"output {output.shape}")
+        output = spatial_guide @ v # Fuse backbone relation and spatial relation
+       
         return output
     
         
