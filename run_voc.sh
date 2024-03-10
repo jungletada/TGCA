@@ -48,7 +48,7 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --seed 2 \
     --epoch 5 \
     --low_alpha 1 \
-    --high_alpha 3 \
+    --high_alpha 2 \
 
 
 #============= Infer with Pixel Semantic Affnity =============#

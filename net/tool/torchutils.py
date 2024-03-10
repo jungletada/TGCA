@@ -148,6 +148,7 @@ class ExtractAffinityLabelInRadius():
 
         return bg_pos_affinity_label, fg_pos_affinity_label, neg_affinity_label
 
+
 class AffinityFromMaskDataset(SegmentationDataset):
     def __init__(self, img_name_list_path, img_dir, label_dir, rescale=None, flip=False, cropsize=None,
                  img_transform=None, mask_transform=None, radius=5):

@@ -18,6 +18,7 @@ from psa_network.tool import pyutils, imutils, torchutils
 from psa_network.network.transform import Normalize
 from psa_network.network.resnet38_aff import ResNet38d_Aff
 from data.coco.dataloader_psa import COCOAffDatasetCRF
+
 cudnn.enabled = True
 
 

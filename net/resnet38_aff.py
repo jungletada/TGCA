@@ -105,3 +105,19 @@ class ResNet38d_Aff(ResNet38d):
                         groups[1].append(m.bias)    # 2xlr & no weight dacay
         return groups
     
+    def train(self, mode=True):
+        super().train(mode)
+        for layer in self.not_training:
+            if isinstance(layer, torch.nn.Conv2d):
+                layer.weight.requires_grad = False
+            elif isinstance(layer, torch.nn.Module):
+                for c in layer.children():
+                    c.weight.requires_grad = False
+                    if c.bias is not None:
+                        c.bias.requires_grad = False
+
+        for layer in self.modules():
+            if isinstance(layer, torch.nn.BatchNorm2d):
+                layer.eval()
+                layer.bias.requires_grad = False
+                layer.weight.requires_grad = False

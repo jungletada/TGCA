@@ -18,10 +18,12 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
-
 sys.path.append(osp.dirname(__file__) + os.sep + '../')
+from data.coco.dataloader_psa import COCOAffDatasetCRF
+from data.coco.dataloader_psa import COCOImageDataset
 from data.voc12.dataloader_psa import VOC12AffDatasetCRF
 from data.voc12.dataloader_psa import VOC12ImageDataset
+
 from net.resnet38_aff import ResNet38d_Aff
 from net.tool import pyutils, imutils, torchutils
 from misc.torchutils import split_dataset 
@@ -35,15 +37,15 @@ def get_args_parser():
     parser.add_argument("--train", default=False, type=str2bool)
     parser.add_argument("--inference", default=False, type=str2bool)
     # model weights and path to CAM seeds 
+    parser.add_argument("--coco_root", default='datasets/MSCOCO', type=str, help="Path to MSCOCO")
+    parser.add_argument("--voc12_root", default='datasets/VOCdevkit/VOC2012/', type=str,
+                        help="Path to VOC 2012 Devkit, must contain ./JPEGImages as subdirectory.")
     parser.add_argument("--work_space", default="results/MCTG", type=str)
     parser.add_argument("--cam_out_dir", default="cam_mask", type=str, help="cam mask path")
     parser.add_argument("--seg_out_dir", default="pseudo_mask", type=str, help="pesudo mask path")
-    parser.add_argument("--train_list", default="configs/voc12/train_aug.txt", type=str)
+    parser.add_argument("--train_list", default="configs/coco/train_id.txt", type=str, help='image list path')
+    parser.add_argument('--infer_list', default='configs/coco/train_id.txt', type=str, help='image list path')
     parser.add_argument("--weights", default='checkpoints/res38_cls.pth', type=str)
-    parser.add_argument("--voc12_root", default='datasets/VOCdevkit/VOC2012/', type=str,
-                        help="Path to VOC 2012 Devkit, must contain ./JPEGImages as subdirectory.")
-    parser.add_argument('--infer_list', default='configs/voc12/train_aug.txt', 
-                        type=str, help='image list path')
     # ddp settings
     parser.add_argument('--rank', default=0, type=int, help='rank of current process')  
     parser.add_argument('--gpu_id', default=0, type=int, help="which gpu to use")
@@ -58,8 +60,8 @@ def get_args_parser():
     parser.add_argument("--num_workers", default=8, type=int)
     parser.add_argument("--wt_dec", default=5e-4, type=float)
     # dataset settings
-    parser.add_argument("--dataset", default="VOC", type=str)
-    parser.add_argument("--num_classes", default=20, type=int)
+    parser.add_argument("--dataset", default="COCO", type=str, help='choose `COCO` or `VOC`')
+    parser.add_argument("--num_classes", default=80, type=int)
     parser.add_argument("--crop_size", default=448, type=int)
     parser.add_argument("--low_alpha", default=1, type=float)
     parser.add_argument("--high_alpha", default=3, type=float)
@@ -81,8 +83,8 @@ class Normalize():
     def __call__(self, imgarr):
         imgarr = (imgarr / 255. - self.mean) / self.std
         return imgarr.astype(np.float32)
-
-
+    
+    
 def init_distributed_mode(args):
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
         args.rank = int(os.environ["RANK"])
@@ -120,37 +122,61 @@ def same_seeds(seed):
         torch.backends.cudnn.deterministic = True
 
 
-def put_palette(seg_label, out_name):
-    out = seg_label.astype(np.uint8)
-    out = Image.fromarray(out, mode='P')
-    # out.putpalette(data_voc.palette)
-    out.save(out_name)
-    
-    
 def build_train_dataset(args):
-    train_dataset = VOC12AffDatasetCRF(
-        img_name_list_path=args.train_list, 
-        cam_npy_dir=args.cam_out_dir,
-        voc12_root=args.voc12_root, 
-        cropsize=args.crop_size, 
-        low_alpha=args.low_alpha, 
-        high_alpha=args.high_alpha,
-        radius=args.radius,
-        joint_transform_list=[
-            None,
-            None,
-            imutils.RandomCrop(args.crop_size),
-            imutils.RandomHorizontalFlip()],
-        img_transform_list=[
-            transforms.ColorJitter(brightness=0.25, contrast=0.25, saturation=0.25, hue=0.1),
-            np.asarray,
-            Normalize(),
-            imutils.HWC_to_CHW],
-        label_transform_list=[
-            None,
-            None,
-            None,
-            imutils.AvgPool2d(8)])
+    """
+    Build the pixel semantic affinity dataset for COCO and VOC
+    """
+    if args.dataset == 'COCO':
+        train_dataset = COCOAffDatasetCRF(
+            img_name_list_path=args.train_list, 
+            cam_npy_dir=args.cam_out_dir,
+            coco_root=args.coco_root, 
+            cropsize=args.crop_size, 
+            low_alpha=args.low_alpha, 
+            high_alpha=args.high_alpha,
+            radius=args.radius,
+            joint_transform_list=[
+                None,
+                None,
+                imutils.RandomCrop(args.crop_size),
+                imutils.RandomHorizontalFlip()],
+            img_transform_list=[
+                transforms.ColorJitter(brightness=0.25, contrast=0.25, saturation=0.25, hue=0.1),
+                np.asarray,
+                Normalize(),
+                imutils.HWC_to_CHW],
+            label_transform_list=[
+                None,
+                None,
+                None,
+                imutils.AvgPool2d(8)])
+    
+    elif args.dataset == 'VOC':
+        train_dataset = VOC12AffDatasetCRF(
+            img_name_list_path=args.train_list, 
+            cam_npy_dir=args.cam_out_dir,
+            voc12_root=args.voc12_root, 
+            cropsize=args.crop_size, 
+            low_alpha=args.low_alpha, 
+            high_alpha=args.high_alpha,
+            radius=args.radius,
+            joint_transform_list=[
+                None,
+                None,
+                imutils.RandomCrop(args.crop_size),
+                imutils.RandomHorizontalFlip()],
+            img_transform_list=[
+                transforms.ColorJitter(brightness=0.25, contrast=0.25, saturation=0.25, hue=0.1),
+                np.asarray,
+                Normalize(),
+                imutils.HWC_to_CHW],
+            label_transform_list=[
+                None,
+                None,
+                None,
+                imutils.AvgPool2d(8)])
+    else:
+        raise NotImplementedError
         
     return train_dataset
 
@@ -168,13 +194,29 @@ def build_train_dataloader(train_dataset, args):
     
     
 def build_infer_dataset(args):
-    infer_dataset = VOC12ImageDataset(
-        args.infer_list, 
-        voc12_root=args.voc12_root,
-        transform=torchvision.transforms.Compose(
-            [np.asarray,
-             Normalize(),
-             imutils.HWC_to_CHW]))
+    """
+    Build the pixel semantic affinity dataset for COCO and VOC
+    """
+    if args.dataset == 'COCO':
+        infer_dataset = COCOImageDataset(
+            img_name_list_path=args.train_list, 
+            coco_root=args.coco_root,
+            transform=torchvision.transforms.Compose(
+                [np.asarray,
+                Normalize(),
+                imutils.HWC_to_CHW]))
+        
+    elif args.dataset == 'VOC':
+        infer_dataset = VOC12ImageDataset(
+            args.infer_list, 
+            voc12_root=args.voc12_root,
+            transform=torchvision.transforms.Compose(
+                [np.asarray,
+                Normalize(),
+                imutils.HWC_to_CHW]))
+    else:
+        raise NotImplementedError
+    
     return infer_dataset # name, img-> C x H x W
 
 
@@ -185,7 +227,7 @@ def build_infer_dataloader(args, infer_dataset):
         num_workers=args.num_workers, 
         pin_memory=False) 
     return infer_data_loader
-    
+
 
 def _work(process_id, model, dataset, args):
     n_gpus = torch.cuda.device_count()
@@ -197,56 +239,77 @@ def _work(process_id, model, dataset, args):
         pin_memory=False) 
     
     stride = 8
+    
     with torch.no_grad(), cuda.device(process_id):
         model.cuda()
-        
         for iter_, (name, img) in enumerate(
                 tqdm(data_loader, position=process_id, desc=f'[PID{process_id}]')):
             name = name[0]
+            
+            # if osp.exists(osp.join(args.seg_out_dir, name + '.png')):
+            #     continue
+            
             original_shape = img.shape
-            padded_size = (int(np.ceil(img.shape[2] / stride) * stride), int(np.ceil(img.shape[3] / stride) * stride))
-            p2d = (0, padded_size[1] - img.shape[3], 0, padded_size[0] - img.shape[2])
-            img = F.pad(img, p2d)
-
+            min_size = 2 * args.radius * stride
+            
+            if original_shape[3] < min_size:
+                pad_w = min_size - img.shape[3]
+            else:
+                pad_w = int(np.ceil(img.shape[3] / stride) * stride) - img.shape[3]
+            
+            if original_shape[2] < min_size:
+                pad_h = min_size - img.shape[2]
+            else:
+                pad_h = int(np.ceil(img.shape[2] / stride) * stride) - img.shape[2]
+                    
+            p2d = (0, pad_w, 0, pad_h)
+            
+            img = F.pad(img, p2d)   
             dheight = int(np.ceil(img.shape[2] / stride))
             dwidth = int(np.ceil(img.shape[3] / stride))
-
-            cam = np.load(osp.join(args.cam_out_dir, name + '.npy'), allow_pickle=True).item()
-
+            
+            cam_dict = np.load(osp.join(args.cam_out_dir, name + '.npy'), allow_pickle=True).item()
+            
+            if len(tuple(cam_dict.keys())) == 0:
+                cam = np.zeros((original_shape[2], original_shape[3]), np.uint8)
+                mask = Image.fromarray(cam, mode='P')
+                mask.save(osp.join(args.seg_out_dir, name + '.png'))
+                continue
+            
             cam_full_arr = np.zeros((args.num_classes, original_shape[2], original_shape[3]), np.float32)
-            for k, v in cam.items():
+            for k, v in cam_dict.items():
                 cam_full_arr[k + 1] = v
 
             cam_full_arr[0] = args.threshold
             cam_full_arr = np.pad(cam_full_arr, ((0, 0), (0, p2d[3]), (0, p2d[1])), mode='constant')
 
-            aff_mat = torch.pow(model.forward(img.cuda(), True), args.beta)
-            trans_mat = aff_mat / torch.sum(aff_mat, dim=0, keepdim=True)
-            
-            for _ in range(args.logt):
-                trans_mat = torch.matmul(trans_mat, trans_mat)
+            with torch.no_grad():
+                aff_mat = torch.pow(model.forward(img.cuda(), to_dense=True), args.beta)
+                trans_mat = aff_mat / torch.sum(aff_mat, dim=0, keepdim=True)
+                for _ in range(args.logt):
+                    trans_mat = torch.matmul(trans_mat, trans_mat)
 
-            cam_full_arr = torch.from_numpy(cam_full_arr)
-            cam_full_arr = F.avg_pool2d(cam_full_arr, stride, stride)
-
-            cam_vec = cam_full_arr.view(args.num_classes, -1)
-            cam_rw = torch.matmul(cam_vec.cuda(), trans_mat)
-            cam_rw = cam_rw.view(1, args.num_classes, dheight, dwidth)
-
-            cam_rw = F.interpolate(
-                input=cam_rw,
-                size=(img.shape[2], img.shape[3]), 
-                mode='bilinear', 
-                align_corners=False)
-            _, cam_rw_pred = torch.max(cam_rw, 1)
-                
-            res = np.uint8(cam_rw_pred.cpu().data[0])[:original_shape[2], :original_shape[3]]
+                cam_full_arr = torch.from_numpy(cam_full_arr)
+                cam_full_arr = F.avg_pool2d(cam_full_arr, stride, stride)
             
-            # put_palette(res, osp.join(args.seg_out_dir, name + '.png'))
-            mask = Image.fromarray(res, mode='P')
-            mask.save(osp.join(args.seg_out_dir, name + '.png'))
-            
-        
+                cam_vec = cam_full_arr.view(args.num_classes, -1)
+                cam_rw = torch.matmul(cam_vec.cuda(), trans_mat)
+                cam_rw = cam_rw.view(1, args.num_classes, dheight, dwidth)
+                cam_rw = F.interpolate(
+                    input=cam_rw,
+                    size=(img.shape[2], img.shape[3]), 
+                    mode='bilinear', 
+                    align_corners=False)
+                _, cam_rw_pred = torch.max(cam_rw, 1)
+                    
+                res = np.uint8(cam_rw_pred.cpu().data[0])[:original_shape[2], :original_shape[3]]
+                mask = Image.fromarray(res, mode='P')
+                mask.save(osp.join(args.seg_out_dir, name + '.png'))
+
+            if process_id == n_gpus - 1 and iter_ % (len(databin) // 20) == 0:
+                print("%d " % ((5*iter_+1)//(len(databin) // 20)), end='')
+
+
 def train_affinity(args):
     init_distributed_mode(args)
     device = torch.device(args.device)
@@ -379,4 +442,4 @@ if __name__ == '__main__':
         
     if args.inference:
         infer_affinity(args)
-    
+       
