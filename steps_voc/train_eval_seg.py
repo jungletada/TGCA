@@ -21,8 +21,8 @@ sys.path.append(osp.dirname(__file__) + os.sep + '../')
 import logging
 import utils 
 from utils import str2bool
-from seg_tool import imutils,  pyutils, torchutils
-from seg_tool.metrics import Evaluator
+from misc import imutils, pyutils, torchutils
+from misc import Evaluator
 from data.voc12.dataloader import VOCAugSegmentationDataset
 from net.resnet38d_seg import ResNet38d_Seg
 cudnn.enabled = True
@@ -153,7 +153,7 @@ def train(args):
     model = ResNet38d_Seg(num_classes=args.num_classes)
     model.load_state_dict(torch.load(args.init_weights), strict=False)
     
-    optimizer = torchutils.PolyOptimizerSGD(
+    optimizer = torchutils.PolyOptimizer(
         params=[
             {'params': model.get_1x_lr_params(), 'lr': args.lr},
             {'params': model.get_10x_lr_params(), 'lr': 10 * args.lr}], 
@@ -284,7 +284,8 @@ def evaluate(args):
             
             if args.use_crf:
                 original_image = original_images.cpu().data[0].numpy()
-                crf_output = imutils.crf_inference_inf(original_image, output, labels=args.num_classes)
+                crf_output = imutils.crf_inference_inf(
+                    original_image, output, labels=args.num_classes)
                 pred = np.argmax(crf_output, 0)
             else:
                 pred = np.argmax(output, axis=0)

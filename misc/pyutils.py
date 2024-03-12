@@ -3,6 +3,7 @@ import numpy as np
 import time
 import sys
 
+
 class Logger(object):
     def __init__(self, outfile):
         self.terminal = sys.stdout
@@ -84,7 +85,6 @@ class Timer:
 
 
 def to_one_hot(sparse_integers, maximum_val=None, dtype=np.bool_):
-
     if maximum_val is None:
         maximum_val = np.max(sparse_integers) + 1
 

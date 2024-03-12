@@ -283,11 +283,12 @@ class SpatialFuseModule(nn.Module):
                       
             
 class SemanticGraph(nn.Module):
-    def __init__(self, kernel_size=9, num_classes=20, drop_path=0., dilation=1):
+    def __init__(self, kernel_size=9, num_classes=20, mid_channels=64, drop_path=0., dilation=1):
         super().__init__()
         
         self.grapher = Grapher(
             in_channels=num_classes, 
+            mid_channels=mid_channels,
             kernel_size=kernel_size, 
             dilation=dilation, 
             conv='mr', 
@@ -309,15 +310,15 @@ class SemanticSpatialModule(nn.Module):
                  query_dim, 
                  key_dim, 
                  num_classes=20, 
-                 num_heads=8, 
+                 mid_channels=64,
                  attn_drop=0., 
                  proj_drop=0., 
                  qkv_bias=True,
                  drop_path=0., 
-                 norm_layer=nn.LayerNorm, 
                  mask_ratio=0.1, 
-                 kernel_size=9, 
-                 dilation=1):
+                 kernel_dict=9, 
+                 dilation_dict=1,
+                 norm_layer=nn.LayerNorm,):
         super().__init__()
         self.norm1 = norm_layer(query_dim)
         self.norm2 = norm_layer(key_dim)
@@ -325,9 +326,7 @@ class SemanticSpatialModule(nn.Module):
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.Cls = num_classes
         self.mask_ratio = mask_ratio
-        self.num_heads = num_heads
         self.dim = min(query_dim, key_dim)
-        self.head_dim = self.dim // num_heads
         self.scale = self.Cls ** -0.5
         
         self.proj_q = nn.Linear(query_dim, self.dim, bias=qkv_bias)
@@ -339,16 +338,18 @@ class SemanticSpatialModule(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
         
         self.graph_b = SemanticGraph(
-            kernel_size=kernel_size,
+            kernel_size=kernel_dict,
             num_classes=num_classes,
+            mid_channels=mid_channels,
             drop_path=drop_path,
-            dilation=dilation)
+            dilation=dilation_dict)
         
         self.graph_s = SemanticGraph(
-            kernel_size=kernel_size,
+            kernel_size=kernel_dict,
             num_classes=num_classes,
+            mid_channels=mid_channels,
             drop_path=drop_path,
-            dilation=dilation)
+            dilation=dilation_dict)
         
         self.mlp = MLP(
             in_features=self.dim, 
@@ -357,13 +358,12 @@ class SemanticSpatialModule(nn.Module):
 
     def weighted_tokens(self, x, base=0.9):
         C, N = x.shape[1:]
-        weights = torch.logspace(start=0, end=C-1, steps=C, base=base)
-        weights = weights.unsqueeze(-1)
+        weights = torch.logspace(start=0, end=C-1, steps=C, base=base).unsqueeze(-1)
+        x = x.softmax(dim=1)
         x_sorted, indices = torch.sort(x, dim=1, descending=True)
         weighted_sorted = x_sorted * weights.to(x.device)
-        result = torch.zeros_like(x).float()
+        result = torch.empty_like(x)
         inv_indices = indices.argsort(dim=1)
-        # Scatter the weighted values to their original positions
         result.scatter_(1, inv_indices, weighted_sorted)
         return result
     

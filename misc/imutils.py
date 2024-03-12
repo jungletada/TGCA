@@ -2,6 +2,7 @@ import random
 import numpy as np
 import pydensecrf.densecrf as dcrf
 from pydensecrf.utils import unary_from_labels
+from pydensecrf.utils import unary_from_softmax
 from PIL import Image
 
 
@@ -36,9 +37,7 @@ def random_resize_long(img, min_long, max_long):
 
 
 def random_scale(img, scale_range, order):
-
     target_scale = scale_range[0] + random.random() * (scale_range[1] - scale_range[0])
-
     if isinstance(img, tuple):
         return (pil_rescale(img[0], target_scale, order[0]), pil_rescale(img[1], target_scale, order[1]))
     else:
@@ -46,7 +45,6 @@ def random_scale(img, scale_range, order):
 
 
 def random_lr_flip(img):
-
     if bool(random.getrandbits(1)):
         if isinstance(img, tuple):
             return [np.fliplr(m) for m in img]
@@ -58,7 +56,6 @@ def random_lr_flip(img):
 
 def get_random_crop_box(imgsize, cropsize):
     h, w = imgsize
-
     ch = min(cropsize, h)
     cw = min(cropsize, w)
 
@@ -83,7 +80,6 @@ def get_random_crop_box(imgsize, cropsize):
 
 
 def random_crop(images, cropsize, default_values):
-
     if isinstance(images, np.ndarray): images = (images,)
     if isinstance(default_values, int): default_values = (default_values,)
 
@@ -108,7 +104,6 @@ def random_crop(images, cropsize, default_values):
 
 def top_left_crop(img, cropsize, default_value):
     h, w = img.shape[:2]
-
     ch = min(cropsize, h)
     cw = min(cropsize, w)
 
@@ -123,12 +118,9 @@ def top_left_crop(img, cropsize, default_value):
 
 
 def center_crop(img, cropsize, default_value=0):
-
     h, w = img.shape[:2]
-
     ch = min(cropsize, h)
     cw = min(cropsize, w)
-
     sh = h - cropsize
     sw = w - cropsize
 
@@ -174,6 +166,25 @@ def crf_inference_label(img, labels, t=10, n_labels=21, gt_prob=0.7):
     q = d.inference(t) 
     
     return np.argmax(np.array(q).reshape((n_labels, h, w)), axis=0)
+
+
+def crf_inference_inf(img, probs, t=10, scale_factor=1, labels=21):
+    h, w = img.shape[:2]
+    n_labels = labels
+
+    d = dcrf.DenseCRF2D(w, h, n_labels)
+
+    unary = unary_from_softmax(probs)
+    unary = np.ascontiguousarray(unary)
+
+    img_c = np.ascontiguousarray(img)
+
+    d.setUnaryEnergy(unary)
+    d.addPairwiseGaussian(sxy=4/scale_factor, compat=3)
+    d.addPairwiseBilateral(sxy=83/scale_factor, srgb=5, rgbim=np.copy(img_c), compat=3)
+    Q = d.inference(t)
+
+    return np.array(Q).reshape((n_labels, h, w))
 
 
 def crf_with_alpha(img, cams, alpha, n_labels):
@@ -237,7 +248,6 @@ def colorize_score(score_map, exclude_zero=False, normalize=True, by_hue=False):
 
 
 def colorize_displacement(disp):
-
     import matplotlib.colors
     import math
 
@@ -252,7 +262,6 @@ def colorize_displacement(disp):
 
 
 def colorize_label(label_map, normalize=True, by_hue=True, exclude_zero=False, outline=False):
-
     label_map = label_map.astype(np.uint8)
 
     if by_hue:

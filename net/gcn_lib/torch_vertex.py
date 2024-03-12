@@ -146,21 +146,21 @@ class Grapher(nn.Module):
     """
     Grapher module with graph convolution and fc layers
     """
-    def __init__(self, in_channels, kernel_size=9, dilation=1, conv='edge', act='relu', norm=None,
+    def __init__(self, in_channels, mid_channels=64, kernel_size=9, dilation=1, conv='edge', act='relu', norm=None,
                  bias=True, stochastic=False, epsilon=0.0, r=1, n=784, drop_path=0.0, relative_pos=False):
         super(Grapher, self).__init__()
         self.channels = in_channels
         self.n = n # number of patches
         self.r = r # reduced ratio
         self.fc1 = nn.Sequential(
-            nn.Conv2d(in_channels, in_channels, 1, stride=1, padding=0),
-            nn.BatchNorm2d(in_channels),)
+            nn.Conv2d(in_channels, mid_channels, 1, stride=1, padding=0),
+            nn.BatchNorm2d(mid_channels),)
         
-        self.graph_conv = DyGraphConv2d(in_channels, in_channels * 2, kernel_size, dilation, conv,
+        self.graph_conv = DyGraphConv2d(mid_channels, mid_channels * 2, kernel_size, dilation, conv,
                               act, norm, bias, stochastic, epsilon, r)
         
         self.fc2 = nn.Sequential(
-            nn.Conv2d(in_channels * 2, in_channels, 1, stride=1, padding=0),
+            nn.Conv2d(mid_channels * 2, in_channels, 1, stride=1, padding=0),
             nn.BatchNorm2d(in_channels),)
         
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
@@ -189,7 +189,7 @@ class Grapher(nn.Module):
         residual + |FC->Graph->FC2| 
         """
         _tmp = x
-        x = x + self.fc1(x)
+        x = self.fc1(x)
         B, C, H, W = x.shape
         relative_pos = self._get_relative_pos(self.relative_pos, H, W)
         x = self.graph_conv(x, relative_pos)

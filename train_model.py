@@ -10,6 +10,7 @@ import torch
 import logging
 import numpy as np
 import torch.nn as nn
+import torch.nn.functional as F
 
 from timm.models import create_model
 from timm.scheduler import create_scheduler
@@ -174,11 +175,15 @@ def init_distributed_mode(args):
     
     
 def load_model_weight(args, model):
+    model_npatches = model.patch_embed.num_patches
     if args.finetune.startswith('https'):
         checkpoint = torch.hub.load_state_dict_from_url(
             args.finetune, map_location='cpu', check_hash=True)
-    else: checkpoint = torch.load(args.finetune, map_location='cpu')
-
+        num_extra_tokens = 1
+    else: 
+        checkpoint = torch.load(args.finetune, map_location='cpu')
+        num_extra_tokens = model.pos_embed.shape[-2] - model_npatches
+        
     try: checkpoint_model = checkpoint['model']
     except: checkpoint_model = checkpoint
         
@@ -189,32 +194,24 @@ def load_model_weight(args, model):
             del checkpoint_model[k]
 
     # interpolate position embedding
-    pos_embed_checkpoint = checkpoint_model['pos_embed']
-    embedding_size = pos_embed_checkpoint.shape[-1]
-    num_patches = model.patch_embed.num_patches
-    Np = int(args.input_size // model.patch_embed.patch_size[0])
-    
-    if args.finetune.startswith('https'):
-        num_extra_tokens = 1
-    else:
-        num_extra_tokens = model.pos_embed.shape[-2] - num_patches
+    ckpt_pos_embed = checkpoint_model['pos_embed']
+    embedding_size = ckpt_pos_embed.shape[-1]
 
-    original_size = int((pos_embed_checkpoint.shape[-2] - num_extra_tokens) ** 0.5)
+    original_size = int((ckpt_pos_embed.shape[-2] - num_extra_tokens) ** 0.5)
 
     if args.finetune.startswith('https'):
-        extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens].repeat(1, args.nb_classes, 1)
+        extra_tokens = ckpt_pos_embed[:, :num_extra_tokens].repeat(1, args.nb_classes, 1)
     else:
-        extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
+        extra_tokens = ckpt_pos_embed[:, :num_extra_tokens]
 
-    pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
+    pos_tokens = ckpt_pos_embed[:, num_extra_tokens:]
 
     pos_tokens = pos_tokens.reshape( # (1, Hp, Wp, C)->(1, C, Hp, Wp)
         -1, original_size, original_size, embedding_size).permute(0, 3, 1, 2)
     
-    import torch.nn.functional as F
     pos_tokens = F.interpolate(
             input=pos_tokens,
-            size=(Np, Np),
+            size=(model.Hp, model.Wp),
             mode='bicubic',
             align_corners=False)
     
@@ -236,11 +233,18 @@ def ddp_print(logger, log_msg):
          logger.info(log_msg)
 
 
-def train_one_epoch(model, data_loader, optimizer, device, epoch,
-        loss_scaler, max_norm, set_training_mode=True):
+def train_one_epoch(
+    model, 
+    data_loader, 
+    optimizer, 
+    device, 
+    epoch,
+    loss_scaler, 
+    max_norm, 
+    set_training_mode=True):
     print_freq = 10
     model.train(set_training_mode)
-    criterion = nn.MultiLabelSoftMarginLoss(weight=None)
+    criterion = nn.MultiLabelSoftMarginLoss()
     
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
@@ -249,7 +253,7 @@ def train_one_epoch(model, data_loader, optimizer, device, epoch,
     for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
-        
+
         with torch.cuda.amp.autocast():
             outputs = model(samples)
 
@@ -346,10 +350,8 @@ def evaluate(data_loader, model, device):
         batch_size = images.shape[0]
 
         with torch.cuda.amp.autocast():
-            output = model(images)
-            cls_out = output[0]
+            cls_out = model(images)[0]
             loss = criterion(cls_out, target)
-            
             cls_out = torch.sigmoid(cls_out)
             mAP_list = compute_mAP(target, cls_out)
             mAP = mAP + mAP_list
@@ -408,7 +410,9 @@ def main(args):
     utils.data_mkdir(args.work_space)
     
     utils.logger_info(logger_name=session_name, 
-                      log_path=os.path.join(args.work_space, f'train_cam_{args.data_set}.log'))
+                      log_path=os.path.join(
+                          args.work_space, 
+                          f'train_cam_{args.data_set}.log'))
     logger = logging.getLogger(session_name)
     ddp_print(logger, f"Use seed: {args.seed}")
     

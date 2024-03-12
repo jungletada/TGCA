@@ -61,10 +61,9 @@ def get_args_parser():
     parser.add_argument("--wt_dec", default=5e-4, type=float)
     # dataset settings
     parser.add_argument("--dataset", default="COCO", type=str, help='choose `COCO` or `VOC`')
-    parser.add_argument("--num_classes", default=80, type=int)
     parser.add_argument("--crop_size", default=448, type=int)
     parser.add_argument("--low_alpha", default=1, type=float)
-    parser.add_argument("--high_alpha", default=3, type=float)
+    parser.add_argument("--high_alpha", default=2, type=float)
     parser.add_argument("--radius", default=5, type=int)
         
     # hyper parameters settings
@@ -141,7 +140,11 @@ def build_train_dataset(args):
                 imutils.RandomCrop(args.crop_size),
                 imutils.RandomHorizontalFlip()],
             img_transform_list=[
-                transforms.ColorJitter(brightness=0.25, contrast=0.25, saturation=0.25, hue=0.1),
+                transforms.ColorJitter(
+                    brightness=0.3, 
+                    contrast=0.3, 
+                    saturation=0.3, 
+                    hue=0.1),
                 np.asarray,
                 Normalize(),
                 imutils.HWC_to_CHW],
@@ -166,7 +169,11 @@ def build_train_dataset(args):
                 imutils.RandomCrop(args.crop_size),
                 imutils.RandomHorizontalFlip()],
             img_transform_list=[
-                transforms.ColorJitter(brightness=0.25, contrast=0.25, saturation=0.25, hue=0.1),
+                transforms.ColorJitter(
+                    brightness=0.35, 
+                    contrast=0.35, 
+                    saturation=0.35, 
+                    hue=0.1),
                 np.asarray,
                 Normalize(),
                 imutils.HWC_to_CHW],
@@ -245,10 +252,8 @@ def _work(process_id, model, dataset, args):
         for iter_, (name, img) in enumerate(
                 tqdm(data_loader, position=process_id, desc=f'[PID{process_id}]')):
             name = name[0]
-            
             # if osp.exists(osp.join(args.seg_out_dir, name + '.png')):
             #     continue
-            
             original_shape = img.shape
             min_size = 2 * args.radius * stride
             
@@ -317,7 +322,6 @@ def train_affinity(args):
     same_seeds(args.seed)
     
     args.cam_out_dir = osp.join(args.work_space, args.cam_out_dir) 
-
     pyutils.Logger(osp.join(args.work_space, 'res38_aff.log'))
     
     train_dataset = build_train_dataset(args)
@@ -436,6 +440,13 @@ def infer_affinity(args):
     
 if __name__ == '__main__':
     args = get_args_parser()
+    
+    if args.dataset == 'COCO':
+        args.num_classes = 80 
+    elif args.dataset == 'VOC':
+        args.num_classes = 20 
+    else:
+        raise NotImplementedError
     
     if args.train:
         train_affinity(args)

@@ -12,28 +12,25 @@ from net.base_vit import VisionTransformer, _cfg
 
 __all__ = ['deit_small_mctgformer']
 
-    
+
 class MCTGFormer(VisionTransformer):
-    def __init__(self, decay_parameter=0.996, input_size=448, *args, **kwargs):
+    def __init__(self, decay_parameter=0.996, input_size=448, gnn_channels=64, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        
         self.stages = 4 # fixed
         interval = int(self.depth // self.stages)
         self.stage_indices = tuple(i for i in range(0, self.depth + 1, interval))
         
-        self.head = nn.Conv2d(self.embed_dim, self.num_classes, kernel_size=3, stride=1, padding=1)
-        
         img_size = to_2tuple(input_size)
         patch_size = to_2tuple(self.patch_embed.patch_size)
-        num_patches = (img_size[1] // patch_size[1]) * (img_size[0] // patch_size[0])
-        self.num_patches = num_patches
-        
+        self.Hp, self.Wp = img_size[0] // patch_size[0], img_size[1] // patch_size[1]
+        self.num_patches = self.Hp * self.Wp
         self.spatial_dims = [self.embed_dim] * self.stages
         self.spatial_scales = (8, 16, 32, 64)   # fixed
         self.spatial_strides = (2, 2, 2)        # fixed
         self.mask_ratios = [0.4, 0.3, 0.2, 0.1]
         self.dilations = [1, 2, 2, 2]
         self.num_knn = [18, 14, 10, 6]          # number of knn's k
+        self.decay_parameter = decay_parameter
         
         self.spatial_sizes = [(img_size[0]//scale, img_size[1]//scale) 
                               for scale in self.spatial_scales]
@@ -46,16 +43,14 @@ class MCTGFormer(VisionTransformer):
             
         self.cls_token = nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim))
         self.pos_embed_cls = nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim))
-        self.pos_embed_pat = nn.Parameter(torch.zeros(1, num_patches, self.embed_dim))
+        self.pos_embed_pat = nn.Parameter(torch.zeros(1, self.num_patches, self.embed_dim))
 
         trunc_normal_(self.cls_token, std=.02)
         trunc_normal_(self.pos_embed_cls, std=.02)
         trunc_normal_(self.pos_embed_pat, std=.02)
         
         self.avgpool2d = nn.AdaptiveAvgPool2d(1)
-       
         self.proj_cls_embed = nn.Linear(self.stages, self.num_classes)
-        self.decay_parameter = decay_parameter
         
         self.spatial_prior = SpatialPriorModule(
             inplanes=64, 
@@ -66,15 +61,15 @@ class MCTGFormer(VisionTransformer):
                 query_dim=self.spatial_dims[i], 
                 key_dim=self.embed_dim, 
                 num_classes=self.num_classes, 
-                num_heads=6, 
+                mid_channels=gnn_channels,
                 attn_drop=0., 
                 proj_drop=0., 
                 drop_path=0., 
                 qkv_bias=True, 
                 norm_layer=nn.LayerNorm, 
                 mask_ratio=self.mask_ratios[i],
-                kernel_size=self.num_knn[i], 
-                dilation=self.dilations[i])
+                kernel_dict=self.num_knn[i], 
+                dilation_dict=self.dilations[i])
             for i in range(self.stages)])
         
         self.down_convs = nn.ModuleList([
@@ -89,23 +84,20 @@ class MCTGFormer(VisionTransformer):
             nn.BatchNorm2d(self.embed_dim),
             nn.GELU())
         
-    def interpolate_pos_encoding(self, x, h, w):
-        npatch = x.shape[1] - self.num_classes
-        N = self.num_patches
-        if npatch == N and h == w:
-            return self.pos_embed_pat
+        self.head = nn.Conv2d(
+            self.embed_dim, self.num_classes, kernel_size=3, stride=1, padding=1)
         
+    def interpolate_pos_encoding(self, x, token_size):
+        if self.Hp == token_size[0] and self.Wp == token_size[1]:
+            return self.pos_embed_pat
         patch_pos_embed = self.pos_embed_pat
-        h0 = h // self.patch_embed.patch_size[0]
-        w0 = w // self.patch_embed.patch_size[1]
+        
         dim = x.shape[-1]
-        Np = int(math.sqrt(N))
         patch_pos_embed = F.interpolate(
-            patch_pos_embed.reshape(1, Np, Np, dim).permute(0, 3, 1, 2),
-            size=(h0, w0),
+            patch_pos_embed.reshape(1, self.Hp, self.Wp, dim).permute(0, 3, 1, 2),
+            size=token_size,
             mode='bilinear',
             align_corners=False)
-        assert h0 == patch_pos_embed.shape[-2] and w0 == patch_pos_embed.shape[-1]
         patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
         return patch_pos_embed
 
@@ -149,7 +141,7 @@ class MCTGFormer(VisionTransformer):
                       W // self.patch_embed.patch_size[1])
         
         if not self.training:
-            pos_embed_pat = self.interpolate_pos_encoding(x, H, W)
+            pos_embed_pat = self.interpolate_pos_encoding(x, token_size=token_size)
             x = x + pos_embed_pat
             sptial_pos_embed = self.interpolate_spatial_pos_encoding(x_spatial)
             for i in range(self.stages):
@@ -296,7 +288,7 @@ class MCTGFormer_CAM(MCTGFormer):
         out_spatial = self.head(out_spatial)  # B x Cls x Hp x Wp
         cams = self.forward_attention(
             out_spatial, attn_weights, fuse_layers=3)
-        
+
         return cams
 
 
