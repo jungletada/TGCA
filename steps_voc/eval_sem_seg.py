@@ -9,7 +9,7 @@ from data.voc12.dataloader_psa import VOCSegmentationLabelDataset
 from engine import calc_semantic_segmentation_confusion
 
 
-def run(args):
+def run_eval_seg(args):
     dataset = VOCSegmentationLabelDataset(
         data_dir=args.voc12_root,
         id_list_file='configs/voc12/train_id.txt')
@@ -49,4 +49,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     args.seg_out_dir = osp.join(args.work_space, args.seg_out_dir)
-    run(args=args)
+    run_eval_seg(args=args)

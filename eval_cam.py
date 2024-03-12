@@ -1,21 +1,13 @@
-import os,sys
-import datetime
-import os.path as osp
 import torch
+import datetime
 import argparse
 import numpy as np
-
-sys.path.append(osp.dirname(__file__) + os.sep + '../')
-from data.voc12.dataloader_psa import VOCSegmentationLabelDataset
+import os.path as osp
 from engine import calc_semantic_segmentation_confusion
 
     
-def run_eval_cam(args):
+def run_eval_cam(args, dataset):
     f = open(args.log_file, "w")
-    dataset = VOCSegmentationLabelDataset( 
-        data_dir=args.voc12_root, 
-        id_list_file='configs/voc12/train_id.txt')
-    
     num_images = len(dataset)
     
     def eval_curve(threshold):
@@ -73,17 +65,26 @@ def run_eval_cam(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Evaluate CAMs', add_help=False)
     parser.add_argument('--voc12_root', default='datasets/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
+    parser.add_argument("--train_list", default="configs/voc12/train_aug_id.txt", type=str, 
+                        help='configs/coco/train_id.txt or configs/voc12/train_aug_id.txt')
+    
     parser.add_argument('--work_space', default='results_voc/your_model', help='work space directory')
     parser.add_argument('--eval_cam_dir', default='cam_mask', help='cam_mask directory')
     parser.add_argument('--log_file', default='eval_cam.log', type=str, 
                         help='log file to save the results')
+    
     parser.add_argument('--curve_threshold', action='store_true', help='whether to use a range of thresholds')
     parser.add_argument('--threshold', default=0.43, type=float, help='threshold for evaluation as background')
     args = parser.parse_args()
     #---------------------------------------------------------------#
     args.eval_cam_dir = osp.join(args.work_space, args.eval_cam_dir)
     args.log_file = osp.join(args.work_space, args.log_file)
-
-    run_eval_cam(args=args)
+    
+    from data.voc12.dataloader_psa import VOCSegmentationLabelDataset
+    dataset = VOCSegmentationLabelDataset( 
+        data_dir=args.voc12_root, 
+        id_list_file=args.train_list)
+    
+    run_eval_cam(args=args, dataset=dataset)
     
     

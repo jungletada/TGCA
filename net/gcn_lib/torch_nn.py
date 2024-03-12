@@ -58,7 +58,7 @@ class BasicConv(Seq):
     def __init__(self, channels, act='relu', norm=None, bias=True, drop=0.):
         m = []
         for i in range(1, len(channels)):
-            m.append(Conv2d(channels[i - 1], channels[i], 1, bias=bias, groups=4))
+            m.append(Conv2d(channels[i - 1], channels[i], 1, bias=bias, groups=4)) # groups=4
             if norm is not None and norm.lower() != 'none':
                 m.append(norm_layer(norm, channels[-1]))
             if act is not None and act.lower() != 'none':

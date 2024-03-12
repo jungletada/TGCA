@@ -153,15 +153,15 @@ class Grapher(nn.Module):
         self.n = n # number of patches
         self.r = r # reduced ratio
         self.fc1 = nn.Sequential(
-            nn.Conv2d(in_channels, mid_channels, 1, stride=1, padding=0),
-            nn.BatchNorm2d(mid_channels),)
+            nn.Conv2d(in_channels, in_channels, 1, stride=1, padding=0),
+            ) # nn.BatchNorm2d(in_channels),
         
-        self.graph_conv = DyGraphConv2d(mid_channels, mid_channels * 2, kernel_size, dilation, conv,
+        self.graph_conv = DyGraphConv2d(in_channels, mid_channels, kernel_size, dilation, conv,
                               act, norm, bias, stochastic, epsilon, r)
         
         self.fc2 = nn.Sequential(
-            nn.Conv2d(mid_channels * 2, in_channels, 1, stride=1, padding=0),
-            nn.BatchNorm2d(in_channels),)
+            nn.Conv2d(mid_channels, in_channels, 1, stride=1, padding=0),
+            ) # nn.BatchNorm2d(in_channels),
         
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.relative_pos = None
@@ -186,7 +186,7 @@ class Grapher(nn.Module):
 
     def forward(self, x):
         """
-        residual + |FC->Graph->FC2| 
+        residual + |FC1->Graph->FC2| 
         """
         _tmp = x
         x = self.fc1(x)

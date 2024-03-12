@@ -30,13 +30,12 @@ def load_image_label_list_from_npy_coco(img_name_list):
 
 
 class COCOClsDataset(Dataset):
-    def __init__(self, coco_root, train=True, transform=None):
-        img_name_list_path = os.path.join('configs/coco', f'{"train" if train else "val"}_id.txt')
-        self.img_name_list = load_img_name_list(img_name_list_path)
+    def __init__(self, coco_root, list_path=True, transform=None):
+        self.img_name_list = load_img_name_list(list_path)
         self.label_list = load_image_label_list_from_npy_coco(self.img_name_list)
         self.coco_root = coco_root
         self.transform = transform
-        self.train = train
+        self.train = 'train' in list_path
 
     def __getitem__(self, idx):
         name = self.img_name_list[idx]
@@ -56,14 +55,12 @@ class COCOClsDataset(Dataset):
 
 
 class COCOClsDatasetMS(Dataset):
-    def __init__(self, coco_root, scales, train=True, transform=None, unit=1):
-        img_name_list_path = os.path.join(
-            'configs/coco', f'{"train" if train else "val"}_id.txt')
-        self.img_name_list = load_img_name_list(img_name_list_path)
+    def __init__(self, coco_root, scales, list_path, transform=None, unit=1):
+        self.img_name_list = load_img_name_list(list_path)
         self.label_list = load_image_label_list_from_npy_coco(self.img_name_list)
         self.coco_root = coco_root
         self.transform = transform
-        self.train = train
+        self.train = 'train' in list_path
         self.unit = unit
         self.scales = scales
 
@@ -100,8 +97,8 @@ class COCOClsDatasetMS(Dataset):
 
 
 class VOC12Dataset(Dataset):
-    def __init__(self, voc12_root, infer_list, transform=None):
-        self.img_name_list = load_img_name_list(infer_list)
+    def __init__(self, voc12_root, list_path, transform=None):
+        self.img_name_list = load_img_name_list(list_path)
         self.label_list = load_image_label_list_from_npy_voc(self.img_name_list)
         self.voc12_root = voc12_root
         self.transform = transform
@@ -120,8 +117,8 @@ class VOC12Dataset(Dataset):
 
 
 class VOC12DatasetMS(Dataset):
-    def __init__(self, voc12_root, infer_list, scales, transform=None, unit=1):
-        self.img_name_list = load_img_name_list(infer_list)
+    def __init__(self, voc12_root, list_path, scales, transform=None, unit=1):
+        self.img_name_list = load_img_name_list(list_path)
         self.label_list = load_image_label_list_from_npy_voc(self.img_name_list)
         self.voc12_root = voc12_root
         self.transform = transform
@@ -205,33 +202,33 @@ def build_dataset(is_train, make_cam, args):
     dataset = None
     nb_classes = None
 
-    if args.data_set == 'VOC12':
+    if args.dataset == 'VOC12':
         dataset = VOC12Dataset(
             voc12_root=args.voc12_root,
-            infer_list='configs/voc12/train_aug_id.txt',
+            list_path=args.train_list,
             transform=transform)
         nb_classes = 20
 
-    elif args.data_set == 'VOC12MS':
+    elif args.dataset == 'VOC12MS':
         dataset = VOC12DatasetMS(
             voc12_root=args.voc12_root,
-            infer_list=args.infer_list,
+            list_path=args.train_list,
             scales=tuple(args.scales),
             transform=transform)
         nb_classes = 20
 
-    elif args.data_set == 'COCO':
+    elif args.dataset == 'COCO':
         dataset = COCOClsDataset(
-            coco_root='datasets/MSCOCO', 
-            train=is_train, 
+            coco_root=args.coco_root, 
+            list_path=args.train_list, 
             transform=transform)
         nb_classes = 80
 
-    elif args.data_set == 'COCOMS':
+    elif args.dataset == 'COCOMS':
         dataset = COCOClsDatasetMS(
-            coco_root='datasets/MSCOCO', 
+            coco_root=args.coco_root, 
             scales=tuple(args.scales), 
-            train=is_train, 
+            list_path=args.train_list, 
             transform=transform)
         nb_classes = 80
 

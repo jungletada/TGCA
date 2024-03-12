@@ -14,7 +14,7 @@ __all__ = ['deit_small_mctgformer']
 
 
 class MCTGFormer(VisionTransformer):
-    def __init__(self, decay_parameter=0.996, input_size=448, gnn_channels=64, *args, **kwargs):
+    def __init__(self, decay_parameter=0.996, input_size=448, gnn_channels=128, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.stages = 4 # fixed
         interval = int(self.depth // self.stages)
@@ -225,10 +225,11 @@ class MCTGFormer(VisionTransformer):
 
 
 class MCTGFormer_CAM(MCTGFormer):
-    def __init__(self, *args, **kwargs):
-        super().__init__(decay_parameter=0.996, input_size=448, *args, **kwargs)
-    
-    def forward_attention(self, tokens, attn_weights, fuse_layers=12):
+    def __init__(self, fuse_layers=3, *args, **kwargs):
+        super().__init__(decay_parameter=0.996, input_size=448, gnn_channels=128, *args, **kwargs)
+        self.fuse_layers = fuse_layers
+        
+    def forward_attention(self, tokens, attn_weights):
         """
         Input: 
             patch_tokens: patch tokens from the last backbone layer
@@ -240,8 +241,8 @@ class MCTGFormer_CAM(MCTGFormer):
         """
         B, Cls, Hp, Wp = tokens.shape
         attn_weights = torch.mean(torch.stack(attn_weights), dim=2)     # L x B x (Cls+Np) x (Cls+Np) 
-        attn_maps = attn_weights[-fuse_layers:].mean(0)                 # B x (Cls+Np) x (Cls+Np)
         
+        attn_maps = attn_weights[-self.fuse_layers:].mean(0)                 # B x (Cls+Np) x (Cls+Np)
         cls2pat = attn_maps[:, :Cls, Cls:].reshape([B, Cls, Hp, Wp])    # B x Cls x Hp x Wp
         patch_cam = tokens.detach().clone()   # B x Cls x Hp x Wp
         patch_cam = F.relu(patch_cam)   # With ReLU Activation
@@ -287,7 +288,7 @@ class MCTGFormer_CAM(MCTGFormer):
         # class activation map
         out_spatial = self.head(out_spatial)  # B x Cls x Hp x Wp
         cams = self.forward_attention(
-            out_spatial, attn_weights, fuse_layers=3)
+            out_spatial, attn_weights)
 
         return cams
 

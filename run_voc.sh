@@ -6,69 +6,72 @@ echo "  |-- COCO dataset path: datasets/MSCOCO";
 # NEED TO SET
 GPU=0,1
 NODES=2
+DATASET=VOC12
 MODEL=mctgformer
 SEG_DIR=pseudo_mask
 CUDA_VISIBLE_DEVICES=${GPU}
 WORKDIR=results_voc/${MODEL}
 
 
-# ============= Train Model ===============#
-OMP_NUM_THREADS=${NODES} \
-torchrun --nproc_per_node=${NODES} --nnodes=1 \
-    train_model.py \
-    --model deit_small_mctgformer \
-    --work_space ${WORKDIR} \
-    --seed 2 \
-    --epoch 45 \
-    --batch_per_gpu 16 \
-    --data_set VOC12 \
-
-
-# ============= Make Class Activation Maps of Model=============#
-python steps_voc/make_cam.py \
-    --model deit_small_${MODEL} \
-    --work_space ${WORKDIR} \
-    --checkpoint ${WORKDIR}/deit_small_${MODEL}_best.pth \
-    --infer_list configs/voc12/train_id.txt \
-
-
-# ============= Evaluate Class Activation Maps =============#
-python steps_voc/eval_cam.py \
-    --curve_threshold \
-    --work_space ${WORKDIR} \
-
-
-# #============= Train and Infer Pixel Semantic Affnity =============#
+# # ============= Train Model ===============#
 # OMP_NUM_THREADS=${NODES} \
 # torchrun --nproc_per_node=${NODES} --nnodes=1 \
-#     train_infer_psa.py \
-#     --dataset VOC \
-#     --train True \
+#     train_model.py \
+#     --dataset ${DATASET} \
+#     --model deit_small_${MODEL} \
 #     --work_space ${WORKDIR} \
-#     --train_list configs/voc12/train_aug.txt \
-#     --weights checkpoints/res38_cls.pth \
-#     --seed 6 \
-#     --epoch 5 \
-#     --low_alpha 0.9 \
-#     --high_alpha 1.5 \
+#     --seed 1 \
+#     --epoch 45 \
+#     --batch_per_gpu 16 \
+    
 
-
-# #============= Infer with Pixel Semantic Affnity =============#
-# python train_infer_psa.py \
-#     --dataset VOC \
-#     --inference True \
+# # ============= Make Class Activation Maps of Model=============#
+# python make_cam.py \
+#     --dataset ${DATASET} \
+#     --model deit_small_${MODEL} \
 #     --work_space ${WORKDIR} \
-#     --infer_list configs/voc12/train.txt \
-#     --seg_out_dir ${SEG_DIR} \
-#     --beta 11 \
-#     --logt 7 \
-#     --threshold 0.47 \
+#     --checkpoint ${WORKDIR}/deit_small_${MODEL}_best.pth \
+#     --train_list configs/voc12/train_id.txt \
 
 
-# #============= Evaluate =============#
-# python steps_voc/eval_sem_seg.py \
+# # ============= Evaluate Class Activation Maps =============#
+# python eval_cam.py \
+#     --curve_threshold \
 #     --work_space ${WORKDIR} \
-#     --seg_out_dir ${SEG_DIR} \
+#     --train_list configs/voc12/train_id.txt \
+
+
+#============= Train and Infer Pixel Semantic Affnity =============#
+OMP_NUM_THREADS=${NODES} \
+torchrun --nproc_per_node=${NODES} --nnodes=1 \
+    train_infer_psa.py \
+    --dataset VOC \
+    --train True \
+    --work_space ${WORKDIR} \
+    --train_list configs/voc12/train_aug.txt \
+    --weights checkpoints/res38_cls.pth \
+    --seed 1 \
+    --epoch 5 \
+    --low_alpha 0.9 \
+    --high_alpha 1.6 \
+
+
+#============= Infer with Pixel Semantic Affnity =============#
+python train_infer_psa.py \
+    --dataset VOC \
+    --inference True \
+    --work_space ${WORKDIR} \
+    --infer_list configs/voc12/train.txt \
+    --seg_out_dir ${SEG_DIR} \
+    --beta 11 \
+    --logt 7 \
+    --threshold 0.47 \
+
+
+#============= Evaluate =============#
+python steps_voc/eval_sem_seg.py \
+    --work_space ${WORKDIR} \
+    --seg_out_dir ${SEG_DIR} \
 
 
 # # Save the generated mask to zip

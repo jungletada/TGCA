@@ -43,8 +43,10 @@ def get_args_parser():
     parser.add_argument("--work_space", default="results/MCTG", type=str)
     parser.add_argument("--cam_out_dir", default="cam_mask", type=str, help="cam mask path")
     parser.add_argument("--seg_out_dir", default="pseudo_mask", type=str, help="pesudo mask path")
-    parser.add_argument("--train_list", default="configs/coco/train_id.txt", type=str, help='image list path')
-    parser.add_argument('--infer_list', default='configs/coco/train_id.txt', type=str, help='image list path')
+    parser.add_argument("--train_list", default="configs/voc12/train_aug_id.txt", type=str, 
+                        help='configs/coco/train_id.txt or configs/voc12/train_aug_id.txt')
+    parser.add_argument('--infer_list', default='configs/coco/train_id.txt', type=str,
+                        help='configs/coco/train_id.txt or configs/voc12/train_id.txt')
     parser.add_argument("--weights", default='checkpoints/res38_cls.pth', type=str)
     # ddp settings
     parser.add_argument('--rank', default=0, type=int, help='rank of current process')  

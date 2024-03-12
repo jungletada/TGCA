@@ -122,8 +122,11 @@ def get_args_parser():
                         help='finetune from checkpoint')
 
     # Dataset parameters
-    parser.add_argument('--data_set', default='', type=str, help='name of dataset')
+    parser.add_argument('--dataset', default='', type=str, help='name of dataset')
     parser.add_argument('--voc12_root', default='datasets/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
+    parser.add_argument("--coco_root", default='datasets/MSCOCO', type=str, help="Path to MSCOCO")
+    parser.add_argument("--train_list", default="configs/voc12/train_aug_id.txt", type=str, 
+                        help='configs/coco/train_id.txt or configs/voc12/train_aug_id.txt')
     parser.add_argument('--checkpoint', default='', help='checkpoint for generating maps')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
@@ -393,7 +396,7 @@ def main(args):
     data_loader_val = torch.utils.data.DataLoader(
         dataset_val, 
         sampler=sampler_val,
-        batch_size=int(1.5 * args.batch_per_gpu),
+        batch_size=int(2 * args.batch_per_gpu),
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=False)
@@ -412,7 +415,7 @@ def main(args):
     utils.logger_info(logger_name=session_name, 
                       log_path=os.path.join(
                           args.work_space, 
-                          f'train_cam_{args.data_set}.log'))
+                          f'train_cam_{args.dataset}.log'))
     logger = logging.getLogger(session_name)
     ddp_print(logger, f"Use seed: {args.seed}")
     
