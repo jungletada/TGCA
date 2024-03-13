@@ -77,9 +77,11 @@ class BasicConv(Seq):
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
             elif isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.InstanceNorm2d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
-
+                if hasattr(m, 'weight') and m.weight is not None:
+                    m.weight.data.fill_(1)
+                if hasattr(m, 'bias') and m.bias is not None:
+                    m.bias.data.zero_()
+                
 
 def batched_index_select(x, idx):
     r"""fetches neighbors features from a given neighbor idx

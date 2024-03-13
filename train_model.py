@@ -23,7 +23,7 @@ import utils
 from engine import compute_mAP
 from datasets_cam import build_dataset
 from utils import str2bool
-import net.mctg_v2
+import net.mctg_v3
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -286,58 +286,7 @@ def train_one_epoch(
     if dist.get_rank() == 0:
         print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}  
-
       
-# def train_one_epoch(model, data_loader, optimizer, device, epoch,
-#         loss_scaler, max_norm, set_training_mode=True):
-#     print_freq = 10
-#     model.train(set_training_mode)
-#     criterion = nn.MultiLabelSoftMarginLoss(weight=None)
-    
-#     metric_logger = utils.MetricLogger(delimiter="  ")
-#     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
-#     header = 'Epoch: [{}]'.format(epoch)
-    
-#     for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
-#         samples = samples.to(device, non_blocking=True)
-#         targets = targets.to(device, non_blocking=True)
-        
-#         with torch.cuda.amp.autocast():
-#             outputs = model(samples)
-
-#             cls_loss = criterion(outputs[0], targets)
-#             metric_logger.update(cls_loss=cls_loss.item())
-            
-#             patch_loss = criterion(outputs[1], targets)
-#             metric_logger.update(pat_loss=patch_loss.item())
-            
-#             stage_cls_loss = 0
-#             for logit in outputs[2]:
-#                 stage_cls_loss += criterion(logit, targets)
-#             stage_cls_loss = stage_cls_loss / len(outputs[2])
-#             metric_logger.update(stage_loss=stage_cls_loss.item())
-        
-#             total_loss = 2 * cls_loss + patch_loss + stage_cls_loss
-            
-#         loss_value = total_loss.item()
-#         if not math.isfinite(loss_value):
-#             print("Loss is {}, stopping training".format(loss_value))
-#             sys.exit(1)
-
-#         optimizer.zero_grad()
-#         is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
-#         loss_scaler(total_loss, optimizer, clip_grad=max_norm,
-#                     parameters=model.parameters(), create_graph=is_second_order)
-#         torch.cuda.synchronize()
-#         metric_logger.update(loss=loss_value)
-#         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
-#     # gather the stats from all processes
-#     metric_logger.synchronize_between_processes()
-    
-#     if dist.get_rank() == 0:
-#         print("Averaged stats:", metric_logger)
-#     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}            
-         
          
 @torch.no_grad()
 def evaluate(data_loader, model, device):

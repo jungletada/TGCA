@@ -293,7 +293,7 @@ class SemanticGraph(nn.Module):
             dilation=dilation, 
             conv='mr', 
             act='gelu', 
-            norm='batch',
+            norm='instance',
             bias=True, 
             stochastic=False, 
             epsilon=0.2, 
