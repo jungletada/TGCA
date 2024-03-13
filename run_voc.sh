@@ -52,7 +52,7 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --weights checkpoints/res38_cls.pth \
     --seed 1 \
     --epoch 5 \
-    --low_alpha 0.9 \
+    --low_alpha 0.8 \
     --high_alpha 1.6 \
 
 

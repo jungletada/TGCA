@@ -1,7 +1,8 @@
 
 configs/
 checkpoints/
-datasets/
+datasets/MSCOCO
+datasets/VOCdevkit
 others/
 __pycache__
 
