@@ -1,4 +1,4 @@
-import os, sys
+import os
 import random
 import pprint
 import argparse
@@ -18,7 +18,6 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
-sys.path.append(osp.dirname(__file__) + os.sep + '../')
 from data.coco.dataloader_psa import COCOAffDatasetCRF
 from data.coco.dataloader_psa import COCOImageDataset
 from data.voc12.dataloader_psa import VOC12AffDatasetCRF

@@ -110,14 +110,16 @@ class ResNet38d_Aff(ResNet38d):
         for layer in self.not_training:
             if isinstance(layer, torch.nn.Conv2d):
                 layer.weight.requires_grad = False
+                if layer.bias is not None:
+                    layer.bias.requires_grad = False
             elif isinstance(layer, torch.nn.Module):
                 for c in layer.children():
                     c.weight.requires_grad = False
                     if c.bias is not None:
                         c.bias.requires_grad = False
 
-        for layer in self.modules():
-            if isinstance(layer, torch.nn.BatchNorm2d):
-                layer.eval()
-                layer.bias.requires_grad = False
-                layer.weight.requires_grad = False
+        # for layer in self.modules():
+        #     if isinstance(layer, torch.nn.BatchNorm2d):
+        #         layer.eval()
+        #         layer.bias.requires_grad = False
+        #         layer.weight.requires_grad = False

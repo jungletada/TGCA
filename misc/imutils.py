@@ -293,3 +293,35 @@ def colorize_label(label_map, normalize=True, by_hue=True, exclude_zero=False, o
 
         test = np.maximum(test, edge)
     return test
+
+
+def show_seg_on_img():
+    from PIL import Image
+    # Load your input natural image
+    natural_image = Image.open("path_to_natural_image.png").convert("RGBA")
+    # Assuming 'mask' is your mask image in "L" or "P" mode
+    mask = Image.open("path_to_mask_image.png")
+    # Apply the palette to the mask
+    palette = [0,0,0,  128,0,0,  0,128,0,  128,128,0,  0,0,128,  128,0,128,  0,128,128,  128,128,128,
+            64,0,0,  192,0,0,  64,128,0,  192,128,0,  64,0,128,  192,0,128,  64,128,128,  192,128,128,
+            0,64,0,  128,64,0,  0,192,0,  128,192,0,  0,64,128,  128,64,128,  0,192,128,  128,192,128,
+            64,64,0,  192,64,0,  64,192,0, 192,192,0]
+    mask.putpalette(palette)
+
+    # Convert the paletted mask to RGBA to include an alpha channel
+    mask_rgba = mask.convert("RGBA")
+    # Control the opacity of the mask. Opacity can range from 0 (transparent) to 255 (opaque)
+    opacity = 128  # Adjust this value as needed
+    # Update the alpha channel of the mask to control opacity
+    # Split the RGBA mask into separate bands
+    r, g, b, a = mask_rgba.split()
+    # Adjust alpha band based on the opacity
+    alpha = a.point(lambda i: i * opacity // 255)
+    # Recombine the bands, using the adjusted alpha band
+    mask_rgba = Image.merge("RGBA", (r, g, b, alpha))
+    # Overlay the mask on the natural image
+    combined_image = Image.alpha_composite(natural_image, mask_rgba)
+    # Save or display the combined image
+    combined_image.save("path_to_combined_image.png")
+    # combined_image.show()
+

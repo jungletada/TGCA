@@ -11,14 +11,12 @@ from net.base_vit import VisionTransformer, _cfg
 """
 1. Add different GNN dilation for backbone and spatial module
     self.dilations = [1, 2, 3, 4]
-    self.num_knn = [18, 15, 12, 9] 
-    
-    self.dilations_spatial = [3, 2, 1, 1]
-    self.num_knn_spatial = [18, 15, 12, 9]
+    self.num_knn = [9, 12, 15, 18] 
+    self.dilations_spatial = [1, 1, 2, 2]
+    self.num_knn_spatial = [15, 12, 9, 6]
 
 2. Change the `BatchNorm` into `InstanceNorm` in Grapher
 
-3. Supervised the class2patch attnetion
 """
 
 __all__ = ['deit_small_mctgformer_v3']
@@ -27,7 +25,8 @@ __all__ = ['deit_small_mctgformer_v3']
 class MCTGFormer(VisionTransformer):
     def __init__(self, decay_parameter=0.996, input_size=448, gnn_channels=128, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.stages = 4 # fixed
+        
+        self.stages = 4 
         interval = int(self.depth // self.stages)
         self.stage_indices = tuple(i for i in range(0, self.depth + 1, interval))
         
@@ -36,11 +35,13 @@ class MCTGFormer(VisionTransformer):
         self.Hp, self.Wp = img_size[0] // patch_size[0], img_size[1] // patch_size[1]
         self.num_patches = self.Hp * self.Wp
         self.spatial_dims = [self.embed_dim] * self.stages
-        self.spatial_scales = (8, 16, 32, 64)   # fixed
-        self.spatial_strides = (2, 2, 2)        # fixed
-        self.mask_ratios = [0.4, 0.3, 0.2, 0.1]
-        self.dilations = [1, 2, 2, 2]
-        self.num_knn = [18, 14, 10, 6]          # number of knn's k
+        self.spatial_scales = (8, 16, 32, 64)   
+        self.spatial_strides = (2, 2, 2)        
+        # self.mask_ratios = [0.4, 0.3, 0.2, 0.1]
+        self.dilations = [1, 2, 3, 4]
+        self.num_knn = [9, 12, 15, 18] 
+        self.dilations_spatial = [1, 1, 2, 2]
+        self.num_knn_spatial = [15, 12, 9, 6]
         self.decay_parameter = decay_parameter
         
         self.spatial_sizes = [(img_size[0]//scale, img_size[1]//scale) 
@@ -52,6 +53,7 @@ class MCTGFormer(VisionTransformer):
         for i in range(self.stages):
             trunc_normal_(self.sptial_pos_embed[i], std=.02)
             
+        
         self.cls_token = nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim))
         self.pos_embed_cls = nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim))
         self.pos_embed_pat = nn.Parameter(torch.zeros(1, self.num_patches, self.embed_dim))
@@ -78,9 +80,12 @@ class MCTGFormer(VisionTransformer):
                 drop_path=0., 
                 qkv_bias=True, 
                 norm_layer=nn.LayerNorm, 
-                mask_ratio=self.mask_ratios[i],
-                kernel_dict=self.num_knn[i], 
-                dilation_dict=self.dilations[i])
+                kernel_dict={
+                    'backbone':self.num_knn[i],
+                    'spatial':self.num_knn_spatial[i]}, 
+                dilation_dict={
+                    'backbone':self.dilations[i],
+                    'spatial':self.dilations_spatial[i]})
             for i in range(self.stages)])
         
         self.down_convs = nn.ModuleList([
@@ -271,7 +276,7 @@ class MCTGFormer_CAM(MCTGFormer):
     
     def forward(self, x):
         H, W = x.shape[2:]
-        min_tokens = self.dilations[-1] * self.num_knn[-1]
+        min_tokens = self.dilations_spatial[-1] * self.num_knn_spatial[-1]
         scaled_size = self.spatial_scales[-1] * self.spatial_scales[-1]
         if (H * W) // scaled_size <= min_tokens:
             H_ = int(math.sqrt(min_tokens * H / W) * self.spatial_scales[-1] + 1)

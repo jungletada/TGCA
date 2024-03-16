@@ -12,6 +12,9 @@ SEG_DIR=pseudo_mask
 CUDA_VISIBLE_DEVICES=${GPU}
 WORKDIR=results_voc/${MODEL}
 
+TRAINAUGID=configs/voc12/train_aug_id.txt
+TRAINID=configs/voc12/train_id.txt
+VALID=configs/voc12/val_id.txt
 
 # ============= Train Model ===============#
 OMP_NUM_THREADS=${NODES} \
@@ -20,7 +23,7 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --dataset ${DATASET} \
     --model deit_small_${MODEL} \
     --work_space ${WORKDIR} \
-    --seed 2 \
+    --seed 1 \
     --epoch 45 \
     --batch_per_gpu 16 \
     
@@ -31,17 +34,17 @@ python make_cam.py \
     --model deit_small_${MODEL} \
     --work_space ${WORKDIR} \
     --checkpoint ${WORKDIR}/deit_small_${MODEL}_best.pth \
-    --train_list configs/voc12/train_id.txt \
+    --train_list ${TRAINAUGID} \
 
 
 # ============= Evaluate Class Activation Maps =============#
 python eval_cam.py \
     --curve_threshold \
     --work_space ${WORKDIR} \
-    --train_list configs/voc12/train_id.txt \
+    --train_list ${TRAINID} \
 
 
-# #============= Train and Infer Pixel Semantic Affnity =============#
+# #============= Train and Infer Pixel Semantic Affnity =============
 # OMP_NUM_THREADS=${NODES} \
 # torchrun --nproc_per_node=${NODES} --nnodes=1 \
 #     train_infer_psa.py \
@@ -50,9 +53,9 @@ python eval_cam.py \
 #     --work_space ${WORKDIR} \
 #     --train_list configs/voc12/train_aug.txt \
 #     --weights checkpoints/res38_cls.pth \
-#     --seed 1 \
+#     --seed 2 \
 #     --epoch 5 \
-#     --low_alpha 0.8 \
+#     --low_alpha 1 \
 #     --high_alpha 1.6 \
 
 
@@ -65,7 +68,7 @@ python eval_cam.py \
 #     --seg_out_dir ${SEG_DIR} \
 #     --beta 11 \
 #     --logt 7 \
-#     --threshold 0.47 \
+#     --threshold 0.46 \
 
 
 # #============= Evaluate =============#

@@ -5,11 +5,15 @@ import numpy as np
 import os.path as osp
 from engine import calc_semantic_segmentation_confusion
 
+
+def logfile(args, msg):
+    with open(args.log_file, "a") as f:
+        f.write(msg + '\n')
+    print(msg)
+    
     
 def run_eval_cam(args, dataset):
-    f = open(args.log_file, "w")
     num_images = len(dataset)
-    
     def eval_curve(threshold):
         preds = []
         labels = []
@@ -37,7 +41,7 @@ def run_eval_cam(args, dataset):
         denominator = gtj + resj - gtjresj
         iou = gtjresj / denominator
         miou = np.nanmean(iou)
-        print("threshold: {:.2f}, miou: {:.4f}".format(threshold, miou))
+        logfile(args, "threshold: {:.2f}, miou: {:.4f}".format(threshold, miou))
         # print('among_pred_fg_bg', float((resj[1:].sum()-confusion[1:,1:].sum())/(resj[1:].sum())))
         return miou
     
@@ -45,21 +49,19 @@ def run_eval_cam(args, dataset):
         best_res = 0.
         best_threshold = 0
         
-        for t in range(30, 60):
+        for t in range(35, 55):
             miou = eval_curve(t / 100.)
             if miou > best_res: 
                 best_res = miou
                 best_threshold = t / 100.
             else:
                 break
-        time = datetime.datetime.now().strftime("%Y-%m-%d-%H_%M_%S")      
-        print("{} Best threshold: {}, best miou: {:.4f}, num_imgs: {}".format(
+        time = datetime.datetime.now().strftime("%Y/%m/%d-%H:%M:%S")      
+        logfile(args, "{} Best threshold: {}, best miou: {:.4f}, num_imgs: {}\n".format(
             time, best_threshold, best_res, num_images))
         
     else:
         miou = eval_curve(args.threshold)
-    
-    f.close()
 
 
 if __name__ == '__main__':
@@ -70,16 +72,18 @@ if __name__ == '__main__':
     
     parser.add_argument('--work_space', default='results_voc/your_model', help='work space directory')
     parser.add_argument('--eval_cam_dir', default='cam_mask', help='cam_mask directory')
-    parser.add_argument('--log_file', default='eval_cam.log', type=str, 
-                        help='log file to save the results')
     
     parser.add_argument('--curve_threshold', action='store_true', help='whether to use a range of thresholds')
     parser.add_argument('--threshold', default=0.43, type=float, help='threshold for evaluation as background')
     args = parser.parse_args()
     #---------------------------------------------------------------#
     args.eval_cam_dir = osp.join(args.work_space, args.eval_cam_dir)
-    args.log_file = osp.join(args.work_space, args.log_file)
     
+    time = datetime.datetime.now().strftime("%Y-%m-%d-%H:%M") 
+    args.log_file = osp.join(args.work_space, f"eval_cam_{time}.log")
+    with open(args.log_file, "a") as f:
+        f.write("{}: Evaluation class activation map for VOC2012\n".format(time))
+        
     from data.voc12.dataloader_psa import VOCSegmentationLabelDataset
     dataset = VOCSegmentationLabelDataset( 
         data_dir=args.voc12_root, 

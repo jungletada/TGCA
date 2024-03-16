@@ -212,10 +212,10 @@ class CrossAttention(nn.Module):
         attn_cls = attn_cls.softmax(dim=-1)
         attn = torch.cat((attn_cls, attn_pat), dim=-1)
         #======================================================================#     
-        # DropKey
-        m_r = torch.ones_like(attn) * self.mask_ratio 
-        attn = attn + torch.bernoulli(m_r) * -1e12
-        attn = attn.softmax(dim=-1)
+        # # DropKey
+        # m_r = torch.ones_like(attn) * self.mask_ratio 
+        # attn = attn + torch.bernoulli(m_r) * -1e12
+        # attn = attn.softmax(dim=-1)
         
         attn = self.attn_drop(attn)
         x = (attn @ v).transpose(1, 2).reshape( # B x Nd x (Cls+Nt) x d
@@ -316,8 +316,8 @@ class SemanticSpatialModule(nn.Module):
                  qkv_bias=True,
                  drop_path=0., 
                  mask_ratio=0.1, 
-                 kernel_dict=9, 
-                 dilation_dict=1,
+                 kernel_dict={'backbone':9, 'spatial':9}, 
+                 dilation_dict={'backbone':1, 'spatial':1},
                  norm_layer=nn.LayerNorm,):
         super().__init__()
         self.norm1 = norm_layer(query_dim)
@@ -338,34 +338,34 @@ class SemanticSpatialModule(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
         
         self.graph_b = SemanticGraph(
-            kernel_size=kernel_dict,
+            kernel_size=kernel_dict['backbone'],
+            dilation=dilation_dict['backbone'],
             num_classes=num_classes,
             mid_channels=mid_channels,
-            drop_path=drop_path,
-            dilation=dilation_dict)
+            drop_path=drop_path)
         
         self.graph_s = SemanticGraph(
-            kernel_size=kernel_dict,
+            kernel_size=kernel_dict['spatial'],
+            dilation=dilation_dict['spatial'],
             num_classes=num_classes,
             mid_channels=mid_channels,
-            drop_path=drop_path,
-            dilation=dilation_dict)
+            drop_path=drop_path)
         
         self.mlp = MLP(
             in_features=self.dim, 
             hidden_features=self.dim * 4,
             out_features=self.dim)
 
-    def weighted_tokens(self, x, base=0.9):
-        C, N = x.shape[1:]
-        weights = torch.logspace(start=0, end=C-1, steps=C, base=base).unsqueeze(-1)
-        x = x.softmax(dim=1)
-        x_sorted, indices = torch.sort(x, dim=1, descending=True)
-        weighted_sorted = x_sorted * weights.to(x.device)
-        result = torch.empty_like(x)
-        inv_indices = indices.argsort(dim=1)
-        result.scatter_(1, inv_indices, weighted_sorted)
-        return result
+    # def weighted_tokens(self, x, base=0.9):
+    #     C, N = x.shape[1:]
+    #     weights = torch.logspace(start=0, end=C-1, steps=C, base=base).unsqueeze(-1)
+    #     x = x.softmax(dim=1)
+    #     x_sorted, indices = torch.sort(x, dim=1, descending=True)
+    #     weighted_sorted = x_sorted * weights.to(x.device)
+    #     result = torch.empty_like(x)
+    #     inv_indices = indices.argsort(dim=1)
+    #     result.scatter_(1, inv_indices, weighted_sorted)
+    #     return result
     
     def forward_semantic_gnn(self, x_spatial, x_backbone, token_size, spatial_size):
         """
@@ -401,9 +401,9 @@ class SemanticSpatialModule(nn.Module):
         # GNN feature aggregator
         spatial_guide = (relation_s.transpose(-2, -1) @ relation_b) * self.scale
         spatial_guide = spatial_guide.softmax(dim=-1)
-        m_r = torch.ones_like(spatial_guide) * self.mask_ratio 
-        spatial_guide = spatial_guide + torch.bernoulli(m_r) * -1e12
-        spatial_guide = spatial_guide.softmax(dim=-1)
+        # m_r = torch.ones_like(spatial_guide) * self.mask_ratio 
+        # spatial_guide = spatial_guide + torch.bernoulli(m_r) * -1e12
+        # spatial_guide = spatial_guide.softmax(dim=-1)
         
         spatial_guide = self.attn_drop(spatial_guide)
         output = spatial_guide @ v # Fuse backbone relation and spatial relation

@@ -258,7 +258,7 @@ def _work(process_id, model, dataset, args):
                 print("%d " % ((5*iter_+1)//(len(databin) // 20)), end='')
 
 
- def train_affinity(args):
+def train_affinity(args):
     init_distributed_mode(args)
     device = torch.device(args.device)
     torch.cuda.set_device(args.local_rank)
