@@ -232,8 +232,8 @@ def load_model_weight(args, model):
       
 
 def ddp_print(logger, log_msg):
-     if dist.get_rank() == 0:
-         logger.info(log_msg)
+    if dist.get_rank() == 0:
+        logger.info(log_msg)
 
 
 def train_one_epoch(
@@ -245,6 +245,7 @@ def train_one_epoch(
     loss_scaler, 
     max_norm, 
     set_training_mode=True):
+    
     print_freq = 10
     model.train(set_training_mode)
     criterion = nn.MultiLabelSoftMarginLoss()
@@ -269,9 +270,9 @@ def train_one_epoch(
             total_loss = 3 * cls_loss + patch_loss
             
         loss_value = total_loss.item()
-        if not math.isfinite(loss_value):
-            print("Loss is {}, stopping training".format(loss_value))
-            sys.exit(1)
+        # if not math.isfinite(loss_value):
+        #     print("Loss is {}, stopping training".format(loss_value))
+        #     sys.exit(1)
 
         optimizer.zero_grad()
         is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
@@ -394,7 +395,7 @@ def main(args):
         model, find_unused_parameters=True, device_ids=[args.local_rank])
     
     for epoch in range(args.start_epoch, args.epochs):
-        sampler_train.set_epoch(epoch)
+        data_loader_train.sampler.set_epoch(epoch)
         train_stats = train_one_epoch(
             model=model, 
             data_loader=data_loader_train,

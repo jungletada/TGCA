@@ -40,7 +40,7 @@ class MCTGFormer(VisionTransformer):
         # self.mask_ratios = [0.4, 0.3, 0.2, 0.1]
         self.dilations = [1, 2, 3, 4]
         self.num_knn = [9, 12, 15, 18] 
-        self.dilations_spatial = [1, 1, 2, 2]
+        self.dilations_spatial = [1, 2, 2, 2]
         self.num_knn_spatial = [15, 12, 9, 6]
         self.decay_parameter = decay_parameter
         

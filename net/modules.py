@@ -2,13 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from timm.models.layers import DropPath
-from net.gcn_lib import Grapher, act_layer
+from net.gcn_lib import Grapher
 
 
 """
-    The code is modified based on 
-    TDRG ()
-    and MCTformer ()
+    The code is modified based on MCTformer ()
 """
 
 
@@ -247,8 +245,18 @@ class MLP(nn.Module):
     
     
 class SpatialFuseModule(nn.Module):
-    def __init__(self, query_dim, key_dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., 
-                 proj_drop=0., drop_path=0., num_classes=20, norm_layer=nn.LayerNorm, mask_ratio=0.3):
+    def __init__(self, 
+                 query_dim, 
+                 key_dim, 
+                 num_heads=8, 
+                 qkv_bias=False, 
+                 qk_scale=None, 
+                 attn_drop=0., 
+                 proj_drop=0., 
+                 drop_path=0., 
+                 num_classes=20, 
+                 norm_layer=nn.LayerNorm, 
+                 mask_ratio=0.3):
         super().__init__()
         self.norm1 = norm_layer(query_dim)
         self.norm2 = norm_layer(key_dim)
@@ -293,7 +301,7 @@ class SemanticGraph(nn.Module):
             dilation=dilation, 
             conv='mr', 
             act='gelu', 
-            norm='instance',
+            norm='batch',
             bias=True, 
             stochastic=False, 
             epsilon=0.2, 
