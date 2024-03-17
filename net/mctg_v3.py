@@ -39,7 +39,7 @@ class MCTGFormer(VisionTransformer):
         self.spatial_strides = (2, 2, 2)        
         # self.mask_ratios = [0.4, 0.3, 0.2, 0.1]
         self.dilations = [1, 2, 3, 4]
-        self.num_knn = [9, 12, 15, 18] 
+        self.num_knn = [18, 15, 12, 9] 
         self.dilations_spatial = [1, 2, 2, 2]
         self.num_knn_spatial = [9, 9, 9, 9]
         self.decay_parameter = decay_parameter
@@ -78,7 +78,8 @@ class MCTGFormer(VisionTransformer):
                 proj_drop=0., 
                 drop_path=0., 
                 qkv_bias=True, 
-                norm_layer=nn.LayerNorm, 
+                norm_layer=partial(
+                    nn.LayerNorm, eps=1e-6), 
                 kernel_dict={
                     'backbone':self.num_knn[i],
                     'spatial':self.num_knn_spatial[i]}, 
