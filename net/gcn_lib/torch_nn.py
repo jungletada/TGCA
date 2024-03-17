@@ -55,10 +55,11 @@ class BasicConv(Seq):
     """Basic Conv Module
     (Conv + Norm + Act) x N
     """
-    def __init__(self, channels, act='relu', norm=None, bias=True, drop=0.):
+    def __init__(self, channels, act='relu', norm=None, groups=6, bias=True, drop=0.):
         m = []
         for i in range(1, len(channels)):
-            m.append(Conv2d(channels[i - 1], channels[i], 1, bias=bias, groups=4)) # groups=4
+            # print(f"In Basic Conv, {channels[i - 1]} and {channels[i]}; heads={groups}")
+            m.append(Conv2d(channels[i - 1], channels[i], 1, bias=bias, groups=groups)) # groups=4
             if norm is not None and norm.lower() != 'none':
                 m.append(norm_layer(norm, channels[-1]))
             if act is not None and act.lower() != 'none':

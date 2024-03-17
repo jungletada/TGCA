@@ -24,7 +24,7 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --dataset ${DATASET} \
     --model deit_small_${MODEL} \
     --work_space ${WORKDIR} \
-    --seed 3 \
+    --seed 2 \
     --epoch 45 \
     --batch_per_gpu 16 \
     

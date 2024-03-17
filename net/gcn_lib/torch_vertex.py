@@ -18,9 +18,10 @@ class MRConv2d(nn.Module):
         edge_index-> 2 x B x C x k (nn_idx, center_idx)
     return: B x 2C x N x 1
     """
-    def __init__(self, in_channels, out_channels, act='relu', norm=None, bias=True):
+    def __init__(self, in_channels, out_channels, act='relu', groups=6, norm=None, bias=True):
         super(MRConv2d, self).__init__()
-        self.nn = BasicConv([in_channels*2, out_channels], act, norm, bias)
+        self.nn = BasicConv(
+            [in_channels*2, out_channels], act=act, norm=norm, groups=groups, bias=bias)
 
     def forward(self, x, edge_index, y=None):
         x_i = batched_index_select(x, edge_index[1])     # B x C x N x k
@@ -95,16 +96,16 @@ class GraphConv2d(nn.Module):
     """
     Static graph convolution layer
     """
-    def __init__(self, in_channels, out_channels, conv='edge', act='relu', norm=None, bias=True):
+    def __init__(self, in_channels, out_channels, conv='edge', act='relu', groups=6, norm=None, bias=True):
         super(GraphConv2d, self).__init__()
         if conv == 'edge':
-            self.gconv = EdgeConv2d(in_channels, out_channels, act, norm, bias)
+            self.gconv = EdgeConv2d(in_channels, out_channels, act, groups, norm, bias)
         elif conv == 'mr':
-            self.gconv = MRConv2d(in_channels, out_channels, act, norm, bias)
+            self.gconv = MRConv2d(in_channels, out_channels, act, groups, norm, bias)
         elif conv == 'sage':
-            self.gconv = GraphSAGE(in_channels, out_channels, act, norm, bias)
+            self.gconv = GraphSAGE(in_channels, out_channels, act, groups, norm, bias)
         elif conv == 'gin':
-            self.gconv = GINConv2d(in_channels, out_channels, act, norm, bias)
+            self.gconv = GINConv2d(in_channels, out_channels, act, groups, norm, bias)
         else:
             raise NotImplementedError('conv:{} is not supported'.format(conv))
 
@@ -119,8 +120,9 @@ class DyGraphConv2d(GraphConv2d):
     Return: x -> B C H W  
     """
     def __init__(self, in_channels, out_channels, kernel_size=9, dilation=1, conv='edge', act='relu',
-                 norm=None, bias=True, stochastic=False, epsilon=0.0, r=1):
-        super(DyGraphConv2d, self).__init__(in_channels, out_channels, conv, act, norm, bias)
+                 groups=6, norm=None, bias=True, stochastic=False, epsilon=0.0, r=1):
+        super(DyGraphConv2d, self).__init__(
+            in_channels, out_channels, conv, act, groups, norm, bias)
         self.k = kernel_size
         self.d = dilation
         self.r = r
@@ -146,8 +148,9 @@ class Grapher(nn.Module):
     """
     Grapher module with graph convolution and fc layers
     """
-    def __init__(self, in_channels, mid_channels=64, kernel_size=9, dilation=1, conv='edge', act='relu', norm=None,
-                 bias=True, stochastic=False, epsilon=0.0, r=1, n=784, drop_path=0.0, relative_pos=False):
+    def __init__(self, in_channels, mid_channels=64, kernel_size=9, dilation=1, conv='edge', act='relu', 
+                 groups=6, norm=None,bias=True, stochastic=False, epsilon=0.0, r=1, n=784, 
+                 drop_path=0.0, relative_pos=False):
         super(Grapher, self).__init__()
         self.channels = in_channels
         self.n = n # number of patches
@@ -156,11 +159,11 @@ class Grapher(nn.Module):
             nn.Conv2d(in_channels, in_channels, 1, stride=1, padding=0),
             ) # nn.BatchNorm2d(in_channels),
         
-        self.graph_conv = DyGraphConv2d(in_channels, mid_channels, kernel_size, dilation, conv,
-                              act, norm, bias, stochastic, epsilon, r)
+        self.graph_conv = DyGraphConv2d(in_channels, in_channels*2, kernel_size, dilation, conv,
+                              act, groups, norm, bias, stochastic, epsilon, r)
         
         self.fc2 = nn.Sequential(
-            nn.Conv2d(mid_channels, in_channels, 1, stride=1, padding=0),
+            nn.Conv2d(in_channels*2, in_channels, 1, stride=1, padding=0),
             ) # nn.BatchNorm2d(in_channels),
         
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()

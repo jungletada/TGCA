@@ -8,6 +8,7 @@ import torch.nn.functional as F
 
 from net.modules import DownConv, SpatialPriorModule, SemanticSpatialModule
 from net.base_vit import VisionTransformer, _cfg
+
 """
 1. Add different GNN dilation for backbone and spatial module
     self.dilations = [1, 2, 3, 4]
@@ -16,7 +17,6 @@ from net.base_vit import VisionTransformer, _cfg
     self.num_knn_spatial = [15, 12, 9, 6]
 
 2. Change the `BatchNorm` into `InstanceNorm` in Grapher
-
 """
 
 __all__ = ['deit_small_mctgformer_v3']
@@ -41,7 +41,7 @@ class MCTGFormer(VisionTransformer):
         self.dilations = [1, 2, 3, 4]
         self.num_knn = [9, 12, 15, 18] 
         self.dilations_spatial = [1, 2, 2, 2]
-        self.num_knn_spatial = [15, 12, 9, 6]
+        self.num_knn_spatial = [9, 9, 9, 9]
         self.decay_parameter = decay_parameter
         
         self.spatial_sizes = [(img_size[0]//scale, img_size[1]//scale) 
@@ -53,7 +53,6 @@ class MCTGFormer(VisionTransformer):
         for i in range(self.stages):
             trunc_normal_(self.sptial_pos_embed[i], std=.02)
             
-        
         self.cls_token = nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim))
         self.pos_embed_cls = nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim))
         self.pos_embed_pat = nn.Parameter(torch.zeros(1, self.num_patches, self.embed_dim))

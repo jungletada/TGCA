@@ -92,9 +92,8 @@ class Attention(nn.Module):
         attn_cls, attn_pat = torch.split(attn, [self.Cls, N-self.Cls], dim=-1)
         attn_pat = attn_pat.softmax(dim=-1)
         attn_cls = attn_cls.softmax(dim=-1)
-        attn = torch.cat((attn_cls, attn_pat), dim=-1)
+        attn = torch.cat((attn_cls, attn_pat), dim=-1)   # attn = attn.softmax(dim=-1)
         #======================================================================#     
-        # attn = attn.softmax(dim=-1)
         weights = attn
         attn = self.attn_drop(attn)
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
@@ -110,7 +109,8 @@ class Block(nn.Module):
         super().__init__()
         self.norm1 = norm_layer(dim)
         self.attn = Attention(
-            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop, num_classes=num_classes)
+            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, 
+            attn_drop=attn_drop, proj_drop=drop, num_classes=num_classes)
 
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
