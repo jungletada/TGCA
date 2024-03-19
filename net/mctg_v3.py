@@ -41,7 +41,7 @@ class MCTGFormer(VisionTransformer):
         self.dilations = [1, 2, 3, 4]
         self.num_knn = [18, 15, 12, 9] 
         self.dilations_spatial = [1, 2, 2, 2]
-        self.num_knn_spatial = [18, 15, 12, 9]
+        self.num_knn_spatial = [9, 9, 9, 9]
         self.decay_parameter = decay_parameter
         
         self.spatial_sizes = [(img_size[0]//scale, img_size[1]//scale) 

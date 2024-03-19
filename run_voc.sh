@@ -17,16 +17,16 @@ TRAINID=configs/voc12/train_id.txt
 VALID=configs/voc12/val_id.txt
 
 
-# ============= Train Model ===============#
-OMP_NUM_THREADS=${NODES} \
-torchrun --nproc_per_node=${NODES} --nnodes=1 \
-    train_model.py \
-    --dataset ${DATASET} \
-    --model deit_small_${MODEL} \
-    --work_space ${WORKDIR} \
-    --seed 2 \
-    --epoch 45 \
-    --batch_per_gpu 16 \
+# # ============= Train Model ===============#
+# OMP_NUM_THREADS=${NODES} \
+# torchrun --nproc_per_node=${NODES} --nnodes=1 \
+#     train_model.py \
+#     --dataset ${DATASET} \
+#     --model deit_small_${MODEL} \
+#     --work_space ${WORKDIR} \
+#     --seed 2 \
+#     --epoch 45 \
+#     --batch_per_gpu 16 \
     
 
 # ============= Make Class Activation Maps of Model=============#
@@ -34,8 +34,8 @@ python make_cam.py \
     --dataset ${DATASET} \
     --model deit_small_${MODEL} \
     --work_space ${WORKDIR} \
-    --checkpoint ${WORKDIR}/deit_small_${MODEL}_best.pth \
-    --train_list ${TRAINID} \
+    --checkpoint ${WORKDIR}/deit_small_${MODEL}_7141.pth \
+    --train_list ${TRAINAUGID} \
 
 
 # ============= Evaluate Class Activation Maps =============#
