@@ -297,8 +297,10 @@ class VOC12AffDatasetCRF(VOC12ImageDataset):
         label_cam = np.load(label_cam_path, allow_pickle=True).item()
         original_image = np.array(img)
         label_la, label_ha = refine_crf_cam(
-            cam_dict=label_cam, original_image=original_image, 
-            low_alpha=self.low_alpha, high_alpha=self.high_alpha)
+            cam_dict=label_cam, 
+            original_image=original_image, 
+            low_alpha=self.low_alpha, 
+            high_alpha=self.high_alpha)
         
         label = np.array(list(label_la.values()) + list(label_ha.values()))
         label = np.transpose(label, (1, 2, 0))
