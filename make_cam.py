@@ -135,7 +135,7 @@ if __name__ == '__main__':
     dataset, num_classes = build_dataset(
         is_train=False, make_cam=True, args=args)
         
-    from net.mctg_v3 import MCTGFormer_CAM
+    from net.mctgformer import MCTGFormer_CAM
     model = MCTGFormer_CAM(
         num_classes=num_classes)
     model_dict = torch.load(

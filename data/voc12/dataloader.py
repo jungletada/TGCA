@@ -35,7 +35,7 @@ palette = [0,0,0,  128,0,0,  0,128,0,  128,128,0,  0,0,128,  128,0,128,  0,128,1
 CAT_NAME_TO_NUM = dict(zip(CAT_LIST,range(len(CAT_LIST))))
 
 
-cls_labels_dict = np.load('data/voc12/cls_labels.npy', allow_pickle=True).item()
+cls_labels_dict = np.load('configs/voc12/cls_labels.npy', allow_pickle=True).item()
 
 
 def decode_int_filename(int_filename):

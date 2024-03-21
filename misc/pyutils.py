@@ -68,8 +68,7 @@ class Timer:
         self.est_remaining = self.est_total - self.elapsed
         self.est_finish = int(self.start + self.est_total)
 
-
-    def str_estimated_complete(self):
+    def str_est_finish(self):
         return str(time.ctime(self.est_finish))
 
     def get_stage_elapsed(self):

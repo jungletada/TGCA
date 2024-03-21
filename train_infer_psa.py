@@ -61,7 +61,7 @@ def get_args_parser():
     parser.add_argument("--num_workers", default=8, type=int)
     parser.add_argument("--wt_dec", default=5e-4, type=float)
     # dataset settings
-    parser.add_argument("--dataset", default="COCO", type=str, help='choose `COCO` or `VOC`')
+    parser.add_argument("--dataset", default="COCO", type=str, help='choose `COCO` or `VOC12`')
     parser.add_argument("--crop_size", default=448, type=int)
     parser.add_argument("--low_alpha", default=1, type=float)
     parser.add_argument("--high_alpha", default=2, type=float)
@@ -155,7 +155,7 @@ def build_train_dataset(args):
                 None,
                 imutils.AvgPool2d(8)])
     
-    elif args.dataset == 'VOC':
+    elif args.dataset == 'VOC12':
         train_dataset = VOC12AffDatasetCRF(
             img_name_list_path=args.train_list, 
             cam_npy_dir=args.cam_out_dir,
@@ -214,7 +214,7 @@ def build_infer_dataset(args):
                 Normalize(),
                 imutils.HWC_to_CHW]))
         
-    elif args.dataset == 'VOC':
+    elif args.dataset == 'VOC12':
         infer_dataset = VOC12ImageDataset(
             args.infer_list, 
             voc12_root=args.voc12_root,
@@ -444,7 +444,7 @@ if __name__ == '__main__':
     
     if args.dataset == 'COCO':
         args.num_classes = 80 
-    elif args.dataset == 'VOC':
+    elif args.dataset == 'VOC12':
         args.num_classes = 20 
     else:
         raise NotImplementedError

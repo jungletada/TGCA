@@ -19,13 +19,12 @@ from net.base_vit import VisionTransformer, _cfg
 2. Change the `BatchNorm` into `InstanceNorm` in Grapher
 """
 
-__all__ = ['deit_small_mctgformer_v3']
+__all__ = ['deit_small_mctgformer']
 
 
 class MCTGFormer(VisionTransformer):
-    def __init__(self, decay_parameter=0.996, input_size=448, gnn_channels=128, *args, **kwargs):
+    def __init__(self, decay_parameter=0.996, input_size=448, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        
         self.stages = 4 
         interval = int(self.depth // self.stages)
         self.stage_indices = tuple(i for i in range(0, self.depth + 1, interval))
@@ -37,7 +36,6 @@ class MCTGFormer(VisionTransformer):
         self.spatial_dims = [self.embed_dim] * self.stages
         self.spatial_scales = (8, 16, 32, 64)   
         self.spatial_strides = (2, 2, 2)        
-        # self.mask_ratios = [0.4, 0.3, 0.2, 0.1]
         self.dilations = [1, 2, 3, 4]
         self.num_knn = [18, 15, 12, 9] 
         self.dilations_spatial = [1, 2, 2, 2]
@@ -73,7 +71,6 @@ class MCTGFormer(VisionTransformer):
                 query_dim=self.spatial_dims[i], 
                 key_dim=self.embed_dim, 
                 num_classes=self.num_classes, 
-                mid_channels=gnn_channels,
                 attn_drop=0., 
                 proj_drop=0., 
                 drop_path=0., 
@@ -180,14 +177,15 @@ class MCTGFormer(VisionTransformer):
                 x, weights_j = self.blocks[j](x) # weights_j: the j-th layer attention weights
                 attn_weights.append(weights_j)
                 
-            x_spatial[i] = self.spatial_fuse[i](
-                x_spatial=x_spatial[i], x_backbone=x, token_size=token_size) 
-           
-            # downsample add
+            x_cls, x_spatial[i] = self.spatial_fuse[i](
+                x_spatial=x_spatial[i], x_backbone=x, token_size=token_size)
+             
+            # x[:, :self.num_classes] = x_cls
+
             if i != self.stages - 1:
                 z = self.down_convs[i](x_spatial[i])
                 x_spatial[i + 1] = x_spatial[i + 1] + z
-    
+        
         return x[:, :self.num_classes], x[:, self.num_classes:], attn_weights, x_spatial
     
     def reshape_patch_tokens(self, patch_tokens, H, W):
@@ -242,7 +240,7 @@ class MCTGFormer(VisionTransformer):
 
 class MCTGFormer_CAM(MCTGFormer):
     def __init__(self, fuse_layers=3, *args, **kwargs):
-        super().__init__(decay_parameter=0.996, input_size=448, gnn_channels=128, *args, **kwargs)
+        super().__init__(decay_parameter=0.996, input_size=448, *args, **kwargs)
         self.fuse_layers = fuse_layers
         
     def forward_attention(self, tokens, attn_weights):
@@ -310,7 +308,7 @@ class MCTGFormer_CAM(MCTGFormer):
 
 
 @register_model
-def deit_small_mctgformer_v3(pretrained=False, **kwargs):
+def deit_small_mctgformer(pretrained=False, **kwargs):
     model = MCTGFormer(
         patch_size=16, 
         embed_dim=384, 

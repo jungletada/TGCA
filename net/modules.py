@@ -438,7 +438,6 @@ class SemanticSpatialModule(nn.Module):
                  query_dim, 
                  key_dim, 
                  num_classes=20, 
-                 mid_channels=64,
                  num_heads=6,
                  attn_drop=0., 
                  proj_drop=0., 
@@ -472,7 +471,6 @@ class SemanticSpatialModule(nn.Module):
         
         self.graph_b = Grapher(
             in_channels=self.num_heads*num_classes, 
-            mid_channels=mid_channels,
             kernel_size=kernel_dict['backbone'],
             dilation=dilation_dict['backbone'],
             conv='mr', 
@@ -487,7 +485,6 @@ class SemanticSpatialModule(nn.Module):
         
         self.graph_s = Grapher(
             in_channels=self.num_heads*num_classes, 
-            mid_channels=mid_channels,
             kernel_size=kernel_dict['spatial'],
             dilation=dilation_dict['spatial'],
             conv='mr', 
@@ -567,7 +564,7 @@ class SemanticSpatialModule(nn.Module):
             B, (self.Cls + N), 2, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
         k, v = kv[0], kv[1] # B x Nd x (Cls+N) x d
         attn = (q @ k.transpose(-2, -1)) * self.scale  # B x Nd x (Cls+Ni) x (Cls+N)
-        # idendity_attn = attn.clone()
+        
         #== Split class and patch tokens ============================================#               
         cls2pat = attn[:, :, :self.Cls, self.Cls:] # B x Nd x Cls x N
         cls2pat = cls2pat.reshape(
@@ -595,8 +592,7 @@ class SemanticSpatialModule(nn.Module):
         x = self.proj(x)
         x = self.proj_drop(x)
         
-        x = x[:, self.Cls:, :]
-        return x
+        return x[:, :self.Cls], x[:, self.Cls:]
         
         
     def forward(self, x_spatial, x_backbone, token_size):
@@ -611,23 +607,25 @@ class SemanticSpatialModule(nn.Module):
         x_spatial = nchw2nlc(x_spatial)
         idendity = x_spatial.clone()
 
-        x_spatial = self.forward_attention_gnn(
-            self.norm1(x_spatial), self.norm2(x_backbone), 
-            token_size=token_size, spatial_size=(H, W))
+        x_cls, x_spatial = self.forward_attention_gnn(
+            self.norm1(x_spatial), 
+            self.norm2(x_backbone), 
+            token_size=token_size, 
+            spatial_size=(H, W))
         
         x_spatial = idendity + self.drop_path(x_spatial)
         x_spatial = x_spatial + self.drop_path(self.mlp(self.norm3(x_spatial)))
         
         x_spatial = nlc2nchw(x_spatial, d_size=(H, W))
-        return x_spatial 
+        return x_cls, x_spatial 
     
     
-if __name__ == "__main__":
-    H, W = 14, 14
-    Hi, Wi = 35, 24
-    model = SemanticSpatialModule(
-        query_dim=384, key_dim=384, num_classes=20,)
-    x = torch.ones(3, 384, Hi, Wi)
-    y = torch.ones(3, int(H * W + 20), 384)
-    out = model(x, y, token_size=(H, W))
-    print(out.shape)
+# if __name__ == "__main__":
+#     H, W = 14, 14
+#     Hi, Wi = 35, 24
+#     model = SemanticSpatialModule(
+#         query_dim=384, key_dim=384, num_classes=20,)
+#     x = torch.ones(3, 384, Hi, Wi)
+#     y = torch.ones(3, int(H * W + 20), 384)
+#     out = model(x, y, token_size=(H, W))
+#     print(out.shape)

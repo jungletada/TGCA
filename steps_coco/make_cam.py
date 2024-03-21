@@ -18,7 +18,6 @@ from misc import torchutils
 cudnn.enabled = True
 import warnings
 warnings.filterwarnings("ignore")
-import net.mctg
 
 
 def get_args_parser():
@@ -133,8 +132,8 @@ if __name__ == '__main__':
         labels_path='data/coco/train_labels.npy', 
         scales=args.scales)
          
-    from net.mctg import MCTGCAM
-    model = MCTGCAM(num_classes=num_classes)
+    from net.mctgvit import MCTGViT_CAM
+    model = MCTGViT_CAM(num_classes=num_classes)
     model_dict = torch.load(args.checkpoint, map_location='cpu')['model']
     
     model.load_state_dict(model_dict)

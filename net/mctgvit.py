@@ -1,79 +1,106 @@
 import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from functools import partial
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
-import torch.nn.functional as F
-
-# models.
-from net.modules import DownConv, SpatialPriorModule, SpatialFuseModule
+from net.modules import DownConv, SpatialPriorModule, SemanticSpatialModule
 from net.base_vit import VisionTransformer, _cfg
 
 
-__all__ = ['deit_small_MCTG']
+__all__ = ['deit_small_mctgvit']
 
     
-class MCTG(VisionTransformer):
+class MCTGViT(VisionTransformer):
     def __init__(self, decay_parameter=0.996, input_size=448, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.head = nn.Conv2d(self.embed_dim, self.num_classes, kernel_size=3, stride=1, padding=1)
+        self.stages = 4 
+        interval = int(self.depth // self.stages)
+        self.stage_indices = tuple(i for i in range(0, self.depth + 1, interval))
         
         img_size = to_2tuple(input_size)
         patch_size = to_2tuple(self.patch_embed.patch_size)
-        num_patches = (img_size[1] // patch_size[1]) * (img_size[0] // patch_size[0])
-        
-        self.num_patches = num_patches
-        self.stage_indices = (0, 3, 6, 9, 12)
-        self.stages = len(self.stage_indices) - 1
-        mask_ratios = [0.4, 0.3, 0.2, 0.1]
+        self.Hp, self.Wp = img_size[0] // patch_size[0], img_size[1] // patch_size[1]
+        self.num_patches = self.Hp * self.Wp
         self.spatial_dims = [self.embed_dim] * self.stages
-       
-        self.cls_token = nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim))
+        self.spatial_scales = (8, 16, 32, 64)   
+        self.spatial_strides = (2, 2, 2)        
+        self.dilations = [1, 2, 3, 4]
+        self.num_knn = [18, 15, 12, 9] 
+        self.dilations_spatial = [1, 2, 2, 2]
+        self.num_knn_spatial = [9, 9, 9, 9]
+        self.decay_parameter = decay_parameter
+        
+        self.spatial_sizes = [(img_size[0]//scale, img_size[1]//scale) 
+                              for scale in self.spatial_scales]
+        self.sptial_pos_embed = [nn.Parameter(
+            torch.zeros(1, self.spatial_dims[i], self.spatial_sizes[i][0], self.spatial_sizes[i][1]))
+                for i in range(self.stages)]
+        
+        for i in range(self.stages):
+            trunc_normal_(self.sptial_pos_embed[i], std=.02)
+            
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
         self.pos_embed_cls = nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim))
-        self.pos_embed_pat = nn.Parameter(torch.zeros(1, num_patches, self.embed_dim))
+        self.pos_embed_pat = nn.Parameter(torch.zeros(1, self.num_patches, self.embed_dim))
 
         trunc_normal_(self.cls_token, std=.02)
         trunc_normal_(self.pos_embed_cls, std=.02)
         trunc_normal_(self.pos_embed_pat, std=.02)
         
         self.avgpool2d = nn.AdaptiveAvgPool2d(1)
-         
-        #================== Extra Part ==================#
         self.proj_cls_embed = nn.Linear(self.stages, self.num_classes)
-        self.decay_parameter = decay_parameter
         
         self.spatial_prior = SpatialPriorModule(
-            inplanes=64, embed_dims=self.spatial_dims)
+            inplanes=64, 
+            embed_dims=self.spatial_dims)
         
         self.spatial_fuse = nn.ModuleList([
-            SpatialFuseModule(query_dim=self.spatial_dims[i], key_dim=self.embed_dim, num_heads=6, 
-                qkv_bias=True, qk_scale=None, attn_drop=0., proj_drop=0., drop_path=0., 
-                num_classes=self.num_classes, norm_layer=nn.LayerNorm, mask_ratio=mask_ratios[i])
+            SemanticSpatialModule(
+                query_dim=self.spatial_dims[i], 
+                key_dim=self.embed_dim, 
+                num_classes=self.num_classes, 
+                attn_drop=0., 
+                proj_drop=0., 
+                drop_path=0., 
+                qkv_bias=True, 
+                norm_layer=partial(
+                    nn.LayerNorm, eps=1e-6), 
+                kernel_dict={
+                    'backbone':self.num_knn[i],
+                    'spatial':self.num_knn_spatial[i]}, 
+                dilation_dict={
+                    'backbone':self.dilations[i],
+                    'spatial':self.dilations_spatial[i]})
             for i in range(self.stages)])
         
-        self.spatial_downsamples = nn.ModuleList([
-            DownConv(in_dim=self.spatial_dims[i], out_dim=self.spatial_dims[i+1])
-                for i in range(self.stages-1)])
+        self.down_convs = nn.ModuleList([
+            DownConv(
+                in_dim=self.spatial_dims[i], 
+                out_dim=self.spatial_dims[i+1],
+                stride=self.spatial_strides[i])
+            for i in range(self.stages-1)])
         
-        self.spatial_reduce = nn.Sequential(
+        self.channel_reduction = nn.Sequential(
             nn.Conv2d(self.embed_dim * 5, self.embed_dim, 1),
             nn.BatchNorm2d(self.embed_dim),
-            nn.ReLU())
+            nn.GELU())
+        
+        self.head = nn.Conv2d(
+            self.embed_dim, self.num_classes, kernel_size=3, stride=1, padding=1)
         
     def interpolate_pos_encoding(self, x, h, w):
-        npatch = x.shape[1] - self.num_classes
-        N = self.num_patches
-        if npatch == N and h == w:
+        if self.Hp == h and self.Wp == w:
             return self.pos_embed_pat
         
         patch_pos_embed = self.pos_embed_pat
         h0 = h // self.patch_embed.patch_size[0]
         w0 = w // self.patch_embed.patch_size[1]
         dim = x.shape[-1]
-        Np = int(math.sqrt(N))
+    
         patch_pos_embed = nn.functional.interpolate(
-            patch_pos_embed.reshape(1, Np, Np, dim).permute(0, 3, 1, 2),
+            patch_pos_embed.reshape(1, self.Hp, self.Wp, dim).permute(0, 3, 1, 2),
             size=(h0, w0),
             mode='bicubic',
             align_corners=False)
@@ -112,25 +139,24 @@ class MCTG(VisionTransformer):
             
         else: x = x + self.pos_embed_pat
         
-        nn_cls_tokens = self.cls_token.expand(B, -1, -1) + self.pos_embed_cls
-        cls_tokens = self.build_class_tokens(x_spatial) + nn_cls_tokens
-        
-        x = torch.cat((cls_tokens, x), dim=1) # Concat input with Nc class tokens
-        x = self.pos_drop(x)                  # B x (N') x C, where N' = Nc + Np
+        cls_tokens = self.build_class_tokens(x_spatial)
+        # x = torch.cat((self.cls_token, x), dim=1) # Concat input with 1 class tokens
+        x = self.pos_drop(x)                      # B x (N') x C, where N' = 1 + Np
         
         attn_weights = []
         for i in range(self.stages):
             for j in range(self.stage_indices[i], self.stage_indices[i+1]):# for each layer
                 x, weights_j = self.blocks[j](x) # weights_j: the j-th layer attention weights
-                attn_weights.append(weights_j)
+                attn_weights.append(weights_j) 
             # spatial fusion 
-            x_spatial[i] = self.spatial_fuse[i](x_query=x_spatial[i], x_key=x) 
+            x_spatial[i] = self.spatial_fuse[i](
+                x_query=x_spatial[i], x_key=torch.cat((cls_tokens, x), dim=1))
             # downsample add
             if i != self.stages - 1:
                 z = self.spatial_downsamples[i](x_spatial[i])
                 x_spatial[i + 1] = x_spatial[i + 1] + z
     
-        return x[:, :self.num_classes], x[:, self.num_classes:], attn_weights, x_spatial
+        return cls_tokens, x[:, self.num_classes:], attn_weights, x_spatial
     
     def reshape_patch_tokens(self, patch_tokens, H, W):
         B, _, C = patch_tokens.shape
@@ -181,7 +207,7 @@ class MCTG(VisionTransformer):
         return cls_logits, pat_logits
 
 
-class MCTGCAM(MCTG):
+class MCTGViT_CAM(MCTGViT):
     def __init__(self, *args, **kwargs):
         super().__init__(decay_parameter=0.996, input_size=448, *args, **kwargs)
     
@@ -243,8 +269,8 @@ class MCTGCAM(MCTG):
 
 
 @register_model
-def deit_small_MCTG(pretrained=False, **kwargs):
-    model = MCTG(
+def deit_small_mctgvit(pretrained=False, **kwargs):
+    model = MCTGViT(
         patch_size=16, embed_dim=384, depth=12, 
         num_heads=6, mlp_ratio=4, qkv_bias=True,
         norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)

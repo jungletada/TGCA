@@ -22,7 +22,7 @@ import logging
 import utils 
 from utils import str2bool
 from misc import imutils, pyutils, torchutils
-from misc import Evaluator
+from misc.metrics import Evaluator
 from data.voc12.dataloader import VOCAugSegmentationDataset
 from net.resnet38d_seg import ResNet38d_Seg
 cudnn.enabled = True
@@ -132,7 +132,7 @@ def train(args):
         is_train=True,
         base_size=None,
         crop_size=321,
-        scales=(0.7, 1.3))
+        scales=(0.75, 1.25))
     
     sampler = DistributedSampler(dataset)
     
@@ -159,8 +159,7 @@ def train(args):
             {'params': model.get_10x_lr_params(), 'lr': 10 * args.lr}], 
         lr=args.lr, 
         weight_decay=args.wt_dec, 
-        max_step=args.max_step, 
-        warmup_step=0) # args.warmup_step
+        max_step=args.max_step)
 
     model.to(device)
     if args.world_size > 1:

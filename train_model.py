@@ -23,7 +23,7 @@ import utils
 from engine import compute_mAP
 from datasets_cam import build_dataset
 from utils import str2bool
-import net.mctg_v3
+import net.mctgformer
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -231,8 +231,8 @@ def load_model_weight(args, model):
     return checkpoint_model
       
 
-def ddp_print(logger, log_msg):
-    if dist.get_rank() == 0:
+def ddp_print(logger, log_msg, rank=0):
+    if rank == 0:
         logger.info(log_msg)
 
 
@@ -270,6 +270,7 @@ def train_one_epoch(
             total_loss = 3 * cls_loss + patch_loss
             
         loss_value = total_loss.item()
+        
         # if not math.isfinite(loss_value):
         #     print("Loss is {}, stopping training".format(loss_value))
         #     sys.exit(1)
@@ -367,15 +368,15 @@ def main(args):
                           args.work_space, 
                           f'train_cam_{args.dataset}.log'))
     logger = logging.getLogger(session_name)
-    ddp_print(logger, f"Use seed: {args.seed}")
+    ddp_print(logger, f"Use seed: {args.seed}", dist.get_rank())
     
     if args.finetune:
         checkpoint_model = load_model_weight(args, model)
         model.load_state_dict(checkpoint_model, strict=False)
     
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    ddp_print(logger, f'Number of parameters: {n_parameters}')
-    ddp_print(logger, best_ckpt_name)
+    ddp_print(logger, f'Number of parameters: {n_parameters}', dist.get_rank())
+    ddp_print(logger, best_ckpt_name, dist.get_rank())
 
     linear_scaled_lr = args.lr * args.batch_per_gpu * dist.get_world_size() / 512.0
     args.lr = linear_scaled_lr
@@ -384,7 +385,7 @@ def main(args):
     loss_scaler = NativeScaler()
 
     lr_scheduler, _ = create_scheduler(args, optimizer)
-    ddp_print(logger, f"|-- Total epochs: {args.epochs}")
+    ddp_print(logger, f"|-- Total epochs: {args.epochs}", dist.get_rank())
     start_time = time.time()
     max_accuracy = 0.0
 
@@ -412,25 +413,26 @@ def main(args):
             data_loader=data_loader_val, 
             device=device)
     
-        ddp_print(logger, f"mAP of the network on the {len(dataset_val)} test images: {test_stats['mAP']*100:.1f}%")
+        ddp_print(logger, f"mAP of the network on the {len(dataset_val)} test images: {test_stats['mAP']*100:.1f}%", 
+                  dist.get_rank())
         if test_stats["mAP"] > max_accuracy:
             torch.save({'model': model.module.state_dict()}, 
                        os.path.join(args.work_space, f'{args.model}_best.pth'))
 
         max_accuracy = max(max_accuracy, test_stats["mAP"])
-        ddp_print(logger, f'Max mAP: {max_accuracy * 100:.2f}%')
+        ddp_print(logger, f'Max mAP: {max_accuracy * 100:.2f}%', dist.get_rank())
 
         log_stats = {'epoch': epoch,
                      **{f'train_{k}': v for k, v in train_stats.items()},
                      **{f'test_{k}': v for k, v in test_stats.items()}}
 
         if utils.is_main_process():
-            ddp_print(logger, json.dumps(log_stats))
+            ddp_print(logger, json.dumps(log_stats), dist.get_rank())
 
     torch.save({'model': model.module.state_dict()}, os.path.join(args.work_space, f'{args.model}_last.pth'))
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    ddp_print(logger, 'Training time {}'.format(total_time_str))
+    ddp_print(logger, 'Training time {}'.format(total_time_str), dist.get_rank())
 
 
 if __name__ == '__main__':
