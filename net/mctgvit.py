@@ -20,6 +20,7 @@ class MCTGViT(VisionTransformer):
         self.stage_indices = tuple(i for i in range(0, self.depth + 1, interval))
         
         img_size = to_2tuple(input_size)
+        self.img_size = img_size
         patch_size = to_2tuple(self.patch_embed.patch_size)
         self.Hp, self.Wp = img_size[0] // patch_size[0], img_size[1] // patch_size[1]
         self.num_patches = self.Hp * self.Wp
@@ -41,12 +42,12 @@ class MCTGViT(VisionTransformer):
         for i in range(self.stages):
             trunc_normal_(self.sptial_pos_embed[i], std=.02)
             
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
-        self.pos_embed_cls = nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim))
+        # self.cls_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
+        # self.pos_embed_cls = nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim))
         self.pos_embed_pat = nn.Parameter(torch.zeros(1, self.num_patches, self.embed_dim))
 
-        trunc_normal_(self.cls_token, std=.02)
-        trunc_normal_(self.pos_embed_cls, std=.02)
+        # trunc_normal_(self.cls_token, std=.02)
+        # trunc_normal_(self.pos_embed_cls, std=.02)
         trunc_normal_(self.pos_embed_pat, std=.02)
         
         self.avgpool2d = nn.AdaptiveAvgPool2d(1)
@@ -90,24 +91,31 @@ class MCTGViT(VisionTransformer):
         self.head = nn.Conv2d(
             self.embed_dim, self.num_classes, kernel_size=3, stride=1, padding=1)
         
-    def interpolate_pos_encoding(self, x, h, w):
-        if self.Hp == h and self.Wp == w:
+    def interpolate_pos_encoding(self, token_size):
+        if self.Hp == token_size[0] and self.Wp == token_size[1]:
             return self.pos_embed_pat
         
         patch_pos_embed = self.pos_embed_pat
-        h0 = h // self.patch_embed.patch_size[0]
-        w0 = w // self.patch_embed.patch_size[1]
-        dim = x.shape[-1]
-    
-        patch_pos_embed = nn.functional.interpolate(
-            patch_pos_embed.reshape(1, self.Hp, self.Wp, dim).permute(0, 3, 1, 2),
-            size=(h0, w0),
-            mode='bicubic',
+        patch_pos_embed = F.interpolate(
+            patch_pos_embed.reshape(1, self.Hp, self.Wp, self.embed_dim).permute(0, 3, 1, 2),
+            size=token_size,
+            mode='bilinear',
             align_corners=False)
-        assert h0 == patch_pos_embed.shape[-2] and w0 == patch_pos_embed.shape[-1]
-        patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
+        patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, self.embed_dim)
         return patch_pos_embed
 
+    def interpolate_spatial_pos_encoding(self, x_spatial):
+        # out_sizes = [((H+1)//scale, (W+1)//scale) for scale in self.spatial_scales]
+        spatial_pos_embed = []
+        for i in range(self.stages):
+            spatial_pos_embed.append(
+                F.interpolate(
+                    self.sptial_pos_embed[i],
+                    size=x_spatial[i].shape[2:],
+                    mode='bilinear',
+                    align_corners=False))
+        return spatial_pos_embed
+    
     def build_class_tokens(self, x):
         """
         Input: x -> list[B x C x H^ x W^]
@@ -132,31 +140,38 @@ class MCTGViT(VisionTransformer):
         B, _, H, W = x.shape                # B x 3 x H x W
         x_spatial = self.spatial_prior(x)   # list [B x C x H^ x W^]
         x = self.patch_embed(x)
+        token_size = (H // self.patch_embed.patch_size[0], 
+                      W // self.patch_embed.patch_size[1])
         
         if not self.training:
-            pos_embed_pat = self.interpolate_pos_encoding(x, H, W)
+            pos_embed_pat = self.interpolate_pos_encoding(token_size=token_size)
             x = x + pos_embed_pat
-            
-        else: x = x + self.pos_embed_pat
+            sptial_pos_embed = self.interpolate_spatial_pos_encoding(x_spatial)
+            for i in range(self.stages):
+                x_spatial[i] += sptial_pos_embed[i].to(x.device)
+        else: 
+            x = x + self.pos_embed_pat
+            for i in range(self.stages):
+                x_spatial[i] += self.sptial_pos_embed[i].to(x.device)
         
         cls_tokens = self.build_class_tokens(x_spatial)
-        # x = torch.cat((self.cls_token, x), dim=1) # Concat input with 1 class tokens
-        x = self.pos_drop(x)                      # B x (N') x C, where N' = 1 + Np
+        x = self.pos_drop(x)
         
         attn_weights = []
         for i in range(self.stages):
             for j in range(self.stage_indices[i], self.stage_indices[i+1]):# for each layer
                 x, weights_j = self.blocks[j](x) # weights_j: the j-th layer attention weights
                 attn_weights.append(weights_j) 
-            # spatial fusion 
-            x_spatial[i] = self.spatial_fuse[i](
-                x_query=x_spatial[i], x_key=torch.cat((cls_tokens, x), dim=1))
-            # downsample add
+            cls_tokens, x_spatial[i] = self.spatial_fuse[i](
+                x_spatial=x_spatial[i], 
+                x_backbone=torch.cat((cls_tokens, x), dim=1),
+                token_size=token_size)
+
             if i != self.stages - 1:
-                z = self.spatial_downsamples[i](x_spatial[i])
+                z = self.down_convs[i](x_spatial[i])
                 x_spatial[i + 1] = x_spatial[i + 1] + z
     
-        return cls_tokens, x[:, self.num_classes:], attn_weights, x_spatial
+        return cls_tokens, x, attn_weights, x_spatial
     
     def reshape_patch_tokens(self, patch_tokens, H, W):
         B, _, C = patch_tokens.shape
@@ -181,7 +196,6 @@ class MCTGViT(VisionTransformer):
         return out
         
     def foward_tokens(self, patch_tokens):
-        """ MCTformer Plus: Weighted Patch Tokens """
         patch_tokens = self.head(patch_tokens) # B x Cls x Hp x Wp
         patch_logits = self.globalweightedpooling(patch_tokens)
         return patch_logits
@@ -201,7 +215,7 @@ class MCTGViT(VisionTransformer):
             out_spatial.append(x)
         # concat spatial and patch tokens        
         out_spatial = torch.cat(out_spatial, dim=1)
-        out_spatial = self.spatial_reduce(out_spatial)
+        out_spatial = self.channel_reduction(out_spatial)
         # classification head and GWP
         pat_logits = self.foward_tokens(out_spatial)
         return cls_logits, pat_logits
@@ -211,7 +225,7 @@ class MCTGViT_CAM(MCTGViT):
     def __init__(self, *args, **kwargs):
         super().__init__(decay_parameter=0.996, input_size=448, *args, **kwargs)
     
-    def forward_attention(self, tokens, attn_weights, fuse_layers=12):
+    def forward_attention(self, tokens, attn_weights, fuse_layers):
         """
         Input: 
             patch_tokens: patch tokens from the last backbone layer
@@ -224,47 +238,59 @@ class MCTGViT_CAM(MCTGViT):
         
         B, Cls, Hp, Wp = tokens.shape
         
-        attn_weights = torch.mean(torch.stack(attn_weights), dim=2)     # L x B x (Cls+Np) x (Cls+Np) 
-        attn_maps = attn_weights[-fuse_layers:].mean(0)                 # B x (Cls+Np) x (Cls+Np)
+        # attn_weights = torch.mean(torch.stack(attn_weights), dim=2)     # L x B x (Cls+Np) x (Cls+Np) 
+        # attn_maps = attn_weights[-fuse_layers:].mean(0)                 # B x (Cls+Np) x (Cls+Np)
         
-        cls2pat = attn_maps[:, :Cls, Cls:].reshape([B, Cls, Hp, Wp])    # B x Cls x Hp x Wp
+        # cls2pat = attn_maps[:, :Cls, Cls:].reshape([B, Cls, Hp, Wp])    # B x Cls x Hp x Wp
         
         patch_cam = tokens.detach().clone()   # B x Cls x Hp x Wp
         patch_cam = F.relu(patch_cam)   # With ReLU Activation
-        
-        cams = torch.pow(cls2pat * patch_cam, 1/2)
+        cams = patch_cam
+        # cams = torch.pow(cls2pat * patch_cam, 1/2)
     
-        # Apply pat2pat affinity refinement
-        pat2pat = attn_weights[:, :, Cls:, Cls:] #  L x B x Np x Np
-        pat2pat = torch.sum(pat2pat, dim=0)      # B x Np x Np
+        # # Apply pat2pat affinity refinement
+        # pat2pat = attn_weights[:, :, Cls:, Cls:] #  L x B x Np x Np
+        # pat2pat = torch.sum(pat2pat, dim=0)      # B x Np x Np
 
-        cams = torch.matmul(
-                pat2pat.unsqueeze(1),    # B x 1 x Np x Np
-                cams.view(B, Cls, -1, 1) # B x Cls x Np x 1
-            ).reshape(B, Cls, Hp, Wp)
+        # cams = torch.matmul(
+        #         pat2pat.unsqueeze(1),    # B x 1 x Np x Np
+        #         cams.view(B, Cls, -1, 1) # B x Cls x Np x 1
+        #     ).reshape(B, Cls, Hp, Wp)
         
         return cams
     
     def forward(self, x):
         H, W = x.shape[2:]
-        # basic forward
+        min_tokens = self.dilations_spatial[-1] * self.num_knn_spatial[-1]
+        scaled_size = self.spatial_scales[-1] * self.spatial_scales[-1]
+        if (H * W) // scaled_size <= min_tokens:
+            H_ = int(math.sqrt(min_tokens * H / W) * self.spatial_scales[-1] + 1)
+            W_ = int(math.sqrt(min_tokens * W / H) * self.spatial_scales[-1] + 1)
+            x = F.interpolate(
+                input=x,
+                size=(H_, W_),
+                mode='bilinear',
+                align_corners=False)
+            # print(f"Originial={H, W}; Now={x.shape[2:]}")
+            H, W = H_, W_
+
         _, patch_tokens, attn_weights, x_spatials = self.forward_features(x)
-        # patch tokens
+
         patch_tokens = self.reshape_patch_tokens(patch_tokens, H, W) # B x C x Hp x Wp  
         out_spatial = [patch_tokens]
-        # spatial tokens
+     
         out_size = patch_tokens.shape[2:]
         for x in x_spatials:
             x = F.interpolate(x, size=out_size, mode="bilinear", align_corners=False)
             out_spatial.append(x)
         # concat spatial and patch tokens        
         out_spatial = torch.cat(out_spatial, dim=1)
-        out_spatial = self.spatial_reduce(out_spatial)
+        out_spatial = self.channel_reduction(out_spatial)
         # class activation map
         out_spatial = self.head(out_spatial)  # B x Cls x Hp x Wp
         cams = self.forward_attention(
             out_spatial, attn_weights, fuse_layers=3)
-        
+
         return cams
 
 
@@ -303,13 +329,10 @@ if __name__ == "__main__":
     
     from timm.models import create_model
     model = create_model(
-        "deit_small_MCTG",
+        "deit_small_mctgvit",
         pretrained=False,
-        num_classes=20,
-        drop_rate=0.,
-        drop_path_rate=0.1,
-        drop_block_rate=None,
-        input_size=512).cuda()
+        input_size=448,
+        num_classes=20,).cuda()
     
     model.eval()
     

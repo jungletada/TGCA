@@ -20,10 +20,13 @@ import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
 
 import utils
-from engine import compute_mAP
+from engine import compute_mAP, evaluate
+from engine import train_one_epoch_mctformerplus, train_one_epoch_mctgformer
 from datasets_cam import build_dataset
 from utils import str2bool
+
 import net.mctgformer
+import net.mctformer_plus
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -45,11 +48,13 @@ def get_args_parser():
     # Model parameters
     parser.add_argument('--model', default='deit_small_mctgformer', type=str, metavar='MODEL',
                         help='Name of model to train')
-    parser.add_argument('--input-size', default=448, type=int, help='images input size')
+    parser.add_argument('--input_size', default=224, type=int, help='images input size')
     parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
                         help='Dropout rate (default: 0.)')
     parser.add_argument('--drop-path', type=float, default=0.1, metavar='PCT',
                         help='Drop path rate (default: 0.1)')
+    parser.add_argument('--cls_weight', type=float, default=1.0, 
+                        help='weight for class output loss')
 
     # Optimizer parameters
     parser.add_argument('--opt', default='adamw', type=str, metavar='OPTIMIZER',
@@ -229,95 +234,90 @@ def load_model_weight(args, model):
         checkpoint_model['cls_token'] = new_cls_token
     
     return checkpoint_model
-      
+
 
 def ddp_print(logger, log_msg, rank=0):
     if rank == 0:
         logger.info(log_msg)
 
 
-def train_one_epoch(
-    model, 
-    data_loader, 
-    optimizer, 
-    device, 
-    epoch,
-    loss_scaler, 
-    max_norm, 
-    set_training_mode=True):
+# def train_one_epoch(
+#     model, 
+#     data_loader, 
+#     optimizer, 
+#     device, 
+#     epoch,
+#     loss_scaler, 
+#     max_norm, 
+#     set_training_mode=True):
+#     print_freq = 10
+#     model.train(set_training_mode)
+#     criterion = nn.MultiLabelSoftMarginLoss()
     
-    print_freq = 10
-    model.train(set_training_mode)
-    criterion = nn.MultiLabelSoftMarginLoss()
+#     metric_logger = utils.MetricLogger(delimiter="  ")
+#     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+#     header = 'Epoch: [{}]'.format(epoch)
     
-    metric_logger = utils.MetricLogger(delimiter="  ")
-    metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
-    header = 'Epoch: [{}]'.format(epoch)
-    
-    for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
-        samples = samples.to(device, non_blocking=True)
-        targets = targets.to(device, non_blocking=True)
+#     for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
+#         samples = samples.to(device, non_blocking=True)
+#         targets = targets.to(device, non_blocking=True)
 
-        with torch.cuda.amp.autocast():
-            outputs = model(samples)
+#         with torch.cuda.amp.autocast():
+#             outputs = model(samples)
 
-            cls_loss = criterion(outputs[0], targets)
-            metric_logger.update(cls_loss=cls_loss.item())
+#             cls_loss = criterion(outputs[0], targets)
+#             metric_logger.update(cls_loss=cls_loss.item())
             
-            patch_loss = criterion(outputs[1], targets)
-            metric_logger.update(pat_loss=patch_loss.item())
+#             patch_loss = criterion(outputs[1], targets)
+#             metric_logger.update(pat_loss=patch_loss.item())
             
-            total_loss = 3 * cls_loss + patch_loss
+#             total_loss = 3 * cls_loss + patch_loss # mctgformer=3
             
-        loss_value = total_loss.item()
-        
-        # if not math.isfinite(loss_value):
-        #     print("Loss is {}, stopping training".format(loss_value))
-        #     sys.exit(1)
+#         loss_value = total_loss.item()
 
-        optimizer.zero_grad()
-        is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
-        loss_scaler(total_loss, optimizer, clip_grad=max_norm,
-                    parameters=model.parameters(), create_graph=is_second_order)
-        torch.cuda.synchronize()
-        metric_logger.update(loss=loss_value)
-        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
-    # gather the stats from all processes
-    metric_logger.synchronize_between_processes()
+#         optimizer.zero_grad()
+#         is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
+#         loss_scaler(total_loss, optimizer, clip_grad=max_norm,
+#                     parameters=model.parameters(), create_graph=is_second_order)
+#         torch.cuda.synchronize()
+#         metric_logger.update(loss=loss_value)
+#         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+#     # gather the stats from all processes
+#     metric_logger.synchronize_between_processes()
     
-    if dist.get_rank() == 0:
-        print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}  
+#     if dist.get_rank() == 0:
+#         print("Averaged stats:", metric_logger)
+#     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}  
       
          
-@torch.no_grad()
-def evaluate(data_loader, model, device):
-    criterion = torch.nn.MultiLabelSoftMarginLoss()
-    metric_logger = utils.MetricLogger(delimiter="  ")
-    header = 'Test:'
-    mAP = []
-    model.eval() # switch to evaluation mode
+# @torch.no_grad()
+# def evaluate(data_loader, model, device):
+#     criterion = torch.nn.MultiLabelSoftMarginLoss()
+#     metric_logger = utils.MetricLogger(delimiter="  ")
+#     header = 'Test:'
+#     mAP = []
+#     model.eval() # switch to evaluation mode
 
-    for images, target in metric_logger.log_every(data_loader, 10, header):
-        images = images.to(device, non_blocking=True)
-        target = target.to(device, non_blocking=True)
-        batch_size = images.shape[0]
+#     for images, target in metric_logger.log_every(data_loader, 10, header):
+#         images = images.to(device, non_blocking=True)
+#         target = target.to(device, non_blocking=True)
+#         batch_size = images.shape[0]
 
-        with torch.cuda.amp.autocast():
-            cls_out = model(images)[0]
-            loss = criterion(cls_out, target)
-            cls_out = torch.sigmoid(cls_out)
-            mAP_list = compute_mAP(target, cls_out)
-            mAP = mAP + mAP_list
-            metric_logger.meters['mAP'].update(np.mean(mAP_list), n=batch_size)
+#         with torch.cuda.amp.autocast():
+#             cls_out = model(images)[0]
+#             loss = criterion(cls_out, target)
+#             cls_out = torch.sigmoid(cls_out)
+#             mAP_list = compute_mAP(target, cls_out)
+#             mAP = mAP + mAP_list
+#             metric_logger.meters['mAP'].update(np.mean(mAP_list), n=batch_size)
             
-        metric_logger.update(loss=loss.item())
+#         metric_logger.update(loss=loss.item())
 
-    # gather the stats from all processes
-    metric_logger.synchronize_between_processes()
-    print('* mAP {mAP.global_avg:.3f}, loss {losses.global_avg:.3f}'
-        .format(mAP=metric_logger.mAP, losses=metric_logger.loss))
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+#     # gather the stats from all processes
+#     metric_logger.synchronize_between_processes()
+#     print('* mAP {mAP.global_avg:.3f}, loss {losses.global_avg:.3f}'
+#         .format(mAP=metric_logger.mAP, losses=metric_logger.loss))
+#     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
      
 def main(args):
@@ -395,9 +395,17 @@ def main(args):
     model = nn.parallel.DistributedDataParallel(
         model, find_unused_parameters=True, device_ids=[args.local_rank])
     
+    if args.model.__contains__("mctformerplus"):
+        train_one_epoch = train_one_epoch_mctformerplus
+    else:
+        train_one_epoch = train_one_epoch_mctgformer
+        
     for epoch in range(args.start_epoch, args.epochs):
+        
         data_loader_train.sampler.set_epoch(epoch)
+        
         train_stats = train_one_epoch(
+            args=args,
             model=model, 
             data_loader=data_loader_train,
             optimizer=optimizer, 

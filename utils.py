@@ -7,6 +7,7 @@ import datetime
 import logging
 import torch
 import torch.distributed as dist
+import torch.nn.functional as F
 from collections import defaultdict, deque
 
 '''
@@ -81,26 +82,77 @@ def logger_info(logger_name, log_path='default_logger.log'):
         log.addHandler(sh)
 
 
+def load_model_weight(args, model):
+    model_npatches = model.patch_embed.num_patches
+    if args.finetune.startswith('https'):
+        checkpoint = torch.hub.load_state_dict_from_url(
+            args.finetune, map_location='cpu', check_hash=True)
+        num_extra_tokens = 1
+    else: 
+        checkpoint = torch.load(args.finetune, map_location='cpu')
+        num_extra_tokens = model.pos_embed.shape[-2] - model_npatches
+        
+    try: checkpoint_model = checkpoint['model']
+    except: checkpoint_model = checkpoint
+        
+    state_dict = model.state_dict()
+    for k in ['head.weight', 'head.bias', 'head_dist.weight', 'head_dist.bias']:
+        if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
+            print(f"Removing key {k} from pretrained checkpoint")
+            del checkpoint_model[k]
+
+    # interpolate position embedding
+    ckpt_pos_embed = checkpoint_model['pos_embed']
+    embedding_size = ckpt_pos_embed.shape[-1]
+
+    original_size = int((ckpt_pos_embed.shape[-2] - num_extra_tokens) ** 0.5)
+
+    if args.finetune.startswith('https'):
+        extra_tokens = ckpt_pos_embed[:, :num_extra_tokens].repeat(1, args.nb_classes, 1)
+    else:
+        extra_tokens = ckpt_pos_embed[:, :num_extra_tokens]
+
+    pos_tokens = ckpt_pos_embed[:, num_extra_tokens:]
+
+    pos_tokens = pos_tokens.reshape( # (1, Hp, Wp, C)->(1, C, Hp, Wp)
+        -1, original_size, original_size, embedding_size).permute(0, 3, 1, 2)
+    
+    pos_tokens = F.interpolate(
+            input=pos_tokens,
+            size=(model.Hp, model.Wp),
+            mode='bicubic',
+            align_corners=False)
+    
+    pos_tokens = pos_tokens.permute(0, 2, 3, 1).flatten(1, 2)
+
+    checkpoint_model['pos_embed_cls'] = extra_tokens
+    checkpoint_model['pos_embed_pat'] = pos_tokens
+
+    if args.finetune.startswith('https'):
+        cls_token_checkpoint = checkpoint_model['cls_token']
+        new_cls_token = cls_token_checkpoint.repeat(1, args.nb_classes, 1)
+        checkpoint_model['cls_token'] = new_cls_token
+    
+    return checkpoint_model
+
+
 def create_cam_model(args):
     if args.model.__contains__('MCTformerV2'):
-        model_name = "MCTformerV2_cam"
         from net.mctformer import MCTformerV2_cam
-        model = MCTformerV2_cam(
-            num_classes=args.nb_classes,
-            drop_rate=args.drop,
-            drop_path_rate=args.drop_path,
-            input_size=args.input_size)
-        
-    elif args.model.__contains__('MCTformerPlus'):
-        model_name = 'MCTformerPlus'
-            
-    elif args.model.__contains__('MCTG'):
-        model_name = 'MCTG'  
-        
+        model_cam = MCTformerV2_cam
+    elif args.model.__contains__('mctformerplus'):
+        from net.mctformer_plus import MCTformerPlus_CAM
+        model_cam = MCTformerPlus_CAM
+    elif args.model.__contains__('mctgformer'):
+        from net.mctgformer import MCTGFormer_CAM
+        model_cam = MCTGFormer_CAM
     else:
         raise NotImplementedError   
     
-    print(f'Use {model_name} for making class activation maps.')
+    model = model_cam(
+        num_classes=args.num_classes,
+        input_size=args.input_size)
+    print(f'Using {args.model} for making class activation maps.')
     
     return model
   

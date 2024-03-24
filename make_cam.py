@@ -11,6 +11,7 @@ from torch.backends import cudnn
 cudnn.enabled = True
 
 from misc import torchutils
+from utils import create_cam_model
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -19,10 +20,10 @@ def get_args_parser():
     parser = argparse.ArgumentParser('Generating attention maps', add_help=False)
     # Model parameters
     parser.add_argument("--num_workers", default=12, type=int)
-    parser.add_argument('--model', default='deit_small_MCTG', type=str, metavar='MODEL',
+    parser.add_argument('--model', default='deit_small_mctgformer', type=str, metavar='MODEL',
                         help='Name of model to train')
     parser.add_argument('--checkpoint', default='', help='checkpoint for generating maps')
-    parser.add_argument('--input-size', default=448, type=int, help='images input size')
+    parser.add_argument('--input_size', default=224, type=int, help='images input size')
     parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
                         help='Dropout rate (default: 0.)')
     parser.add_argument('--drop-path', type=float, default=0.1, metavar='PCT',
@@ -125,19 +126,17 @@ if __name__ == '__main__':
     # change to multi-scale dataset
     if args.dataset == 'VOC12':
         args.dataset = 'VOC12MS' 
-        
     elif args.dataset == 'COCO':
         args.dataset = 'COCOMS'
-        
     else:
         raise NotImplementedError
     
     dataset, num_classes = build_dataset(
         is_train=False, make_cam=True, args=args)
-        
-    from net.mctgformer import MCTGFormer_CAM
-    model = MCTGFormer_CAM(
-        num_classes=num_classes)
+    args.num_classes = num_classes
+    
+    model = create_cam_model(args)
+    
     model_dict = torch.load(
         args.checkpoint, 
         map_location='cpu')['model']

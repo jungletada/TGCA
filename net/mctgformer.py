@@ -23,7 +23,7 @@ __all__ = ['deit_small_mctgformer']
 
 
 class MCTGFormer(VisionTransformer):
-    def __init__(self, decay_parameter=0.996, input_size=448, *args, **kwargs):
+    def __init__(self, decay_parameter=0.996, input_size=224, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.stages = 4 
         interval = int(self.depth // self.stages)
@@ -31,7 +31,7 @@ class MCTGFormer(VisionTransformer):
         
         img_size = to_2tuple(input_size)
         patch_size = to_2tuple(self.patch_embed.patch_size)
-        self.Hp, self.Wp = img_size[0] // patch_size[0], img_size[1] // patch_size[1]
+        self.Hp, self.Wp = math.ceil(img_size[0] / patch_size[0]), math.ceil(img_size[1] / patch_size[1])
         self.num_patches = self.Hp * self.Wp
         self.spatial_dims = [self.embed_dim] * self.stages
         self.spatial_scales = (8, 16, 32, 64)   
@@ -39,10 +39,13 @@ class MCTGFormer(VisionTransformer):
         self.dilations = [1, 2, 3, 4]
         self.num_knn = [18, 15, 12, 9] 
         self.dilations_spatial = [1, 2, 2, 2]
-        self.num_knn_spatial = [9, 9, 9, 9]
+        if input_size < 448:
+            self.num_knn_spatial = [9, 9, 6, 6]
+        else:
+            self.num_knn_spatial = [9, 9, 9, 9]
         self.decay_parameter = decay_parameter
         
-        self.spatial_sizes = [(img_size[0]//scale, img_size[1]//scale) 
+        self.spatial_sizes = [(math.ceil(img_size[0]/scale), math.ceil(img_size[1]/scale)) 
                               for scale in self.spatial_scales]
         self.sptial_pos_embed = [nn.Parameter(
             torch.zeros(1, self.spatial_dims[i], self.spatial_sizes[i][0], self.spatial_sizes[i][1]))
@@ -163,7 +166,7 @@ class MCTGFormer(VisionTransformer):
             x = x + self.pos_embed_pat
             for i in range(self.stages):
                 x_spatial[i] += self.sptial_pos_embed[i].to(x.device)
-        
+                
         nn_cls_tokens = self.cls_token.expand(B, -1, -1) + self.pos_embed_cls
         cls_tokens = self.build_class_tokens(x_spatial) + nn_cls_tokens
         
@@ -177,11 +180,9 @@ class MCTGFormer(VisionTransformer):
                 x, weights_j = self.blocks[j](x) # weights_j: the j-th layer attention weights
                 attn_weights.append(weights_j)
                 
-            x_cls, x_spatial[i] = self.spatial_fuse[i](
+            _, x_spatial[i] = self.spatial_fuse[i](
                 x_spatial=x_spatial[i], x_backbone=x, token_size=token_size)
-             
-            # x[:, :self.num_classes] = x_cls
-
+            
             if i != self.stages - 1:
                 z = self.down_convs[i](x_spatial[i])
                 x_spatial[i + 1] = x_spatial[i + 1] + z
@@ -240,7 +241,7 @@ class MCTGFormer(VisionTransformer):
 
 class MCTGFormer_CAM(MCTGFormer):
     def __init__(self, fuse_layers=3, *args, **kwargs):
-        super().__init__(decay_parameter=0.996, input_size=448, *args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.fuse_layers = fuse_layers
         
     def forward_attention(self, tokens, attn_weights):

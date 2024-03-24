@@ -9,6 +9,7 @@ NODES=2
 DATASET=VOC12
 MODEL=mctgformer
 SEG_DIR=pseudo_mask
+INPUTSIZE=224
 CUDA_VISIBLE_DEVICES=${GPU}
 WORKDIR=results_voc/${MODEL}
 
@@ -27,7 +28,8 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --dataset ${DATASET} \
     --model deit_small_${MODEL} \
     --work_space ${WORKDIR} \
-    --seed 4 \
+    --input_size ${INPUTSIZE} \
+    --seed 3 \
     --epoch 45 \
     --batch_per_gpu 16 \
     
@@ -37,9 +39,10 @@ python make_cam.py \
     --dataset ${DATASET} \
     --model deit_small_${MODEL} \
     --work_space ${WORKDIR} \
-    --checkpoint ${WORKDIR}/deit_small_${MODEL}_7142.pth \
+    --input_size ${INPUTSIZE} \
     --train_list ${TRAINID} \
-
+    --checkpoint ${WORKDIR}/deit_small_${MODEL}_best.pth \
+    
 
 # ============= Evaluate Class Activation Maps =============#
 python eval_cam.py \

@@ -18,100 +18,43 @@ import torch.distributed as dist
 from sklearn.metrics import average_precision_score
 
 
-def train_one_epoch_mctformer(
-        model: torch.nn.Module, 
-        data_loader: Iterable,
-        optimizer: torch.optim.Optimizer, 
-        device: torch.device,
-        epoch: int,
-        loss_scaler, 
-        max_norm: float = 0,
-        set_training_mode=True):
-    model.train(set_training_mode)
-    metric_logger = utils.MetricLogger(delimiter="  ")
-    metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
-    header = 'Epoch: [{}]'.format(epoch)
-    print_freq = 10
-    criterion = nn.MultiLabelSoftMarginLoss(weight=None)
-    
-    for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
-        samples = samples.to(device, non_blocking=True)
-        targets = targets.to(device, non_blocking=True)
-
-        patch_outputs = None
-        with torch.cuda.amp.autocast():
-            outputs = model(samples)
-            if not isinstance(outputs, torch.Tensor):
-                outputs, patch_outputs = outputs
-
-            loss = criterion(outputs, targets)
-            metric_logger.update(cls_loss=loss.item())
-            if  patch_outputs is not None:
-                ploss = criterion(patch_outputs, targets)
-                metric_logger.update(pat_loss=ploss.item())
-                loss = loss + ploss
-
-        loss_value = loss.item()
-
-        if not math.isfinite(loss_value):
-            print("Loss is {}, stopping training".format(loss_value))
-            sys.exit(1)
-        optimizer.zero_grad()
-        # this attribute is added by timm on one optimizer (adahessian)
-        is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
-        loss_scaler(loss, optimizer, clip_grad=max_norm,
-                    parameters=model.parameters(), create_graph=is_second_order)
-        torch.cuda.synchronize()
-        metric_logger.update(loss=loss_value)
-        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
-    # gather the stats from all processes
-    metric_logger.synchronize_between_processes()
-    if dist.get_rank() == 0:
-        print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-
-
-def train_one_epoch_mctg(
-        model: torch.nn.Module, 
-        data_loader: Iterable,
-        optimizer: torch.optim.Optimizer, 
-        device: torch.device,
-        epoch: int,
-        loss_scaler, 
-        max_norm: float = 0,
-        set_training_mode=True):
-    
+def train_one_epoch_mctgformer(
+    args,
+    model, 
+    data_loader, 
+    optimizer, 
+    device, 
+    epoch,
+    loss_scaler, 
+    max_norm, 
+    set_training_mode=True):
     print_freq = 10
     model.train(set_training_mode)
-    
-    criterion = nn.MultiLabelSoftMarginLoss(weight=None)
+    criterion = nn.MultiLabelSoftMarginLoss()
     
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
     
+    if args.cls_weight is None:
+        args.cls_weight = 3.
+        
     for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
-        
+
         with torch.cuda.amp.autocast():
             outputs = model(samples)
-        
+
             cls_loss = criterion(outputs[0], targets)
             metric_logger.update(cls_loss=cls_loss.item())
             
             patch_loss = criterion(outputs[1], targets)
             metric_logger.update(pat_loss=patch_loss.item())
             
-            # gcn_loss = criterion(outputs[2], targets)
-            # metric_logger.update(gcn_loss=gcn_loss.item())
-            
-            total_loss = 3 * cls_loss + patch_loss # + gcn_loss
+            total_loss = args.cls_weight * cls_loss + patch_loss # mctgformer=3
             
         loss_value = total_loss.item()
-        if not math.isfinite(loss_value):
-            print("Loss is {}, stopping training".format(loss_value))
-            sys.exit(1)
 
         optimizer.zero_grad()
         is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
@@ -125,20 +68,28 @@ def train_one_epoch_mctg(
     
     if dist.get_rank() == 0:
         print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}  
 
 
-def train_one_epoch_mctformer_plus(
-    model: torch.nn.Module, data_loader: Iterable,
-    optimizer: torch.optim.Optimizer, device: torch.device,
-    epoch: int, loss_scaler, max_norm: float = 0,
-    set_training_mode=True, args=None):
+def train_one_epoch_mctformerplus(
+    args,
+    model,
+    data_loader,
+    optimizer, 
+    device,
+    epoch, 
+    loss_scaler, 
+    max_norm,
+    set_training_mode=True):
     model.train(set_training_mode)
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 10
-
+    
+    if args.cls_weight is None:
+        args.cls_weight = 1.
+        
     for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
@@ -151,27 +102,24 @@ def train_one_epoch_mctformer_plus(
 
             loss = F.multilabel_soft_margin_loss(outputs, targets)
             metric_logger.update(mct_loss=loss.item())
+            
+            output_cls_embeddings = F.normalize(c_outputs, dim=-1)  # 12xBxCxD
+            scores = output_cls_embeddings @ output_cls_embeddings.permute(0, 1, 3, 2)  # 12xBxCxC
 
-            if c_outputs is not None:
-                c_outputs = c_outputs[-args.num_cct:]
-                output_cls_embeddings = F.normalize(c_outputs, dim=-1)  # 12xBxCxD
-                scores = output_cls_embeddings @ output_cls_embeddings.permute(0, 1, 3, 2)  # 12xBxCxC
-
-                ground_truth = torch.arange(targets.size(-1), dtype=torch.long, device=device)  # C
-                ground_truth = ground_truth.unsqueeze(0).unsqueeze(0).expand(
-                    c_outputs.shape[0], c_outputs.shape[1],c_outputs.shape[2])  # 12xBxC
-                regularizer_loss = torch.nn.CrossEntropyLoss(reduction='none')(
-                    scores.permute(1, 2, 3, 0), ground_truth.permute(1, 2, 0))  # BxCx12
-                regularizer_loss = torch.mean(
-                    torch.mean(torch.sum(regularizer_loss * targets.unsqueeze(-1), dim=-2), dim=-1) / (
-                                torch.sum(targets, dim=-1) + 1e-8))
-                metric_logger.update(attn_loss=regularizer_loss.item())
-                loss = loss + args.loss_weight*regularizer_loss
-
-            if patch_outputs is not None:
-                ploss = F.multilabel_soft_margin_loss(patch_outputs, targets)
-                metric_logger.update(pat_loss=ploss.item())
-                loss = loss + ploss
+            ground_truth = torch.arange(targets.size(-1), dtype=torch.long, device=device)  # C
+            ground_truth = ground_truth.unsqueeze(0).unsqueeze(0).expand(
+                c_outputs.shape[0], c_outputs.shape[1],c_outputs.shape[2])  # 12xBxC
+            regularizer_loss = torch.nn.CrossEntropyLoss(reduction='none')(
+                scores.permute(1, 2, 3, 0), ground_truth.permute(1, 2, 0))  # BxCx12
+            regularizer_loss = torch.mean(
+                torch.mean(torch.sum(regularizer_loss * targets.unsqueeze(-1), dim=-2), dim=-1) / (
+                            torch.sum(targets, dim=-1) + 1e-8))
+            metric_logger.update(attn_loss=regularizer_loss.item())
+            loss = loss + args.cls_weight * regularizer_loss
+            
+            ploss = F.multilabel_soft_margin_loss(patch_outputs, targets)
+            metric_logger.update(pat_loss=ploss.item())
+            loss = loss + ploss
 
         loss_value = loss.item()
 
