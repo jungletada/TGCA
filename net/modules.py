@@ -467,8 +467,7 @@ class SemanticSpatialModule(nn.Module):
         x = self.proj_drop(x)
         
         return x[:, :self.Cls], x[:, self.Cls:]
-        
-        
+               
     def forward(self, x_spatial, x_backbone, token_size):
         """
         Input:

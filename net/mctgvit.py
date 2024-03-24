@@ -42,12 +42,12 @@ class MCTGViT(VisionTransformer):
         for i in range(self.stages):
             trunc_normal_(self.sptial_pos_embed[i], std=.02)
             
-        # self.cls_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
-        # self.pos_embed_cls = nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim))
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
+        self.pos_embed_cls = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
         self.pos_embed_pat = nn.Parameter(torch.zeros(1, self.num_patches, self.embed_dim))
 
-        # trunc_normal_(self.cls_token, std=.02)
-        # trunc_normal_(self.pos_embed_cls, std=.02)
+        trunc_normal_(self.cls_token, std=.02)
+        trunc_normal_(self.pos_embed_cls, std=.02)
         trunc_normal_(self.pos_embed_pat, std=.02)
         
         self.avgpool2d = nn.AdaptiveAvgPool2d(1)
@@ -88,16 +88,17 @@ class MCTGViT(VisionTransformer):
             nn.BatchNorm2d(self.embed_dim),
             nn.GELU())
         
-        self.head = nn.Conv2d(
-            self.embed_dim, self.num_classes, kernel_size=3, stride=1, padding=1)
+        self.head = nn.Conv2d(self.embed_dim, self.num_classes, kernel_size=3, stride=1, padding=1)
+        self.cls_head = nn.Linear(self.embed_dim, self.num_classes)
+        self.extend_cls = nn.Conv1d(1, self.num_classes, kernel_size=1, stride=1)
         
     def interpolate_pos_encoding(self, token_size):
         if self.Hp == token_size[0] and self.Wp == token_size[1]:
             return self.pos_embed_pat
         
-        patch_pos_embed = self.pos_embed_pat
         patch_pos_embed = F.interpolate(
-            patch_pos_embed.reshape(1, self.Hp, self.Wp, self.embed_dim).permute(0, 3, 1, 2),
+            self.pos_embed_pat.reshape(
+                1, self.Hp, self.Wp, self.embed_dim).permute(0, 3, 1, 2),
             size=token_size,
             mode='bilinear',
             align_corners=False)
@@ -137,7 +138,7 @@ class MCTGViT(VisionTransformer):
             attn_weights: list[B x Hd x N' x N']
             x_spatial: list[B x C x H^ x W^]
         """
-        B, _, H, W = x.shape                # B x 3 x H x W
+        H, W = x.shape[2:]   # B x 3 x H x W
         x_spatial = self.spatial_prior(x)   # list [B x C x H^ x W^]
         x = self.patch_embed(x)
         token_size = (H // self.patch_embed.patch_size[0], 
@@ -154,7 +155,9 @@ class MCTGViT(VisionTransformer):
             for i in range(self.stages):
                 x_spatial[i] += self.sptial_pos_embed[i].to(x.device)
         
-        cls_tokens = self.build_class_tokens(x_spatial)
+        ext_cls = self.build_class_tokens(x_spatial)
+        cls_tokens = torch.mean(ext_cls, dim=1, keepdim=True) + self.cls_token
+        x = torch.cat((cls_tokens, x), dim=1)
         x = self.pos_drop(x)
         
         attn_weights = []
@@ -162,16 +165,18 @@ class MCTGViT(VisionTransformer):
             for j in range(self.stage_indices[i], self.stage_indices[i+1]):# for each layer
                 x, weights_j = self.blocks[j](x) # weights_j: the j-th layer attention weights
                 attn_weights.append(weights_j) 
-            cls_tokens, x_spatial[i] = self.spatial_fuse[i](
+                
+            ext_cls = self.extend_cls(x[:, :1])
+            _, x_spatial[i] = self.spatial_fuse[i](
                 x_spatial=x_spatial[i], 
-                x_backbone=torch.cat((cls_tokens, x), dim=1),
+                x_backbone=torch.cat((ext_cls, x), dim=1),
                 token_size=token_size)
 
             if i != self.stages - 1:
                 z = self.down_convs[i](x_spatial[i])
                 x_spatial[i + 1] = x_spatial[i + 1] + z
     
-        return cls_tokens, x, attn_weights, x_spatial
+        return x[:, :1], x[:, 1:], attn_weights, x_spatial
     
     def reshape_patch_tokens(self, patch_tokens, H, W):
         B, _, C = patch_tokens.shape
@@ -204,7 +209,7 @@ class MCTGViT(VisionTransformer):
         H, W = x.shape[2:]
         # basic forward
         cls_tokens, patch_tokens, _, x_spatials = self.forward_features(x)
-        cls_logits = cls_tokens.mean(-1)
+        cls_logits = self.cls_head(cls_tokens)
         # patch tokens
         patch_tokens = self.reshape_patch_tokens(patch_tokens, H, W) # B x C x Hp x Wp  
         out_spatial = [patch_tokens]

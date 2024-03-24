@@ -29,8 +29,8 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --model deit_small_${MODEL} \
     --work_space ${WORKDIR} \
     --input_size ${INPUTSIZE} \
-    --seed 3 \
-    --epoch 45 \
+    --seed 2 \
+    --epoch 30 \
     --batch_per_gpu 16 \
     
 
@@ -39,8 +39,8 @@ python make_cam.py \
     --dataset ${DATASET} \
     --model deit_small_${MODEL} \
     --work_space ${WORKDIR} \
-    --input_size ${INPUTSIZE} \
     --train_list ${TRAINID} \
+    --input_size ${INPUTSIZE} \
     --checkpoint ${WORKDIR}/deit_small_${MODEL}_best.pth \
     
 

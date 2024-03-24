@@ -40,7 +40,7 @@ class MCTGFormer(VisionTransformer):
         self.num_knn = [18, 15, 12, 9] 
         self.dilations_spatial = [1, 2, 2, 2]
         if input_size < 448:
-            self.num_knn_spatial = [9, 9, 6, 6]
+            self.num_knn_spatial = [9, 6, 6, 6]
         else:
             self.num_knn_spatial = [9, 9, 9, 9]
         self.decay_parameter = decay_parameter
