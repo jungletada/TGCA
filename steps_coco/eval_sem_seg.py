@@ -31,7 +31,7 @@ def run(args):
     num_images = len(dataset)
     logger.info(f"COCO: Number of images = {num_images}")
     
-    chunk_size = 10000 # for memory efficient
+    chunk_size = 10000     # for memory efficient
     split_indices = [(i, min(i + chunk_size, num_images)) 
                      for i in range(0, num_images, chunk_size)]
     

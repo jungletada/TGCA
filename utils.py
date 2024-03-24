@@ -317,7 +317,7 @@ class MetricLogger(object):
     def add_meter(self, name, meter):
         self.meters[name] = meter
 
-    def log_every(self, iterable, print_freq, header=None):
+    def log_every(self, iterable, print_freq, header=None, rank=0):
         i = 0
         if not header:
             header = ''
@@ -359,8 +359,9 @@ class MetricLogger(object):
             end = time.time()
         total_time = time.time() - start_time
         total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-        print('{} Total time: {} ({:.4f} s / it)'.format(
-            header, total_time_str, total_time / len(iterable)))
+        if rank == 0:
+            print('{} Total time: {} ({:.4f} s / it)'.format(
+                header, total_time_str, total_time / len(iterable)))
 
 
 def _load_checkpoint_for_ema(model_ema, checkpoint):

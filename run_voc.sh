@@ -9,9 +9,9 @@ NODES=2
 DATASET=VOC12
 MODEL=mctgformer
 SEG_DIR=pseudo_mask
-INPUTSIZE=224
+INPUTSIZE=448
 CUDA_VISIBLE_DEVICES=${GPU}
-WORKDIR=results_voc/${MODEL}
+WORKDIR=results_voc/${MODEL}_${INPUTSIZE}
 
 DATACONFIG=configs/voc12
 TRAINAUGID=${DATACONFIG}/train_aug_id.txt
@@ -20,8 +20,9 @@ VALID=${DATACONFIG}/val_id.txt
 TRAINAUGLIST=${DATACONFIG}/train_aug.txt
 TRAINLIST=${DATACONFIG}/train.txt
 
+# please note that mctformer(plus) use cls_weight=1.0
 
-# ============= Train Model ===============#
+# # # ==================== Train Model ====================#
 OMP_NUM_THREADS=${NODES} \
 torchrun --nproc_per_node=${NODES} --nnodes=1 \
     train_model.py \
@@ -29,7 +30,7 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --model deit_small_${MODEL} \
     --work_space ${WORKDIR} \
     --input_size ${INPUTSIZE} \
-    --seed 2 \
+    --seed 8 \
     --epoch 30 \
     --batch_per_gpu 16 \
     
@@ -47,6 +48,7 @@ python make_cam.py \
 # ============= Evaluate Class Activation Maps =============#
 python eval_cam.py \
     --curve_threshold \
+    --dataset ${DATASET} \
     --work_space ${WORKDIR} \
     --train_list ${TRAINID} \
 

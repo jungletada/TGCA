@@ -5,19 +5,8 @@ from functools import partial
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
 import torch.nn.functional as F
-
 from net.modules import DownConv, SpatialPriorModule, SemanticSpatialModule
 from net.base_vit import VisionTransformer, _cfg
-
-"""
-1. Add different GNN dilation for backbone and spatial module
-    self.dilations = [1, 2, 3, 4]
-    self.num_knn = [9, 12, 15, 18] 
-    self.dilations_spatial = [1, 1, 2, 2]
-    self.num_knn_spatial = [15, 12, 9, 6]
-
-2. Change the `BatchNorm` into `InstanceNorm` in Grapher
-"""
 
 __all__ = ['deit_small_mctgformer']
 
@@ -40,8 +29,9 @@ class MCTGFormer(VisionTransformer):
         self.num_knn = [18, 15, 12, 9] 
         self.dilations_spatial = [1, 2, 2, 2]
         if input_size < 448:
-            self.num_knn_spatial = [9, 6, 6, 6]
+            self.num_knn_spatial = [10, 8, 6, 4]
         else:
+            # self.num_knn_spatial = [9, 9, 9, 9]
             self.num_knn_spatial = [9, 9, 9, 9]
         self.decay_parameter = decay_parameter
         

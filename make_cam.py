@@ -102,6 +102,10 @@ def _work(process_id, model, dataset, args):
             upsample_cam = torch.sum(torch.stack(upsample_cam_list, 0), 0) # (20, H, W)
             
             valid_cat = torch.nonzero(label)[:, 0] # get validate class->[#val_cls]
+            if valid_cat.shape[0] == 0: # No validate category
+                np.save(osp.join(args.cam_out_dir, img_name.replace('jpg', 'npy'),
+                        dict()))
+                continue
             
             upsample_cam = upsample_cam[valid_cat]
             upsample_cam = normalize_cam(upsample_cam)

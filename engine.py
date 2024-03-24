@@ -18,16 +18,8 @@ import torch.distributed as dist
 from sklearn.metrics import average_precision_score
 
 
-def train_one_epoch_mctgformer(
-    args,
-    model, 
-    data_loader, 
-    optimizer, 
-    device, 
-    epoch,
-    loss_scaler, 
-    max_norm, 
-    set_training_mode=True):
+def train_one_epoch_mctgformer(args,model, data_loader, optimizer, device, epoch,
+    loss_scaler, max_norm, set_training_mode=True, rank=0):
     print_freq = 10
     model.train(set_training_mode)
     criterion = nn.MultiLabelSoftMarginLoss()
@@ -39,7 +31,7 @@ def train_one_epoch_mctgformer(
     if args.cls_weight is None:
         args.cls_weight = 3.
         
-    for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
+    for samples, targets in metric_logger.log_every(data_loader, print_freq, header, rank=rank):
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
 
