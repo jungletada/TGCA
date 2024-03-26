@@ -367,6 +367,7 @@ def train_affinity(args):
     
     for epoch in range(args.epoch):
         sampler_train.set_epoch(epoch)
+        
         for iteration, pack in enumerate(train_data_loader):
             aff = model.forward(pack[0].cuda(non_blocking=True)) # B x 3 x H x W
             bg_label = pack[1][0].cuda(non_blocking=True)

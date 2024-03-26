@@ -1,4 +1,5 @@
 import os
+import sys
 import math
 import argparse
 import datetime
@@ -9,7 +10,6 @@ import torch
 import logging
 import numpy as np
 import torch.nn as nn
-import torch.nn.functional as F
 
 from timm.models import create_model
 from timm.scheduler import create_scheduler
@@ -19,24 +19,31 @@ import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
 
 import utils
-from engine import evaluate
-from engine import train_one_epoch_mctformerplus, train_one_epoch_mctgformer
+from engine import compute_mAP
 from datasets_cam import build_dataset
-from utils import str2bool
-
-import net.mctgformer
-import net.mctformer_plus
+import net.resnet38d
 
 import warnings
 warnings.filterwarnings("ignore")
+
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
         
         
 def get_args_parser():
     parser = argparse.ArgumentParser('DeiT training and evaluation script', add_help=False)
     parser.add_argument('--batch_per_gpu', default=16, type=int)
-    parser.add_argument('--epochs', default=45, type=int)
+    parser.add_argument('--epochs', default=25, type=int)
     parser.add_argument('--seed', default=0, type=int)
-    parser.add_argument("--work_space", default="results/MCTG", type=str)
+    parser.add_argument("--work_space", default="results_voc", type=str)
     
     # ddp settings
     parser.add_argument('--rank', default=0, type=int, help='rank of current process')  
@@ -45,15 +52,13 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',help='device id (i.e. 0 or 0,1 or cpu)')
 
     # Model parameters
-    parser.add_argument('--model', default='deit_small_mctgformer', type=str, metavar='MODEL',
+    parser.add_argument('--model', default='ResNet38d_patch_224', type=str, metavar='MODEL',
                         help='Name of model to train')
-    parser.add_argument('--input_size', default=224, type=int, help='images input size')
+    parser.add_argument('--input_size', default=448, type=int, help='images input size')
     parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
                         help='Dropout rate (default: 0.)')
     parser.add_argument('--drop-path', type=float, default=0.1, metavar='PCT',
                         help='Drop path rate (default: 0.1)')
-    parser.add_argument('--cls_weight', type=float, default=3.0, 
-                        help='weight for class output loss')
 
     # Optimizer parameters
     parser.add_argument('--opt', default='adamw', type=str, metavar='OPTIMIZER',
@@ -120,11 +125,6 @@ def get_args_parser():
     parser.add_argument('--resplit', action='store_true', default=False,
                         help='Do not random erase first (clean) augmentation split')
 
-    # * Finetuning params
-    parser.add_argument('--finetune', 
-                        default='https://dl.fbaipublicfiles.com/deit/deit_small_patch16_224-cd65a155.pth', 
-                        help='finetune from checkpoint')
-
     # Dataset parameters
     parser.add_argument('--dataset', default='', type=str, help='name of dataset')
     parser.add_argument('--voc12_root', default='datasets/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
@@ -179,60 +179,84 @@ def init_distributed_mode(args):
         world_size=args.world_size,
         rank=args.rank)
     dist.barrier()
+      
+
+def ddp_print(logger, log_msg):
+     if dist.get_rank() == 0:
+         logger.info(log_msg)
+
+
+def train_one_epoch(model, data_loader, optimizer, device, epoch,
+        loss_scaler, max_norm, set_training_mode=True):
+    print_freq = 10
+    model.train(set_training_mode)
+    criterion = nn.MultiLabelSoftMarginLoss(weight=None)
     
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    header = 'Epoch: [{}]'.format(epoch)
     
-def load_model_weight(args, model):
-    model_npatches = model.patch_embed.num_patches
-    if args.finetune.startswith('https'):
-        checkpoint = torch.hub.load_state_dict_from_url(
-            args.finetune, map_location='cpu', check_hash=True)
-        num_extra_tokens = 1
-    else: 
-        checkpoint = torch.load(args.finetune, map_location='cpu')
-        num_extra_tokens = model.pos_embed.shape[-2] - model_npatches
+    for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
+        samples = samples.to(device, non_blocking=True)
+        targets = targets.to(device, non_blocking=True)
         
-    try: checkpoint_model = checkpoint['model']
-    except: checkpoint_model = checkpoint
-        
-    state_dict = model.state_dict()
-    for k in ['head.weight', 'head.bias', 'head_dist.weight', 'head_dist.bias']:
-        if k in checkpoint_model and checkpoint_model[k].shape != state_dict[k].shape:
-            print(f"Removing key {k} from pretrained checkpoint")
-            del checkpoint_model[k]
+        with torch.cuda.amp.autocast():
+            outputs = model(samples)
 
-    # interpolate position embedding
-    ckpt_pos_embed = checkpoint_model['pos_embed']
-    embedding_size = ckpt_pos_embed.shape[-1]
+            cls_loss = criterion(outputs, targets)
+            metric_logger.update(cls_loss=cls_loss.item())
+            
+            total_loss = cls_loss
+                        
+        loss_value = total_loss.item()
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+            sys.exit(1)
 
-    original_size = int((ckpt_pos_embed.shape[-2] - num_extra_tokens) ** 0.5)
-    if args.finetune.startswith('https'):
-        extra_tokens = ckpt_pos_embed[:, :num_extra_tokens].repeat(1, args.nb_classes, 1)
-    else:
-        extra_tokens = ckpt_pos_embed[:, :num_extra_tokens]
-    pos_tokens = ckpt_pos_embed[:, num_extra_tokens:]
-    pos_tokens = pos_tokens.reshape( # (1, Hp, Wp, C)->(1, C, Hp, Wp)
-        -1, original_size, original_size, embedding_size).permute(0, 3, 1, 2)
-    pos_tokens = F.interpolate(
-            input=pos_tokens,
-            size=(model.Hp, model.Wp),
-            mode='bicubic',
-            align_corners=False)
-    pos_tokens = pos_tokens.permute(0, 2, 3, 1).flatten(1, 2)
-
-    checkpoint_model['pos_embed_cls'] = extra_tokens
-    checkpoint_model['pos_embed_pat'] = pos_tokens
-
-    if args.finetune.startswith('https'):
-        cls_token_checkpoint = checkpoint_model['cls_token']
-        new_cls_token = cls_token_checkpoint.repeat(1, args.nb_classes, 1)
-        checkpoint_model['cls_token'] = new_cls_token
+        optimizer.zero_grad()
+        is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
+        loss_scaler(total_loss, optimizer, clip_grad=max_norm,
+                    parameters=model.parameters(), create_graph=is_second_order)
+        torch.cuda.synchronize()
+        metric_logger.update(loss=loss_value)
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+    # gather the stats from all processes
+    metric_logger.synchronize_between_processes()
     
-    return checkpoint_model
+    if dist.get_rank() == 0:
+        print("Averaged stats:", metric_logger)
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}        
+         
+         
+@torch.no_grad()
+def evaluate(data_loader, model, device):
+    criterion = torch.nn.MultiLabelSoftMarginLoss()
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    header = 'Test:'
+    mAP = []
+    model.eval() # switch to evaluation mode
 
+    for images, target in metric_logger.log_every(data_loader, 10, header):
+        images = images.to(device, non_blocking=True)
+        target = target.to(device, non_blocking=True)
+        batch_size = images.shape[0]
 
-def ddp_print(logger, log_msg, rank=0):
-    if rank == 0:
-        logger.info(log_msg)
+        with torch.cuda.amp.autocast():
+            cls_out = model(images)
+            loss = criterion(cls_out, target)
+            
+            cls_out = torch.sigmoid(cls_out)
+            mAP_list = compute_mAP(target, cls_out)
+            mAP = mAP + mAP_list
+            metric_logger.meters['mAP'].update(np.mean(mAP_list), n=batch_size)
+            
+        metric_logger.update(loss=loss.item())
+
+    # gather the stats from all processes
+    metric_logger.synchronize_between_processes()
+    print('* mAP {mAP.global_avg:.3f}, loss {losses.global_avg:.3f}'
+        .format(mAP=metric_logger.mAP, losses=metric_logger.loss))
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
      
 def main(args):
@@ -262,38 +286,30 @@ def main(args):
     data_loader_val = torch.utils.data.DataLoader(
         dataset_val, 
         sampler=sampler_val,
-        batch_size=int(2 * args.batch_per_gpu),
+        batch_size=int(1.5 * args.batch_per_gpu),
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=False)
     
     model = create_model(
         args.model,
-        pretrained=False,
-        num_classes=args.nb_classes,
-        drop_rate=args.drop,
-        drop_path_rate=args.drop_path,
-        input_size=args.input_size) 
+        pretrained=None,
+        num_classes=args.nb_classes)
    
-    args.cls_weight = 3.0 if args.model.__contains__('mctgformer') else 1.0
-
     best_ckpt_name = f'{args.model}_best.pth'
     utils.data_mkdir(args.work_space)
     
     utils.logger_info(logger_name=session_name, 
-                      log_path=os.path.join(
-                          args.work_space, 
-                          f'train_cam_{args.dataset}.log'))
+                      log_path=os.path.join(args.work_space, f'train_cam_{args.dataset}.log'))
     logger = logging.getLogger(session_name)
-    ddp_print(logger, f"Use seed: {args.seed}", dist.get_rank())
+    ddp_print(logger, f"Use seed: {args.seed}")
     
-    if args.finetune:
-        checkpoint_model = load_model_weight(args, model)
-        model.load_state_dict(checkpoint_model, strict=False)
+    checkpoint_model = torch.load('checkpoints/res38_cls.pth')
+    model.load_state_dict(checkpoint_model, strict=False)
     
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    ddp_print(logger, f'Number of parameters: {n_parameters}', dist.get_rank())
-    ddp_print(logger, best_ckpt_name, dist.get_rank())
+    ddp_print(logger, f'Number of parameters: {n_parameters}')
+    ddp_print(logger, best_ckpt_name)
 
     linear_scaled_lr = args.lr * args.batch_per_gpu * dist.get_world_size() / 512.0
     args.lr = linear_scaled_lr
@@ -302,7 +318,7 @@ def main(args):
     loss_scaler = NativeScaler()
 
     lr_scheduler, _ = create_scheduler(args, optimizer)
-    ddp_print(logger, f"|-- Total epochs: {args.epochs}", dist.get_rank())
+    ddp_print(logger, f"|-- Total epochs: {args.epochs}")
     start_time = time.time()
     max_accuracy = 0.0
 
@@ -310,26 +326,18 @@ def main(args):
     if args.world_size > 1:
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model) 
     model = nn.parallel.DistributedDataParallel(
-        model, find_unused_parameters=True, device_ids=[args.local_rank])
+        model, find_unused_parameters=False, device_ids=[args.local_rank])
     
-    if args.model.__contains__("mctformerplus"):
-        train_one_epoch = train_one_epoch_mctformerplus
-    else:
-        train_one_epoch = train_one_epoch_mctgformer
-        
     for epoch in range(args.start_epoch, args.epochs):
-        data_loader_train.sampler.set_epoch(epoch)
-
+        sampler_train.set_epoch(epoch)
         train_stats = train_one_epoch(
-            args=args,
             model=model, 
             data_loader=data_loader_train,
             optimizer=optimizer, 
             device=device, 
             epoch=epoch, 
             loss_scaler=loss_scaler,
-            max_norm=args.clip_grad,
-            rank=dist.get_rank())
+            max_norm=args.clip_grad)
 
         lr_scheduler.step(epoch)
 
@@ -338,26 +346,25 @@ def main(args):
             data_loader=data_loader_val, 
             device=device)
     
-        ddp_print(logger, f"mAP of the network on the {len(dataset_val)} test images: {test_stats['mAP']*100:.1f}%", 
-                  dist.get_rank())
+        ddp_print(logger, f"mAP of the network on the {len(dataset_val)} test images: {test_stats['mAP']*100:.1f}%")
         if test_stats["mAP"] > max_accuracy:
             torch.save({'model': model.module.state_dict()}, 
                        os.path.join(args.work_space, f'{args.model}_best.pth'))
 
         max_accuracy = max(max_accuracy, test_stats["mAP"])
-        ddp_print(logger, f'Max mAP: {max_accuracy * 100:.2f}%', dist.get_rank())
+        ddp_print(logger, f'Max mAP: {max_accuracy * 100:.2f}%')
 
         log_stats = {'epoch': epoch,
                      **{f'train_{k}': v for k, v in train_stats.items()},
                      **{f'test_{k}': v for k, v in test_stats.items()}}
 
         if utils.is_main_process():
-            ddp_print(logger, json.dumps(log_stats), dist.get_rank())
+            ddp_print(logger, json.dumps(log_stats))
 
     torch.save({'model': model.module.state_dict()}, os.path.join(args.work_space, f'{args.model}_last.pth'))
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    ddp_print(logger, 'Training time {}'.format(total_time_str), dist.get_rank())
+    ddp_print(logger, 'Training time {}'.format(total_time_str))
 
 
 if __name__ == '__main__':

@@ -32,7 +32,7 @@ class MCTGFormer(VisionTransformer):
             self.num_knn_spatial = [10, 8, 6, 4]
         else:
             # self.num_knn_spatial = [9, 9, 9, 9]
-            self.num_knn_spatial = [9, 9, 9, 9]
+            self.num_knn_spatial = [20, 16, 12, 8]
         self.decay_parameter = decay_parameter
         
         self.spatial_sizes = [(math.ceil(img_size[0]/scale), math.ceil(img_size[1]/scale)) 
