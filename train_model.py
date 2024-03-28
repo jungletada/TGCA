@@ -245,7 +245,6 @@ def main(args):
     # Train and Validation for image classification
     dataset_train, args.nb_classes = build_dataset(
         is_train=True, make_cam=False, args=args)
-    
     dataset_val, _ = build_dataset(is_train=False, make_cam=False, args=args)
     sampler_train = DistributedSampler(dataset_train)
     

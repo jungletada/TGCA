@@ -14,3 +14,5 @@ data/coco/train_labels.npy
 data/coco/val_labels.npy
 
 data/voc12/cls_labels.npy
+
+test_demo.ipynb

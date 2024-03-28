@@ -28,10 +28,11 @@ TRAINLIST=${DATACONFIG}/train.txt
 #     train_model.py \
 #     --dataset ${DATASET} \
 #     --model deit_small_${MODEL} \
+#     --train_list ${TRAINAUGID} \
 #     --work_space ${WORKDIR} \
 #     --input_size ${INPUTSIZE} \
-#     --seed 2 \
-#     --epoch 30was \
+#     --seed 8 \
+#     --epoch 30 \
 #     --batch_per_gpu 16 \
     
 
@@ -42,7 +43,7 @@ TRAINLIST=${DATACONFIG}/train.txt
 #     --work_space ${WORKDIR} \
 #     --train_list ${TRAINAUGID} \
 #     --input_size ${INPUTSIZE} \
-#     --checkpoint ${WORKDIR}/deit_small_${MODEL}_7170.pth \
+#     --checkpoint ${WORKDIR}/deit_small_${MODEL}_best.pth \
     
 
 # # ============= Evaluate Class Activation Maps =============#
@@ -53,26 +54,25 @@ TRAINLIST=${DATACONFIG}/train.txt
 #     --curve_threshold \
 
 
-#============= Train and Infer Pixel Semantic Affnity =============
-OMP_NUM_THREADS=${NODES} \
-torchrun --nproc_per_node=${NODES} --nnodes=1 \
-    train_infer_psa.py --train True \
-    --dataset ${DATASET} \
-    --work_space ${WORKDIR} \
-    --train_list ${TRAINAUGLIST} \
-    --weights results_voc/resnet38d/ResNet38d_patch_224_best.pth \
-    --seed 3 \
-    --epoch 8 \
-    --lr 0.15 \
-    --low_alpha 0.55 \
-    --high_alpha 0.42 \
+# #============= Train and Infer Pixel Semantic Affnity =============
+# OMP_NUM_THREADS=${NODES} \
+# torchrun --nproc_per_node=${NODES} --nnodes=1 \
+#     train_infer_psa.py --train True \
+#     --dataset ${DATASET} \
+#     --work_space ${WORKDIR} \
+#     --train_list ${TRAINAUGLIST} \
+#     --weights checkpoints/res38_cls.pth \
+#     --seed 3 \
+#     --epoch 5 \
+#     --low_alpha 0.55 \
+#     --high_alpha 0.42 \
 
 
 #============= Infer with Pixel Semantic Affnity =============#
 python train_infer_psa.py --inference True \
     --dataset ${DATASET} \
     --work_space ${WORKDIR} \
-    --infer_list ${TRAINLIST} \
+    --infer_list ${TRAINAUGLIST} \
     --seg_out_dir ${SEG_DIR} \
     --beta 11 \
     --logt 7 \

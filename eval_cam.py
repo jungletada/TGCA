@@ -124,6 +124,6 @@ if __name__ == '__main__':
     time = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M") 
     args.log_file = osp.join(args.work_space, f"eval_cam_{time}.log")
     with open(args.log_file, "a") as f:
-        f.write("{}\nEvaluation class activation map for {}\n".format(time, args.dataset))
+        f.write("{}: Evaluation class activation map for {}\n".format(time, args.dataset))
         
     run(args=args, dataset=dataset)
