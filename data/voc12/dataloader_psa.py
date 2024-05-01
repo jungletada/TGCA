@@ -62,9 +62,14 @@ def load_img_name_list(dataset_path):
     return img_name_list
 
 
+def load_img_name_idlist(dataset_path):
+    img_name_list = open(dataset_path).read().splitlines()
+    return img_name_list
+
+
 class VOC12ImageDataset(Dataset):
     def __init__(self, img_name_list_path, voc12_root, transform=None):
-        self.img_name_list = load_img_name_list(img_name_list_path)
+        self.img_name_list = load_img_name_idlist(img_name_list_path)
         self.voc12_root = voc12_root
         self.transform = transform
 

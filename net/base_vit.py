@@ -103,12 +103,46 @@ class Attention(nn.Module):
         return x, weights
 
 
+
+class AttentionGNN(nn.Module):
+    def __init__(self, dim, num_heads=6, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0., num_classes=20):
+        super().__init__()
+        self.Cls = num_classes
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        self.scale = qk_scale or head_dim ** -0.5
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+    def forward(self, x):
+        B, N, C = x.shape  # Here N = #patches + #class-tokens
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2] 
+        # d for each head, Nd heads in total. --> B x Nd x N x d for {q, k, v}.
+        attn = (q @ k.transpose(-2, -1)) * self.scale  # B x Nd x N x N
+        #======================================================================#               
+        attn_cls, attn_pat = torch.split(attn, [self.Cls, N-self.Cls], dim=-1)
+        attn_pat = attn_pat.softmax(dim=-1)
+        attn_cls = attn_cls.softmax(dim=-1)
+        attn = torch.cat((attn_cls, attn_pat), dim=-1)
+        #======================================================================#     
+        weights = attn
+        attn = self.attn_drop(attn)
+        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+
+        return x, weights
+    
+    
 class Block(nn.Module):
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
                  drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, num_classes=20):
         super().__init__()
         self.norm1 = norm_layer(dim)
-        self.attn = Attention(
+        self.attn = AttentionGNN(
             dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, 
             attn_drop=attn_drop, proj_drop=drop, num_classes=num_classes)
 
