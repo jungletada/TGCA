@@ -317,6 +317,7 @@ class SemanticSpatialModule(nn.Module):
                  proj_drop=0., 
                  drop_path=0.1, 
                  mask_ratio=0.1, 
+                 mlp_ratio=4,
                  qkv_bias=True,
                  qk_scale=None,
                  kernel_dict={'backbone':9, 'spatial':9}, 
@@ -373,7 +374,7 @@ class SemanticSpatialModule(nn.Module):
         
         self.mlp = MLP(
             in_features=self.dim, 
-            hidden_features=self.dim * 4,
+            hidden_features=int(self.dim * mlp_ratio),
             out_features=self.dim)
     
     def forward_semantic_gnn(self, x_spatial, x_backbone, token_size, spatial_size):

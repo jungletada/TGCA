@@ -207,8 +207,8 @@ def build_infer_dataset(args):
     """
     if args.dataset == 'COCO':
         infer_dataset = COCOImageDataset(
-            img_name_list_path=args.train_list, 
             coco_root=args.coco_root,
+            img_name_list_path=args.infer_list, 
             transform=torchvision.transforms.Compose(
                 [np.asarray,
                 Normalize(),

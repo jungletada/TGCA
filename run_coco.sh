@@ -6,21 +6,19 @@ echo "  |-- COCO dataset path: datasets/MSCOCO";
 # NEED TO SET
 GPU=0,1
 NODES=2
-DATASET=VOC12
+DATASET=COCO
 MODEL=mctgformer
 MODELNAME=deit_small_mctgformer
-SEG_DIR=pseudo_mask
+SEGDIR=pseudo_mask
 INPUTSIZE=448
 
 CUDA_VISIBLE_DEVICES=${GPU}
-WORKDIR=results_voc/${MODEL}_${INPUTSIZE}
+WORKDIR=results_coco/${MODEL}_${INPUTSIZE}
 
-DATACONFIG=configs/voc12
-TRAINAUGID=${DATACONFIG}/train_aug_id.txt
+DATACONFIG=configs/coco
 TRAINID=${DATACONFIG}/train_id.txt
 VALID=${DATACONFIG}/val_id.txt
-# TRAINAUGLIST=${DATACONFIG}/train_aug.txt
-# TRAINLIST=${DATACONFIG}/train.txt
+
 
 
 # # ============= Train Model ===============#
@@ -29,7 +27,7 @@ VALID=${DATACONFIG}/val_id.txt
 #     train_model.py \
 #     --dataset ${DATASET} \
 #     --model ${MODELNAME} \
-#     --train_list ${TRAINAUGID} \
+#     --train_list ${TRAINID} \
 #     --work_space ${WORKDIR} \
 #     --input_size ${INPUTSIZE} \
 #     --seed 8 \
@@ -42,9 +40,9 @@ VALID=${DATACONFIG}/val_id.txt
 #     --dataset ${DATASET} \
 #     --model ${MODELNAME} \
 #     --work_space ${WORKDIR} \
-#     --train_list ${TRAINAUGID} \
+#     --train_list ${TRAINID} \
 #     --input_size ${INPUTSIZE} \
-#     --checkpoint ${WORKDIR}/${MODELNAME}_7170.pth \
+#     --checkpoint ${WORKDIR}/${MODELNAME}_4520.pth \
     
 
 # # ============= Evaluate Class Activation Maps =============#
@@ -61,29 +59,29 @@ VALID=${DATACONFIG}/val_id.txt
 #     train_infer_psa.py --train True \
 #     --dataset ${DATASET} \
 #     --work_space ${WORKDIR} \
-#     --train_list ${TRAINAUGID} \
+#     --train_list ${TRAINID} \
 #     --weights checkpoints/res38_cls.pth \
 #     --seed 3 \
 #     --epoch 5 \
-#     --low_alpha 0.38 \
-#     --high_alpha 0.50 \
+#     --low_alpha 0.42 \
+#     --high_alpha 0.52 \
 
 
-# #============= Infer with Pixel Semantic Affnity =============#
-# python train_infer_psa.py --inference True \
-#     --dataset ${DATASET} \
-#     --work_space ${WORKDIR} \
-#     --infer_list ${TRAINAUGID} \
-#     --seg_out_dir ${SEG_DIR} \
-#     --beta 11 \
-#     --logt 7 \
-#     --threshold 0.45 \
+#============= Infer with Pixel Semantic Affnity =============#
+python train_infer_psa.py --inference True \
+    --dataset ${DATASET} \
+    --work_space ${WORKDIR} \
+    --infer_list ${TRAINID} \
+    --seg_out_dir ${SEGDIR} \
+    --beta 11 \
+    --logt 7 \
+    --threshold 0.45 \
 
 
 # #============= Evaluate =============#
-# python steps_voc/eval_sem_seg.py \
+# python steps_coco/eval_sem_seg.py \
 #     --work_space ${WORKDIR} \
-#     --seg_out_dir ${SEG_DIR} \
+#     --seg_out_dir ${SEGDIR} \
 
 
 # # Save the generated mask to zip

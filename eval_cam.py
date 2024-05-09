@@ -119,7 +119,7 @@ if __name__ == '__main__':
             data_dir=args.mscoco_root, 
             id_list_file=args.train_list, # configs/coco/train_id.txt
             annotation_dir='MaskSets')
-        args.low_thres, args.high_thres = 35, 50
+        args.low_thres, args.high_thres = 40, 50
 
     time = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M") 
     args.log_file = osp.join(args.work_space, f"eval_cam_{time}.log")
