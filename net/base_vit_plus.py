@@ -71,8 +71,10 @@ class Mlp(nn.Module):
         return x
 
 
-class Attention(nn.Module):
-    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0., num_classes=20):
+class AttentionGNN(nn.Module):
+    def __init__(self, dim, num_heads=6, qkv_bias=False, qk_scale=None, 
+                 attn_drop=0., proj_drop=0., num_classes=20, 
+                 kernel_size=9, dilation=1, drop_path=0.):
         super().__init__()
         self.Cls = num_classes
         self.num_heads = num_heads
@@ -82,44 +84,89 @@ class Attention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
+        
+        self.graph_b = Grapher(
+            in_channels=self.num_heads*self.Cls, 
+            kernel_size=kernel_size,
+            dilation=dilation,
+            conv='mr', 
+            act='gelu', 
+            groups=self.num_heads,
+            norm='instance',
+            bias=True, 
+            stochastic=False, 
+            epsilon=0.2, 
+            r=1, 
+            drop_path=drop_path)
+        
+        self.graph_s = Grapher(
+            in_channels=self.num_heads*self.Cls, 
+            kernel_size=kernel_size,
+            dilation=dilation,
+            conv='mr', 
+            act='gelu', 
+            groups=self.num_heads,
+            norm='instance',
+            bias=True, 
+            stochastic=False, 
+            epsilon=0.2, 
+            r=1, 
+            drop_path=drop_path)
 
-    def forward(self, x):
-        B, N, C = x.shape  # Here N = #patches + #class-tokens
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+    def forward(self, x, token_size):
+        B, N_s, C = x.shape  # Here N_s = #patches + #class
+        N = N_s - self.Cls 
+        qkv = self.qkv(x).reshape(B, N_s, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2] 
         # d for each head, Nd heads in total. --> B x Nd x N x d for {q, k, v}.
         attn = (q @ k.transpose(-2, -1)) * self.scale  # B x Nd x N x N
+        #======================= Split class and patch tokens =======================#               
+        cls2pat = attn[:, :, :self.Cls, self.Cls:] # B x Nd x Cls x N
+        cls2pat = cls2pat.reshape(
+            B, self.num_heads * self.Cls, token_size[0], token_size[1]).contiguous()
+        cls2pat = self.graph_b(cls2pat)
+        
+        pat2cls = attn[:, :, self.Cls:, :self.Cls] # B x Nd x Ni x Cls
+        pat2cls = pat2cls.permute(0, 1, 3, 2).reshape(
+            B, self.num_heads * self.Cls, token_size[0], token_size[1]).contiguous()
+        pat2cls = self.graph_s(pat2cls) 
+        
+        attn[:, :, :self.Cls, self.Cls:] = cls2pat.reshape(B, self.num_heads, self.Cls, -1)
+        attn[:, :, self.Cls:, :self.Cls] = pat2cls.reshape(B, self.num_heads, self.Cls, -1).permute(0, 1, 3, 2)
+        
         #======================================================================#               
-        attn_cls, attn_pat = torch.split(attn, [self.Cls, N-self.Cls], dim=-1)
+        attn_cls, attn_pat = torch.split(attn, [self.Cls, N], dim=-1)
         attn_pat = attn_pat.softmax(dim=-1)
         attn_cls = attn_cls.softmax(dim=-1)
-        attn = torch.cat((attn_cls, attn_pat), dim=-1)   # attn = attn.softmax(dim=-1)
+        attn = torch.cat((attn_cls, attn_pat), dim=-1)
         #======================================================================#     
         weights = attn
         attn = self.attn_drop(attn)
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        x = (attn @ v).transpose(1, 2).reshape(B, N_s, C)
         x = self.proj(x)
         x = self.proj_drop(x)
 
         return x, weights
-
+    
     
 class Block(nn.Module):
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
-                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, num_classes=20):
+                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, num_classes=20, 
+                 kernel_size=9, dilation=1):
         super().__init__()
         self.norm1 = norm_layer(dim)
-        self.attn = Attention(
+        self.attn = AttentionGNN(
             dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, 
-            attn_drop=attn_drop, proj_drop=drop, num_classes=num_classes)
+            attn_drop=attn_drop, proj_drop=drop, num_classes=num_classes, 
+            kernel_size=kernel_size, dilation=dilation, drop_path=drop_path)
 
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
-    def forward(self, x):
-        o, weights = self.attn(self.norm1(x))
+    def forward(self, x, token_size):
+        o, weights = self.attn(self.norm1(x), token_size)
         x = x + self.drop_path(o)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x, weights
@@ -131,7 +178,7 @@ class PatchEmbed(nn.Module):
         super().__init__()
         img_size = to_2tuple(img_size)
         patch_size = to_2tuple(patch_size)
-        num_patches = (img_size[1] // patch_size[1]) * (img_size[0] // patch_size[0])
+        num_patches = (img_size[0] // patch_size[0]) * (img_size[1] // patch_size[1])
         self.img_size = img_size
         self.patch_size = patch_size
         self.num_patches = num_patches
@@ -143,7 +190,7 @@ class PatchEmbed(nn.Module):
         return x
 
 
-class VisionTransformer(nn.Module):
+class VisionTransformerGNN(nn.Module):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=384, depth=12,
                  num_heads=6, mlp_ratio=4., qkv_bias=True, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., norm_layer=partial(nn.LayerNorm, eps=1e-6), mask_type=None):
@@ -163,13 +210,17 @@ class VisionTransformer(nn.Module):
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
+        num_knn = [int(x.item()) for x in torch.linspace(9, 18, depth)]  # number of knn's k
+        Hp, Wp = self.img_size//16, self.img_size//16
+        max_dilation = Hp * Wp // max(num_knn)
+        
         self.blocks = nn.ModuleList([
             Block(
                 dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
-                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, num_classes=num_classes)
+                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, num_classes=num_classes,
+                kernel_size=num_knn[i], dilation=min(i // 4 + 1, max_dilation))
             for i in range(depth)])
         self.norm = norm_layer(embed_dim)
-        # Classifier head
         self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
         
         trunc_normal_(self.pos_embed, std=.02)
@@ -186,19 +237,17 @@ class VisionTransformer(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
         
-    def interpolate_pos_encoding(self, x, w, h):
+    def interpolate_pos_encoding(self, x, H, W):
         npatch = x.shape[1] - 1
         N = self.pos_embed.shape[1] - 1
-        if npatch == N and w == h:
+        if npatch == N and H == W:
             return self.pos_embed
         class_pos_embed = self.pos_embed[:, 0:1]
         patch_pos_embed = self.pos_embed[:, 1:]
         dim = x.shape[-1]
 
-        w0 = w // self.patch_embed.patch_size[0]
-        h0 = h // self.patch_embed.patch_size[0]
-        # we add a small number to avoid floating point error in the interpolation
-        # see discussion at https://github.com/facebookresearch/dino/issues/8
+        w0 = H // self.patch_embed.patch_size[0]
+        h0 = W // self.patch_embed.patch_size[0]
         w0, h0 = w0 + 0.1, h0 + 0.1
         embedding = patch_pos_embed.reshape(1, int(math.sqrt(N)), int(math.sqrt(N)), dim).permute(0, 3, 1, 2),
         patch_pos_embed = nn.functional.interpolate(
@@ -221,16 +270,18 @@ class VisionTransformer(nn.Module):
         self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
     def forward_features(self, x, n):
-        B, nc, w, h = x.shape
+        B, _, H, W = x.shape
+        token_size = (H // self.patch_embed.patch_size[0], 
+                      W // self.patch_embed.patch_size[1])
         x = self.patch_embed(x)
         cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
         x = torch.cat((cls_tokens, x), dim=1)
-        x = x + self.interpolate_pos_encoding(x, w, h)
+        x = x + self.interpolate_pos_encoding(x, H, W)
         x = self.pos_drop(x)
         attn_weights = []
 
         for i, blk in enumerate(self.blocks):
-            x, weights = blk(x)
+            x, weights = blk(x, token_size)
             if len(self.blocks) - i <= n:
                 attn_weights.append(weights)
 

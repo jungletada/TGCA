@@ -164,20 +164,26 @@ class MCTGFormer(VisionTransformer):
         x = self.pos_drop(x)                  # B x (N') x C, where N' = Nc + Np
         
         attn_weights = []
- 
+
         for i in range(self.stages):
             for j in range(self.stage_indices[i], self.stage_indices[i+1]):# for each layer
                 x, weights_j = self.blocks[j](x) # weights_j: the j-th layer attention weights
                 attn_weights.append(weights_j)
-                
+            
+            # graph transformer part
             _, x_spatial[i] = self.spatial_fuse[i](
                 x_spatial=x_spatial[i], x_backbone=x, token_size=token_size)
-            
+            # downsample multi-scale sfeatures
             if i != self.stages - 1:
                 z = self.down_convs[i](x_spatial[i])
                 x_spatial[i + 1] = x_spatial[i + 1] + z
         
-        return x[:, :self.num_classes], x[:, self.num_classes:], attn_weights, x_spatial
+        return {
+            'x_cls_last': x[:, :self.num_classes], 
+            'x_pat': x[:, self.num_classes:], 
+            'attn': attn_weights, 
+            'x_stru': x_spatial,
+            }
     
     def reshape_patch_tokens(self, patch_tokens, H, W):
         B, _, C = patch_tokens.shape
@@ -210,15 +216,16 @@ class MCTGFormer(VisionTransformer):
     def forward(self, x):
         H, W = x.shape[2:]
         # basic forward
-        cls_tokens, patch_tokens, _, x_spatials = self.forward_features(x)
-        cls_logits = cls_tokens.mean(-1)
-        
+        feat_dict = self.forward_features(x)
+        # class tokens
+        last_cls_tokens = feat_dict['x_cls_last']
+        cls_logits = last_cls_tokens.mean(-1)
         # patch tokens
-        patch_tokens = self.reshape_patch_tokens(patch_tokens, H, W) # B x C x Hp x Wp  
+        patch_tokens = self.reshape_patch_tokens(feat_dict['x_pat'], H, W) # B x C x Hp x Wp  
         out_spatial = [patch_tokens]
         # spatial tokens
         out_size = patch_tokens.shape[2:]
-        for x in x_spatials:
+        for x in feat_dict['x_stru']:
             x = F.interpolate(x, size=out_size, mode="bilinear", align_corners=False)
             out_spatial.append(x)
         # concat spatial and patch tokens        
@@ -226,15 +233,16 @@ class MCTGFormer(VisionTransformer):
         out_spatial = self.channel_reduction(out_spatial)
         # classification head and GWP
         pat_logits = self.foward_tokens(out_spatial)
+        
         return cls_logits, pat_logits
 
 
 class MCTGFormer_CAM(MCTGFormer):
-    def __init__(self, fuse_layers=3, *args, **kwargs):
+    def __init__(self, fuse_layers=4, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fuse_layers = fuse_layers
         
-    def forward_attention(self, tokens, attn_weights):
+    def forward_cam(self, tokens, attn_weights):
         """
         Input: 
             patch_tokens: patch tokens from the last backbone layer
@@ -275,16 +283,15 @@ class MCTGFormer_CAM(MCTGFormer):
                 size=(H_, W_),
                 mode='bilinear',
                 align_corners=False)
-            # print(f"Originial={H, W}; Now={x.shape[2:]}")
             H, W = H_, W_
 
-        _, patch_tokens, attn_weights, x_spatials = self.forward_features(x)
-
-        patch_tokens = self.reshape_patch_tokens(patch_tokens, H, W) # B x C x Hp x Wp  
+        feat_dict = self.forward_features(x)
+        
+        patch_tokens = self.reshape_patch_tokens(feat_dict['x_pat'], H, W) # B x C x Hp x Wp  
         out_spatial = [patch_tokens]
      
         out_size = patch_tokens.shape[2:]
-        for x in x_spatials:
+        for x in feat_dict['x_stru']:
             x = F.interpolate(x, size=out_size, mode="bilinear", align_corners=False)
             out_spatial.append(x)
         # concat spatial and patch tokens        
@@ -292,8 +299,7 @@ class MCTGFormer_CAM(MCTGFormer):
         out_spatial = self.channel_reduction(out_spatial)
         # class activation map
         out_spatial = self.head(out_spatial)  # B x Cls x Hp x Wp
-        cams = self.forward_attention(
-            out_spatial, attn_weights)
+        cams = self.forward_cam(out_spatial, feat_dict['attn'])
 
         return cams
 

@@ -190,7 +190,8 @@ def create_cam_model(args):
         from net.mctformer_plus import MCTformerPlus_CAM
         model_cam = MCTformerPlus_CAM
     elif args.model.__contains__('mctgformer'):
-        from net.mctgformer import MCTGFormer_CAM
+        # from net.mctgformer import MCTGFormer_CAM
+        from net.mctgformer_plus import MCTGFormer_CAM
         model_cam = MCTGFormer_CAM
     else:
         raise NotImplementedError   

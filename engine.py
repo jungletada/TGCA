@@ -8,17 +8,16 @@ import utils
 import torch.nn as nn
 import numpy as np
 # import seaborn as sns
-
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
-
 from typing import Iterable
 import torch.nn.functional as F
 import torch.distributed as dist
 from sklearn.metrics import average_precision_score
 
-
-def train_one_epoch_mctgformer(args,model, data_loader, optimizer, device, epoch,
+    
+def train_one_epoch_mctgformer(
+    args,model, data_loader, optimizer, device, epoch,
     loss_scaler, max_norm, set_training_mode=True, rank=0):
 
     print_freq = 10
@@ -42,7 +41,7 @@ def train_one_epoch_mctgformer(args,model, data_loader, optimizer, device, epoch
             patch_loss = criterion(outputs[1], targets)
             metric_logger.update(pat_loss=patch_loss.item())
             
-            total_loss = args.cls_weight * cls_loss + patch_loss # mctgformer=3
+            total_loss = args.cls_weight * cls_loss + patch_loss
             
         loss_value = total_loss.item()
 

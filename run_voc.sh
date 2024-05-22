@@ -19,40 +19,38 @@ DATACONFIG=configs/voc12
 TRAINAUGID=${DATACONFIG}/train_aug_id.txt
 TRAINID=${DATACONFIG}/train_id.txt
 VALID=${DATACONFIG}/val_id.txt
-# TRAINAUGLIST=${DATACONFIG}/train_aug.txt
-# TRAINLIST=${DATACONFIG}/train.txt
 
 
-# # ============= Train Model ===============#
-# OMP_NUM_THREADS=${NODES} \
-# torchrun --nproc_per_node=${NODES} --nnodes=1 \
-#     train_model.py \
-#     --dataset ${DATASET} \
-#     --model ${MODELNAME} \
-#     --train_list ${TRAINAUGID} \
-#     --work_space ${WORKDIR} \
-#     --input_size ${INPUTSIZE} \
-#     --seed 8 \
-#     --epoch 30 \
-#     --batch_per_gpu 16 \
+#============= Train Model ===============#
+OMP_NUM_THREADS=${NODES} \
+torchrun --nproc_per_node=${NODES} --nnodes=1 \
+    train_model.py \
+    --dataset ${DATASET} \
+    --model ${MODELNAME} \
+    --train_list ${TRAINAUGID} \
+    --work_space ${WORKDIR} \
+    --input_size ${INPUTSIZE} \
+    --seed 8 \
+    --epoch 30 \
+    --batch_per_gpu 16 \
     
 
-# # ============= Make Class Activation Maps of Model=============#
-# python make_cam.py \
-#     --dataset ${DATASET} \
-#     --model ${MODELNAME} \
-#     --work_space ${WORKDIR} \
-#     --train_list ${TRAINAUGID} \
-#     --input_size ${INPUTSIZE} \
-#     --checkpoint ${WORKDIR}/${MODELNAME}_7170.pth \
+# ============= Make Class Activation Maps of Model=============#
+python make_cam.py \
+    --dataset ${DATASET} \
+    --model ${MODELNAME} \
+    --work_space ${WORKDIR} \
+    --train_list ${TRAINID} \
+    --input_size ${INPUTSIZE} \
+    --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
     
 
-# # ============= Evaluate Class Activation Maps =============#
-# python eval_cam.py \
-#     --dataset ${DATASET} \
-#     --work_space ${WORKDIR} \
-#     --train_list ${TRAINID} \
-#     --curve_threshold \
+# ============= Evaluate Class Activation Maps =============#
+python eval_cam.py \
+    --dataset ${DATASET} \
+    --work_space ${WORKDIR} \
+    --train_list ${TRAINID} \
+    --curve_threshold \
 
 
 # #============= Train and Infer Pixel Semantic Affnity =============

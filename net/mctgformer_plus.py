@@ -24,14 +24,15 @@ class MCTGFormer(VisionTransformer):
         self.num_patches = self.Hp * self.Wp
         self.spatial_dims = [self.embed_dim] * self.stages
         self.spatial_scales = (8, 16, 32, 64)   
-        self.spatial_strides = (2, 2, 2)        
+        self.spatial_strides = (2, 2, 2)       
+         
         self.dilations = [1, 2, 3, 4]
-        self.num_knn = [18, 15, 12, 9] 
+        self.num_knn = [18, 15, 12, 9]
+        
         self.dilations_spatial = [1, 2, 2, 2]
         if input_size < 448:
             self.num_knn_spatial = [10, 8, 6, 4]
         else:
-            # self.num_knn_spatial = [9, 9, 9, 9]
             self.num_knn_spatial = [20, 16, 12, 8]
         self.decay_parameter = decay_parameter
         
@@ -59,7 +60,6 @@ class MCTGFormer(VisionTransformer):
             inplanes=64, 
             embed_dims=self.spatial_dims)
         
-        mr = [1, 4, 6, 8]
         self.spatial_fuse = nn.ModuleList([
             SemanticSpatialModule(
                 query_dim=self.spatial_dims[i], 
@@ -68,7 +68,6 @@ class MCTGFormer(VisionTransformer):
                 attn_drop=0., 
                 proj_drop=0., 
                 drop_path=0., 
-                mlp_ratio=mr[i],
                 qkv_bias=True, 
                 norm_layer=partial(
                     nn.LayerNorm, eps=1e-6), 
@@ -91,6 +90,10 @@ class MCTGFormer(VisionTransformer):
             nn.Conv2d(self.embed_dim * 5, self.embed_dim, 1),
             nn.BatchNorm2d(self.embed_dim),
             nn.GELU())
+        
+        # self.weights = nn.ParameterList([
+        #     nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim)) 
+        #     for _ in range(self.stages)])
         
         self.head = nn.Conv2d(
             self.embed_dim, self.num_classes, kernel_size=3, stride=1, padding=1)
@@ -168,18 +171,28 @@ class MCTGFormer(VisionTransformer):
         attn_weights = []
  
         for i in range(self.stages):
+            # for each block in stage-i
             for j in range(self.stage_indices[i], self.stage_indices[i+1]):# for each layer
                 x, weights_j = self.blocks[j](x) # weights_j: the j-th layer attention weights
                 attn_weights.append(weights_j)
                 
-            _, x_spatial[i] = self.spatial_fuse[i](
+            cls_stru, x_spatial[i] = self.spatial_fuse[i](
                 x_spatial=x_spatial[i], x_backbone=x, token_size=token_size)
+            
+            # x_cls = x[:, :self.num_classes] + self.weights[i] * cls_stru
+            x_pat = x[:, self.num_classes:]
+            x = torch.cat((cls_stru, x_pat), dim=1)
             
             if i != self.stages - 1:
                 z = self.down_convs[i](x_spatial[i])
                 x_spatial[i + 1] = x_spatial[i + 1] + z
         
-        return x[:, :self.num_classes], x[:, self.num_classes:], attn_weights, x_spatial
+        return {
+            'x_cls_last': x[:, :self.num_classes], 
+            'x_pat': x[:, self.num_classes:], 
+            'attn': attn_weights, 
+            'x_stru': x_spatial,
+            }
     
     def reshape_patch_tokens(self, patch_tokens, H, W):
         B, _, C = patch_tokens.shape
@@ -212,15 +225,16 @@ class MCTGFormer(VisionTransformer):
     def forward(self, x):
         H, W = x.shape[2:]
         # basic forward
-        cls_tokens, patch_tokens, _, x_spatials = self.forward_features(x)
-        cls_logits = cls_tokens.mean(-1)
-        
+        feat_dict = self.forward_features(x)
+        # class tokens
+        last_cls_tokens = feat_dict['x_cls_last']
+        cls_logits = last_cls_tokens.mean(-1)
         # patch tokens
-        patch_tokens = self.reshape_patch_tokens(patch_tokens, H, W) # B x C x Hp x Wp  
+        patch_tokens = self.reshape_patch_tokens(feat_dict['x_pat'], H, W) # B x C x Hp x Wp  
         out_spatial = [patch_tokens]
         # spatial tokens
         out_size = patch_tokens.shape[2:]
-        for x in x_spatials:
+        for x in feat_dict['x_stru']:
             x = F.interpolate(x, size=out_size, mode="bilinear", align_corners=False)
             out_spatial.append(x)
         # concat spatial and patch tokens        
@@ -228,15 +242,16 @@ class MCTGFormer(VisionTransformer):
         out_spatial = self.channel_reduction(out_spatial)
         # classification head and GWP
         pat_logits = self.foward_tokens(out_spatial)
+        
         return cls_logits, pat_logits
 
 
 class MCTGFormer_CAM(MCTGFormer):
-    def __init__(self, fuse_layers=3, *args, **kwargs):
+    def __init__(self, fuse_layers=4, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fuse_layers = fuse_layers
         
-    def forward_attention(self, tokens, attn_weights):
+    def forward_cam(self, tokens, attn_weights):
         """
         Input: 
             patch_tokens: patch tokens from the last backbone layer
@@ -248,12 +263,14 @@ class MCTGFormer_CAM(MCTGFormer):
         """
         B, Cls, Hp, Wp = tokens.shape
         attn_weights = torch.mean(torch.stack(attn_weights), dim=2)     # L x B x (Cls+Np) x (Cls+Np) 
-        
-        attn_maps = attn_weights[-self.fuse_layers:].mean(0)                 # B x (Cls+Np) x (Cls+Np)
-        cls2pat = attn_maps[:, :Cls, Cls:].reshape([B, Cls, Hp, Wp])    # B x Cls x Hp x Wp
-        patch_cam = tokens.detach().clone()   # B x Cls x Hp x Wp
-        patch_cam = F.relu(patch_cam)   # With ReLU Activation
-        cams = torch.pow(cls2pat * patch_cam, 1/2)
+        if self.fuse_layers == 0:
+            cams = patch_cam
+        else:
+            attn_maps = attn_weights[-self.fuse_layers:].mean(0)                 # B x (Cls+Np) x (Cls+Np)
+            cls2pat = attn_maps[:, :Cls, Cls:].reshape([B, Cls, Hp, Wp])    # B x Cls x Hp x Wp
+            patch_cam = tokens.detach().clone()   # B x Cls x Hp x Wp
+            patch_cam = F.relu(patch_cam)   # With ReLU Activation
+            cams = torch.pow(cls2pat * patch_cam, 1/2)
     
         # Apply pat2pat affinity refinement
         pat2pat = attn_weights[:, :, Cls:, Cls:] #  L x B x Np x Np
@@ -277,16 +294,15 @@ class MCTGFormer_CAM(MCTGFormer):
                 size=(H_, W_),
                 mode='bilinear',
                 align_corners=False)
-            # print(f"Originial={H, W}; Now={x.shape[2:]}")
             H, W = H_, W_
 
-        _, patch_tokens, attn_weights, x_spatials = self.forward_features(x)
-
-        patch_tokens = self.reshape_patch_tokens(patch_tokens, H, W) # B x C x Hp x Wp  
+        feat_dict = self.forward_features(x)
+        
+        patch_tokens = self.reshape_patch_tokens(feat_dict['x_pat'], H, W) # B x C x Hp x Wp  
         out_spatial = [patch_tokens]
      
         out_size = patch_tokens.shape[2:]
-        for x in x_spatials:
+        for x in feat_dict['x_stru']:
             x = F.interpolate(x, size=out_size, mode="bilinear", align_corners=False)
             out_spatial.append(x)
         # concat spatial and patch tokens        
@@ -294,8 +310,7 @@ class MCTGFormer_CAM(MCTGFormer):
         out_spatial = self.channel_reduction(out_spatial)
         # class activation map
         out_spatial = self.head(out_spatial)  # B x Cls x Hp x Wp
-        cams = self.forward_attention(
-            out_spatial, attn_weights)
+        cams = self.forward_cam(out_spatial, feat_dict['attn'])
 
         return cams
 

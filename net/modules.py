@@ -224,7 +224,7 @@ class MLP(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
         super().__init__()
         out_features = out_features or in_features
-        hidden_features = hidden_features or in_features
+        hidden_features = hidden_features or in_features * 4
         self.fc1 = nn.Linear(in_features, hidden_features)
         self.act = act_layer()
         self.fc2 = nn.Linear(hidden_features, out_features)
@@ -317,7 +317,6 @@ class SemanticSpatialModule(nn.Module):
                  proj_drop=0., 
                  drop_path=0.1, 
                  mask_ratio=0.1, 
-                 mlp_ratio=4,
                  qkv_bias=True,
                  qk_scale=None,
                  kernel_dict={'backbone':9, 'spatial':9}, 
@@ -374,55 +373,52 @@ class SemanticSpatialModule(nn.Module):
         
         self.mlp = MLP(
             in_features=self.dim, 
-            hidden_features=int(self.dim * mlp_ratio),
+            hidden_features=self.dim * 4,
             out_features=self.dim)
     
-    def forward_semantic_gnn(self, x_spatial, x_backbone, token_size, spatial_size):
-        """
-        Input:
-            x_spatial: spatial features from prior module->[B, (Hi * Wi), Cq]
-            x_backbone: multi-class token transformer features->[B, (Cls+N'), Ck]
-        Output:
-            x_spatial: updated spatial features 
-        """
-        B, N, _ = x_backbone.shape
-        Ni = spatial_size[0] * spatial_size[1]
-        # Linear projection 
-        q = self.proj_q(x_spatial)  # B, (Hi * Wi), C
-        kv = self.proj_kv(x_pat).reshape(B, -1, 2, self.dim).permute(2, 0, 1, 3)
-        k, v = kv[0], kv[1] # [B, N', C]
+    # def forward_semantic_gnn(self, x_spatial, x_backbone, token_size, spatial_size):
+    #     """
+    #     Input:
+    #         x_spatial: spatial features from prior module->[B, (Hi * Wi), Cq]
+    #         x_backbone: multi-class token transformer features->[B, (Cls+N'), Ck]
+    #     Output:
+    #         x_spatial: updated spatial features 
+    #     """
+    #     B, N, _ = x_backbone.shape
+    #     Ni = spatial_size[0] * spatial_size[1]
+    #     # Linear projection 
+    #     q = self.proj_q(x_spatial)  # B, (Hi * Wi), C
+    #     kv = self.proj_kv(x_pat).reshape(B, -1, 2, self.dim).permute(2, 0, 1, 3)
+    #     k, v = kv[0], kv[1] # [B, N', C]
         
-        # build cross attention
-        x_cls, x_pat = torch.split(x_backbone, [self.Cls, N-self.Cls], dim=1)
-        x_cls = self.proj_cls(x_cls)    # B, Cls, C
-        # Build semantic relation
-        relation_s = (x_cls @ q.transpose(-2, -1)) * self.scale # (B, Cls, C) (B, Ni, C) 
-        # relation_s = self.weighted_tokens(relation_s, base=0.9)
+    #     # build cross attention
+    #     x_cls, x_pat = torch.split(x_backbone, [self.Cls, N-self.Cls], dim=1)
+    #     x_cls = self.proj_cls(x_cls)    # B, Cls, C
         
-        relation_s = relation_s.view(B, -1, spatial_size[0], spatial_size[1])
-        relation_s = self.graph_s(relation_s)
-        relation_s = relation_s.view(B, self.Cls, -1)
+    #     # Build semantic relation
+    #     relation_s = (x_cls @ q.transpose(-2, -1)) * self.scale # (B, Cls, C) (B, Ni, C) 
+    #     relation_s = relation_s.view(B, -1, spatial_size[0], spatial_size[1])
+    #     relation_s = self.graph_s(relation_s)
+    #     relation_s = relation_s.view(B, self.Cls, -1)
         
-        # Build semantic relation
-        relation_b = (x_cls @ k.transpose(-2, -1)) * self.scale # (B, Cls, C) (B, N', C) 
-        # relation_b = self.weighted_tokens(relation_b, base=0.9)
+    #     # Build semantic relation
+    #     relation_b = (x_cls @ k.transpose(-2, -1)) * self.scale # (B, Cls, C) (B, N', C) 
+    #     relation_b = relation_b.view(B, -1, token_size[0], token_size[1]) # (B, Cls, H', W')
+    #     relation_b = self.graph_b(relation_b)
+    #     relation_b = relation_b.view(B, self.Cls, -1) 
+    #     # GNN feature aggregator
+    #     spatial_guide = (relation_s.transpose(-2, -1) @ relation_b) * self.scale
+    #     # spatial_guide = spatial_guide.softmax(dim=-1)
         
-        relation_b = relation_b.view(B, -1, token_size[0], token_size[1]) # (B, Cls, H', W')
-        relation_b = self.graph_b(relation_b)
-        relation_b = relation_b.view(B, self.Cls, -1) 
-        # GNN feature aggregator
-        spatial_guide = (relation_s.transpose(-2, -1) @ relation_b) * self.scale
-        # spatial_guide = spatial_guide.softmax(dim=-1)
+    #     if self.training:
+    #         m_r = torch.ones_like(spatial_guide) * self.mask_ratio 
+    #         spatial_guide = spatial_guide + torch.bernoulli(m_r) * -1e12
         
-        if self.training:
-            m_r = torch.ones_like(spatial_guide) * self.mask_ratio 
-            spatial_guide = spatial_guide + torch.bernoulli(m_r) * -1e12
-        
-        spatial_guide = spatial_guide.softmax(dim=-1)
-        spatial_guide = self.attn_drop(spatial_guide)
-        output = spatial_guide @ v # Fuse backbone relation and spatial relation
+    #     spatial_guide = spatial_guide.softmax(dim=-1)
+    #     spatial_guide = self.attn_drop(spatial_guide)
+    #     output = spatial_guide @ v # Fuse backbone relation and spatial relation
        
-        return output
+    #     return output
     
     def forward_attention_gnn(self, input_query, input_key, token_size, spatial_size):
         B, Ni, _ = input_query.shape
@@ -477,29 +473,40 @@ class SemanticSpatialModule(nn.Module):
         Output:
             x_spatial: updated spatial features 
         """
+        # H, W = x_spatial.shape[2:]
+        # x_spatial = nchw2nlc(x_spatial)
+        # idendity = x_spatial.clone()
+
+        # x_cls, x_spatial = self.forward_attention_gnn(
+        #     self.norm1(x_spatial), 
+        #     self.norm2(x_backbone), 
+        #     token_size=token_size, 
+        #     spatial_size=(H, W))
+        
+        # x_spatial = idendity + self.drop_path(x_spatial)
+        # x_spatial = x_spatial + self.drop_path(self.mlp(self.norm3(x_spatial)))
+        
+        # x_spatial = nlc2nchw(x_spatial, d_size=(H, W))
+        # return x_cls, x_spatial 
+        
         H, W = x_spatial.shape[2:]
         x_spatial = nchw2nlc(x_spatial)
-        idendity = x_spatial.clone()
-
+        x_cls = x_backbone[:,:self.Cls]
+        x_cat = torch.cat((x_cls, x_spatial), dim=1).clone() # B, (Cls+Ni), C
+    
         x_cls, x_spatial = self.forward_attention_gnn(
             self.norm1(x_spatial), 
             self.norm2(x_backbone), 
             token_size=token_size, 
             spatial_size=(H, W))
         
-        x_spatial = idendity + self.drop_path(x_spatial)
-        x_spatial = x_spatial + self.drop_path(self.mlp(self.norm3(x_spatial)))
+        x_cat = x_cat + self.drop_path(torch.cat((x_cls, x_spatial), dim=1))
+        x_cat = x_cat + self.drop_path(self.mlp(self.norm3(x_cat)))
         
+        x_cls, x_spatial = x_cat[:, :self.Cls], x_cat[:, self.Cls:]
         x_spatial = nlc2nchw(x_spatial, d_size=(H, W))
-        return x_cls, x_spatial 
+        
+        return x_cls, x_spatial
     
     
-# if __name__ == "__main__":
-#     H, W = 14, 14
-#     Hi, Wi = 35, 24
-#     model = SemanticSpatialModule(
-#         query_dim=384, key_dim=384, num_classes=20,)
-#     x = torch.ones(3, 384, Hi, Wi)
-#     y = torch.ones(3, int(H * W + 20), 384)
-#     out = model(x, y, token_size=(H, W))
-#     print(out.shape)
+    

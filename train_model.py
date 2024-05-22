@@ -24,8 +24,8 @@ from engine import train_one_epoch_mctformerplus, train_one_epoch_mctgformer
 from datasets_cam import build_dataset
 from utils import str2bool
 
-import net.mctgformer
-import net.mctformer_plus
+import net.mctgformer_plus
+# import net.mctformer_plus
 
 import warnings
 warnings.filterwarnings("ignore")

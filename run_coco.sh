@@ -63,19 +63,19 @@ VALID=${DATACONFIG}/val_id.txt
 #     --weights checkpoints/res38_cls.pth \
 #     --seed 3 \
 #     --epoch 5 \
-#     --low_alpha 0.42 \
-#     --high_alpha 0.52 \
+#     --low_alpha 0.38 \
+#     --high_alpha 0.50 \
 
 
-#============= Infer with Pixel Semantic Affnity =============#
-python train_infer_psa.py --inference True \
-    --dataset ${DATASET} \
-    --work_space ${WORKDIR} \
-    --infer_list ${TRAINID} \
-    --seg_out_dir ${SEGDIR} \
-    --beta 11 \
-    --logt 7 \
-    --threshold 0.45 \
+# #============= Infer with Pixel Semantic Affnity =============#
+# python train_infer_psa.py --inference True \
+#     --dataset ${DATASET} \
+#     --work_space ${WORKDIR} \
+#     --infer_list ${TRAINID} \
+#     --seg_out_dir ${SEGDIR} \
+#     --beta 11 \
+#     --logt 7 \
+#     --threshold 0.45 \
 
 
 # #============= Evaluate =============#
