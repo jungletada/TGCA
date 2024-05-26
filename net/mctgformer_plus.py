@@ -91,9 +91,9 @@ class MCTGFormer(VisionTransformer):
             nn.BatchNorm2d(self.embed_dim),
             nn.GELU())
         
-        # self.weights = nn.ParameterList([
-        #     nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim)) 
-        #     for _ in range(self.stages)])
+        self.weights = nn.ParameterList([
+            nn.Parameter(torch.zeros(1, self.num_classes, 1)) 
+            for _ in range(self.stages)])
         
         self.head = nn.Conv2d(
             self.embed_dim, self.num_classes, kernel_size=3, stride=1, padding=1)
@@ -179,9 +179,9 @@ class MCTGFormer(VisionTransformer):
             cls_stru, x_spatial[i] = self.spatial_fuse[i](
                 x_spatial=x_spatial[i], x_backbone=x, token_size=token_size)
             
-            # x_cls = x[:, :self.num_classes] + self.weights[i] * cls_stru
+            x_cls = x[:, :self.num_classes] + self.weights[i] * cls_stru
             x_pat = x[:, self.num_classes:]
-            x = torch.cat((cls_stru, x_pat), dim=1)
+            x = torch.cat((x_cls, x_pat), dim=1)
             
             if i != self.stages - 1:
                 z = self.down_convs[i](x_spatial[i])

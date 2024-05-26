@@ -21,18 +21,18 @@ TRAINID=${DATACONFIG}/train_id.txt
 VALID=${DATACONFIG}/val_id.txt
 
 
-#============= Train Model ===============#
-OMP_NUM_THREADS=${NODES} \
-torchrun --nproc_per_node=${NODES} --nnodes=1 \
-    train_model.py \
-    --dataset ${DATASET} \
-    --model ${MODELNAME} \
-    --train_list ${TRAINAUGID} \
-    --work_space ${WORKDIR} \
-    --input_size ${INPUTSIZE} \
-    --seed 8 \
-    --epoch 30 \
-    --batch_per_gpu 16 \
+# #============= Train Model ===============#
+# OMP_NUM_THREADS=${NODES} \
+# torchrun --nproc_per_node=${NODES} --nnodes=1 \
+#     train_model.py \
+#     --dataset ${DATASET} \
+#     --model ${MODELNAME} \
+#     --train_list ${TRAINAUGID} \
+#     --work_space ${WORKDIR} \
+#     --input_size ${INPUTSIZE} \
+#     --seed 8 \
+#     --epoch 30 \
+#     --batch_per_gpu 18 \
     
 
 # ============= Make Class Activation Maps of Model=============#
