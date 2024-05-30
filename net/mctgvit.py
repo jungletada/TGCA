@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from functools import partial
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
-from net.modules import DownConv, SpatialPriorModule, SemanticSpatialModule
+from net.modules import DownConv, SpatialPriorModule, SemanticAttnGNNModule
 from net.base_vit import VisionTransformer, _cfg
 
 
@@ -58,7 +58,7 @@ class MCTGViT(VisionTransformer):
             embed_dims=self.spatial_dims)
         
         self.spatial_fuse = nn.ModuleList([
-            SemanticSpatialModule(
+            SemanticAttnGNNModule(
                 query_dim=self.spatial_dims[i], 
                 key_dim=self.embed_dim, 
                 num_classes=self.num_classes, 

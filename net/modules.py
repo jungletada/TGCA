@@ -308,7 +308,7 @@ class SemanticGraph(nn.Module):
         return x
         
 
-class SemanticSpatialModule(nn.Module):
+class SemanticAttnGNNModule(nn.Module):
     def __init__(self, 
                  query_dim, 
                  key_dim, 
@@ -437,18 +437,19 @@ class SemanticSpatialModule(nn.Module):
         k, v = kv[0], kv[1] # B x Nd x (Cls+N) x d
         attn = (q @ k.transpose(-2, -1)) * self.scale  # B x Nd x (Cls+Ni) x (Cls+N)
         
-        #== Split class and patch tokens ============================================#               
+        #=============== Forward GNN ===============#               
         cls2pat = attn[:, :, :self.Cls, self.Cls:] # B x Nd x Cls x N
         cls2pat = cls2pat.reshape(
             B, self.num_heads * self.Cls, token_size[0], token_size[1]).contiguous()
         cls2pat = self.graph_b(cls2pat)
+        adpt_attn = cls2pat.clone() # B x C x Hp x Wp
         
         cls2spa = attn[:, :, self.Cls:, :self.Cls] # B x Nd x Ni x Cls
         cls2spa = cls2spa.permute(0, 1, 3, 2).reshape(
             B, self.num_heads * self.Cls, spatial_size[0], spatial_size[1]).contiguous()
         cls2spa = self.graph_s(cls2spa) 
         
-        # print(cls2pat.shape, cls2spa.shape)
+        #=============== Reshape and Softmax ===============#
         attn[:, :, :self.Cls, self.Cls:] = cls2pat.reshape(B, self.num_heads, self.Cls, N)
         attn[:, :, self.Cls:, :self.Cls] = cls2spa.reshape(B, self.num_heads, self.Cls, -1).permute(0, 1, 3, 2)
         
@@ -457,14 +458,14 @@ class SemanticSpatialModule(nn.Module):
         attn_cls = attn_cls.softmax(dim=-1)
         attn = torch.cat((attn_cls, attn_pat), dim=-1)
         
-        #======================================================================#     
+        #=============== Reshape Attention and times Value ===============#     
         attn = self.attn_drop(attn)
         x = (attn @ v).transpose(1, 2).reshape( # B x Nd x (Cls+Nt) x d
             B, (self.Cls+Ni), -1)               # B x (Cls+Ni) x Ct
         x = self.proj(x)
         x = self.proj_drop(x)
         
-        return x[:, :self.Cls], x[:, self.Cls:]
+        return x[:, :self.Cls], x[:, self.Cls:], adpt_attn
                
     def forward(self, x_spatial, x_backbone, token_size):
         """
@@ -495,7 +496,7 @@ class SemanticSpatialModule(nn.Module):
         x_cls = x_backbone[:,:self.Cls]
         x_cat = torch.cat((x_cls, x_spatial), dim=1).clone() # B, (Cls+Ni), C
     
-        x_cls, x_spatial = self.forward_attention_gnn(
+        x_cls, x_spatial, adpt_attn = self.forward_attention_gnn(
             self.norm1(x_spatial), 
             self.norm2(x_backbone), 
             token_size=token_size, 
@@ -507,29 +508,4 @@ class SemanticSpatialModule(nn.Module):
         x_cls, x_spatial = x_cat[:, :self.Cls], x_cat[:, self.Cls:]
         x_spatial = nlc2nchw(x_spatial, d_size=(H, W))
         
-        return x_cls, x_spatial
-    
-    
-def get_indices_of_pairs(radius, size):
-    search_dist = []
-    for x in range(1, radius):
-        search_dist.append((0, x))
-    for y in range(1, radius):
-        for x in range(-radius + 1, radius):
-            if x * x + y * y < radius * radius:
-                search_dist.append((y, x))
-    radius_floor = radius - 1
-    full_indices = np.reshape(
-        np.arange(0, size[0]*size[1], dtype=np.int64),
-        (size[0], size[1]))
-    cropped_height = size[0] - radius_floor
-    cropped_width = size[1] - 2 * radius_floor
-    indices_from = np.reshape(full_indices[:-radius_floor, radius_floor:-radius_floor], [-1])
-    indices_to_list = []
-    for dy, dx in search_dist:
-        indices_to = full_indices[dy:dy + cropped_height,
-                     radius_floor + dx:radius_floor + dx + cropped_width]
-        indices_to = np.reshape(indices_to, [-1])
-        indices_to_list.append(indices_to)
-    concat_indices_to = np.concatenate(indices_to_list, axis=0)
-    return indices_from, concat_indices_to
+        return x_cls, x_spatial, adpt_attn
