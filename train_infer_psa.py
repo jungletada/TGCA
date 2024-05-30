@@ -338,8 +338,6 @@ def train_affinity(args):
         pprint.pprint(args_dict)
     
     model = ResNet38d_Aff()
-    weights_dict = torch.load(args.weights)
-    
     param_groups = model.get_parameter_groups()
     optimizer = torchutils.PolyOptimizer([
         {'params': param_groups[0], 'lr': args.lr, 'weight_decay': args.wt_dec},
@@ -347,7 +345,7 @@ def train_affinity(args):
         {'params': param_groups[2], 'lr': 10 * args.lr, 'weight_decay': args.wt_dec},
         {'params': param_groups[3], 'lr': 20 * args.lr, 'weight_decay': 0}
     ], lr=args.lr, weight_decay=args.wt_dec, max_step=max_step)
-    
+    weights_dict = torch.load(args.weights)
     model.load_state_dict(weights_dict, strict=False)
     model.to(device)
     
@@ -419,7 +417,6 @@ def infer_affinity(args):
     pprint.pprint(vars(args))
 
     model = ResNet38d_Aff()
-
     model_dict = torch.load(
         osp.join(args.work_space, 'res38_aff_final.pth'), 
         map_location='cpu')

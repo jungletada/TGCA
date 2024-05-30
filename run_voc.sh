@@ -35,53 +35,53 @@ VALID=${DATACONFIG}/val_id.txt
 #     --batch_per_gpu 18 \
     
 
-# ============= Make Class Activation Maps of Model=============#
-python make_cam.py \
-    --dataset ${DATASET} \
-    --model ${MODELNAME} \
-    --work_space ${WORKDIR} \
-    --train_list ${TRAINID} \
-    --input_size ${INPUTSIZE} \
-    --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
-    
-
-# ============= Evaluate Class Activation Maps =============#
-python eval_cam.py \
-    --dataset ${DATASET} \
-    --work_space ${WORKDIR} \
-    --train_list ${TRAINID} \
-    --curve_threshold \
-
-
-# #============= Train and Infer Pixel Semantic Affnity =============
-# OMP_NUM_THREADS=${NODES} \
-# torchrun --nproc_per_node=${NODES} --nnodes=1 \
-#     train_infer_psa.py --train True \
+# # ============= Make Class Activation Maps of Model=============#
+# python make_cam.py \
 #     --dataset ${DATASET} \
+#     --model ${MODELNAME} \
 #     --work_space ${WORKDIR} \
 #     --train_list ${TRAINAUGID} \
-#     --weights checkpoints/res38_cls.pth \
-#     --seed 3 \
-#     --epoch 5 \
-#     --low_alpha 0.38 \
-#     --high_alpha 0.50 \
+#     --input_size ${INPUTSIZE} \
+#     --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
+    
 
-
-# #============= Infer with Pixel Semantic Affnity =============#
-# python train_infer_psa.py --inference True \
+# # ============= Evaluate Class Activation Maps =============#
+# python eval_cam.py \
 #     --dataset ${DATASET} \
 #     --work_space ${WORKDIR} \
-#     --infer_list ${TRAINAUGID} \
-#     --seg_out_dir ${SEG_DIR} \
-#     --beta 11 \
-#     --logt 7 \
-#     --threshold 0.45 \
+#     --train_list ${TRAINID} \
+#     --curve_threshold \
 
 
-# #============= Evaluate =============#
-# python steps_voc/eval_sem_seg.py \
-#     --work_space ${WORKDIR} \
-#     --seg_out_dir ${SEG_DIR} \
+#============= Train and Infer Pixel Semantic Affnity =============
+OMP_NUM_THREADS=${NODES} \
+torchrun --nproc_per_node=${NODES} --nnodes=1 \
+    train_infer_psa.py --train True \
+    --dataset ${DATASET} \
+    --work_space ${WORKDIR} \
+    --train_list ${TRAINAUGID} \
+    --weights checkpoints/res38_cls.pth \
+    --seed 15 \
+    --epoch 5 \
+    --low_alpha 0.37 \
+    --high_alpha 0.47 \
+
+
+#============= Infer with Pixel Semantic Affnity =============#
+python train_infer_psa.py --inference True \
+    --dataset ${DATASET} \
+    --work_space ${WORKDIR} \
+    --infer_list ${TRAINID} \
+    --seg_out_dir ${SEG_DIR} \
+    --beta 11 \
+    --logt 7 \
+    --threshold 0.45 \
+
+
+#============= Evaluate =============#
+python steps_voc/eval_sem_seg.py \
+    --work_space ${WORKDIR} \
+    --seg_out_dir ${SEG_DIR} \
 
 
 # # Save the generated mask to zip

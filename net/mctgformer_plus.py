@@ -12,7 +12,7 @@ __all__ = ['deit_small_mctgformer']
 
 
 class MCTGFormer(VisionTransformer):
-    def __init__(self, decay_parameter=0.996, input_size=224, *args, **kwargs):
+    def __init__(self, decay_parameter=0.996, input_size=448, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.stages = 4 
         interval = int(self.depth // self.stages)
