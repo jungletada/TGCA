@@ -3,7 +3,6 @@ from torch import nn
 import numpy as np
 import torch.nn.functional as F
 from timm.models.registry import register_model
-from timm.models.layers import trunc_normal_, to_2tuple
 
 
 class ResBlock(nn.Module):
