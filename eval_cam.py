@@ -113,11 +113,11 @@ if __name__ == '__main__':
         dataset = VOCSegmentationLabelDataset( 
             data_dir=args.voc12_root, 
             id_list_file=args.train_list)
-        args.low_thres, args.high_thres = 45, 55
+        args.low_thres, args.high_thres = 40, 55
     elif args.dataset == 'COCO':
         dataset = COCOSegmentationLabelDataset(
             data_dir=args.mscoco_root, 
-            id_list_file=args.train_list, # configs/coco/train_id.txt
+            id_list_file=args.train_list,
             annotation_dir='MaskSets')
         args.low_thres, args.high_thres = 40, 50
 

@@ -169,16 +169,16 @@ class MCTGFormer(VisionTransformer):
         x = self.pos_drop(x)                  # B x (N') x C, where N' = Nc + Np
         
         attn_weights = []
-        adpt_attn_weights = []
+       
         for i in range(self.stages):
             # for each block in stage-i
             for j in range(self.stage_indices[i], self.stage_indices[i+1]):# for each layer
                 x, weights_j = self.blocks[j](x) # weights_j: the j-th layer attention weights
                 attn_weights.append(weights_j)
                 
-            cls_stru, x_spatial[i], adpt_attn = self.spatial_fuse[i](
+            cls_stru, x_spatial[i] = self.spatial_fuse[i](
                 x_spatial=x_spatial[i], x_backbone=x, token_size=token_size)
-            adpt_attn_weights.append(adpt_attn)
+            
             # zero initialized weights for adding new class tokens
             x_cls = x[:, :self.num_classes] + self.weights[i] * cls_stru
             x_pat = x[:, self.num_classes:]
@@ -192,7 +192,6 @@ class MCTGFormer(VisionTransformer):
             'x_cls_last': x[:, :self.num_classes], 
             'x_pat': x[:, self.num_classes:], 
             'attn': attn_weights, 
-            'adpt_attn':adpt_attn_weights,
             'x_stru': x_spatial,
             }
     
@@ -272,7 +271,7 @@ class MCTGFormer_CAM(MCTGFormer):
             patch_cam = tokens.detach().clone()   # B x Cls x Hp x Wp
             patch_cam = F.relu(patch_cam)         # With ReLU Activation
             cams = torch.pow(cls2pat * patch_cam, 1/2)
-    
+ 
         # Apply pat2pat affinity refinement
         pat2pat = attn_weights[:, :, Cls:, Cls:] #  L x B x Np x Np
         pat2pat = torch.sum(pat2pat, dim=0)      # B x Np x Np

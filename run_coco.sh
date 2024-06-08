@@ -30,27 +30,27 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --train_list ${TRAINID} \
     --work_space ${WORKDIR} \
     --input_size ${INPUTSIZE} \
-    --seed 7 \
-    --epoch 30 \
+    --seed 3 \
+    --epoch 32 \
     --batch_per_gpu 18 \
     
 
-# ============= Make Class Activation Maps of Model=============#
-python make_cam.py \
-    --dataset ${DATASET} \
-    --model ${MODELNAME} \
-    --work_space ${WORKDIR} \
-    --train_list ${TRAINID} \
-    --input_size ${INPUTSIZE} \
-    --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
+# # ============= Make Class Activation Maps of Model=============#
+# python make_cam.py \
+#     --dataset ${DATASET} \
+#     --model ${MODELNAME} \
+#     --work_space ${WORKDIR} \
+#     --train_list ${TRAINID} \
+#     --input_size ${INPUTSIZE} \
+#     --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
     
 
-# ============= Evaluate Class Activation Maps =============#
-python eval_cam.py \
-    --dataset ${DATASET} \
-    --work_space ${WORKDIR} \
-    --train_list ${TRAINID} \
-    --curve_threshold \
+# # ============= Evaluate Class Activation Maps =============#
+# python eval_cam.py \
+#     --dataset ${DATASET} \
+#     --work_space ${WORKDIR} \
+#     --train_list ${TRAINID} \
+#     --curve_threshold \
 
 
 # #============= Train and Infer Pixel Semantic Affnity =============
@@ -61,10 +61,11 @@ python eval_cam.py \
 #     --work_space ${WORKDIR} \
 #     --train_list ${TRAINID} \
 #     --weights checkpoints/res38_cls.pth \
+#     --batch_per_gpu 8 \
 #     --seed 3 \
 #     --epoch 5 \
 #     --low_alpha 0.38 \
-#     --high_alpha 0.50 \
+#     --high_alpha 0.48 \
 
 
 # #============= Infer with Pixel Semantic Affnity =============#

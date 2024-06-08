@@ -104,7 +104,6 @@ def _work(process_id, model, dataset, args):
             valid_cat = torch.nonzero(label)[:, 0] # get validate class->[#val_cls]
             
             if valid_cat.shape[0] == 0: # No validate category
-                print(img_name)
                 np.save(osp.join(args.cam_out_dir, img_name + '.npy'), dict())
                 continue
             

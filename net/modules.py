@@ -377,49 +377,6 @@ class SemanticAttnGNNModule(nn.Module):
             hidden_features=self.dim * 4,
             out_features=self.dim)
     
-    # def forward_semantic_gnn(self, x_spatial, x_backbone, token_size, spatial_size):
-    #     """
-    #     Input:
-    #         x_spatial: spatial features from prior module->[B, (Hi * Wi), Cq]
-    #         x_backbone: multi-class token transformer features->[B, (Cls+N'), Ck]
-    #     Output:
-    #         x_spatial: updated spatial features 
-    #     """
-    #     B, N, _ = x_backbone.shape
-    #     Ni = spatial_size[0] * spatial_size[1]
-    #     # Linear projection 
-    #     q = self.proj_q(x_spatial)  # B, (Hi * Wi), C
-    #     kv = self.proj_kv(x_pat).reshape(B, -1, 2, self.dim).permute(2, 0, 1, 3)
-    #     k, v = kv[0], kv[1] # [B, N', C]
-        
-    #     # build cross attention
-    #     x_cls, x_pat = torch.split(x_backbone, [self.Cls, N-self.Cls], dim=1)
-    #     x_cls = self.proj_cls(x_cls)    # B, Cls, C
-        
-    #     # Build semantic relation
-    #     relation_s = (x_cls @ q.transpose(-2, -1)) * self.scale # (B, Cls, C) (B, Ni, C) 
-    #     relation_s = relation_s.view(B, -1, spatial_size[0], spatial_size[1])
-    #     relation_s = self.graph_s(relation_s)
-    #     relation_s = relation_s.view(B, self.Cls, -1)
-        
-    #     # Build semantic relation
-    #     relation_b = (x_cls @ k.transpose(-2, -1)) * self.scale # (B, Cls, C) (B, N', C) 
-    #     relation_b = relation_b.view(B, -1, token_size[0], token_size[1]) # (B, Cls, H', W')
-    #     relation_b = self.graph_b(relation_b)
-    #     relation_b = relation_b.view(B, self.Cls, -1) 
-    #     # GNN feature aggregator
-    #     spatial_guide = (relation_s.transpose(-2, -1) @ relation_b) * self.scale
-    #     # spatial_guide = spatial_guide.softmax(dim=-1)
-        
-    #     if self.training:
-    #         m_r = torch.ones_like(spatial_guide) * self.mask_ratio 
-    #         spatial_guide = spatial_guide + torch.bernoulli(m_r) * -1e12
-        
-    #     spatial_guide = spatial_guide.softmax(dim=-1)
-    #     spatial_guide = self.attn_drop(spatial_guide)
-    #     output = spatial_guide @ v # Fuse backbone relation and spatial relation
-       
-    #     return output
     
     def forward_attention_gnn(self, input_query, input_key, token_size, spatial_size):
         B, Ni, _ = input_query.shape
@@ -441,8 +398,7 @@ class SemanticAttnGNNModule(nn.Module):
         cls2pat = attn[:, :, :self.Cls, self.Cls:] # B x Nd x Cls x N
         cls2pat = cls2pat.reshape(
             B, self.num_heads * self.Cls, token_size[0], token_size[1]).contiguous()
-        cls2pat = self.graph_b(cls2pat)
-        adpt_attn = cls2pat.clone() # B x C x Hp x Wp
+        cls2pat = self.graph_b(cls2pat) # B x (Nd x Cls) x Hp x Wp
         
         cls2spa = attn[:, :, self.Cls:, :self.Cls] # B x Nd x Ni x Cls
         cls2spa = cls2spa.permute(0, 1, 3, 2).reshape(
@@ -465,7 +421,7 @@ class SemanticAttnGNNModule(nn.Module):
         x = self.proj(x)
         x = self.proj_drop(x)
         
-        return x[:, :self.Cls], x[:, self.Cls:], adpt_attn
+        return x[:, :self.Cls], x[:, self.Cls:]
                
     def forward(self, x_spatial, x_backbone, token_size):
         """
@@ -496,7 +452,7 @@ class SemanticAttnGNNModule(nn.Module):
         x_cls = x_backbone[:,:self.Cls]
         x_cat = torch.cat((x_cls, x_spatial), dim=1).clone() # B, (Cls+Ni), C
     
-        x_cls, x_spatial, adpt_attn = self.forward_attention_gnn(
+        x_cls, x_spatial = self.forward_attention_gnn(
             self.norm1(x_spatial), 
             self.norm2(x_backbone), 
             token_size=token_size, 
@@ -508,4 +464,4 @@ class SemanticAttnGNNModule(nn.Module):
         x_cls, x_spatial = x_cat[:, :self.Cls], x_cat[:, self.Cls:]
         x_spatial = nlc2nchw(x_spatial, d_size=(H, W))
         
-        return x_cls, x_spatial, adpt_attn
+        return x_cls, x_spatial
