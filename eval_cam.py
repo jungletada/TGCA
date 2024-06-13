@@ -70,14 +70,14 @@ def run(args, dataset):
                 all_slices.append(miou)
             mean_value = np.mean(all_slices)
             logfile(args, "threshold={:.2f}; mean IoU for all images: {:.2f}%".format(
-                t / 100., mean_value*100))
-            if miou > best_res: 
-                best_res = miou
+                t / 100., mean_value * 100.))
+            if mean_value > best_res: 
+                best_res = mean_value
                 best_threshold = t / 100.
             else:
                 break    
         logfile(args, "Best threshold: {}, best miou: {:.2f}%, num_imgs: {}".format(
-            best_threshold, best_res * 100, num_images))
+            best_threshold, best_res * 100., num_images))
         
     else:
         all_slices = []
@@ -103,7 +103,7 @@ if __name__ == '__main__':
     parser.add_argument('--log_file', default='eval_cam.log', type=str, 
                         help='log file to save the results')
     parser.add_argument('--curve_threshold', action='store_true', help='whether to use a range of thresholds')
-    parser.add_argument('--threshold', default=0.42, type=float, help='threshold for evaluation as background')
+    parser.add_argument('--threshold', default=0.45, type=float, help='threshold for evaluation as background')
     args = parser.parse_args()
     #----------------------------------------------------------------------------------#
     args.eval_cam_dir = osp.join(args.work_space, args.eval_cam_dir)
@@ -114,12 +114,13 @@ if __name__ == '__main__':
             data_dir=args.voc12_root, 
             id_list_file=args.train_list)
         args.low_thres, args.high_thres = 40, 55
+
     elif args.dataset == 'COCO':
         dataset = COCOSegmentationLabelDataset(
             data_dir=args.mscoco_root, 
             id_list_file=args.train_list,
             annotation_dir='MaskSets')
-        args.low_thres, args.high_thres = 40, 50
+        args.low_thres, args.high_thres = 43, 50
 
     time = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M") 
     args.log_file = osp.join(args.work_space, f"eval_cam_{time}.log")

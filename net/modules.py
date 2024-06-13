@@ -20,10 +20,11 @@ def nchw2nlc(x):
   
     
 class DownConv(nn.Module):
-    def __init__(self, in_dim, out_dim, norm_layer=nn.BatchNorm2d, stride=2):
+    def __init__(self, in_dim, out_dim, kernel_size=3, stride=1, padding=1, 
+                 norm_layer=nn.BatchNorm2d):
         super(DownConv, self).__init__()
         self.conv = nn.Conv2d(
-            in_dim, out_dim, kernel_size=3, stride=stride, padding=1)
+            in_dim, out_dim, kernel_size=kernel_size, stride=stride, padding=padding)
         self.norm = norm_layer(out_dim)
         self.act = nn.GELU()
     
@@ -94,9 +95,10 @@ class GraphConvolution(nn.Module):
 class SpatialPriorModule(nn.Module):
     def __init__(self, 
                  inplanes=64, 
-                 embed_dims=[96, 192, 384, 768], 
+                 embed_dims=[384, 384, 384, 384], 
                  norm_layer=nn.BatchNorm2d, 
-                 act_layer=nn.GELU):
+                 act_layer=nn.GELU,
+                 first_down_ratio=8):
         super().__init__()
         self.stem = nn.Sequential(*[ # downsample by 4
             nn.Conv2d(3, inplanes, kernel_size=3, stride=2, padding=1, bias=False),
@@ -110,16 +112,33 @@ class SpatialPriorModule(nn.Module):
             act_layer(),
             nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         ]) 
-        self.conv2 = nn.Sequential(*[# downsample by 2
-            nn.Conv2d(inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
-            norm_layer(2 * inplanes),
-            act_layer(),
-        ])
-        self.conv3 = nn.Sequential(*[ # downsample by 2
-            nn.Conv2d(2 * inplanes, 4 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
-            norm_layer(4 * inplanes),
-            act_layer(),
-        ])
+
+        if first_down_ratio == 8:
+            self.conv2 = nn.Sequential(*[ # downsample by 2
+                nn.Conv2d(inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
+                norm_layer(2 * inplanes),
+                act_layer()])
+            
+            self.conv3 = nn.Sequential(*[ # downsample by 2
+                nn.Conv2d(2 * inplanes, 4 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
+                norm_layer(4 * inplanes),
+                act_layer()])
+
+        elif first_down_ratio == 16:
+            self.conv2 = nn.Sequential(*[ # downsample by 4
+                nn.Conv2d(inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
+                norm_layer(2 * inplanes),
+                nn.Conv2d(2 * inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
+                norm_layer(2 * inplanes),
+                act_layer(),
+            ])
+            self.conv3 = nn.Sequential(*[ # downsample by 1
+                nn.Conv2d(2 * inplanes, 4 * inplanes, kernel_size=3, stride=1, padding=1, bias=False),
+                norm_layer(4 * inplanes),
+                act_layer()])
+
+        else: raise NotImplementedError
+        
         self.conv4 = nn.Sequential(*[ # downsample by 2
             nn.Conv2d(4 * inplanes, 4 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
             norm_layer(4 * inplanes),
@@ -148,22 +167,22 @@ class SpatialPriorModule(nn.Module):
         c2 = self.fc2(c2) # 8s
         c3 = self.fc3(c3) # 16s
         c4 = self.fc4(c4) # 32s
-        c5 = self.fc5(c5) # 32s
+        c5 = self.fc5(c5) # 64s
     
         return [c2, c3, c4, c5]
 
 
-class Conv1dProj(nn.Module):
-    def __init__(self, in_dim, out_dim, bias=False, act=nn.ReLU):
-        super().__init__()
-        self.conv = nn.Conv1d(in_dim, out_dim, 1, bias=bias)
-        self.act = act
+# class Conv1dProj(nn.Module):
+#     def __init__(self, in_dim, out_dim, bias=False, act=nn.ReLU):
+#         super().__init__()
+#         self.conv = nn.Conv1d(in_dim, out_dim, 1, bias=bias)
+#         self.act = act
     
-    def forward(self, x):
-        x = self.conv(x)
-        if self.act is not None:
-            x = self.act(x)
-        return x
+#     def forward(self, x):
+#         x = self.conv(x)
+#         if self.act is not None:
+#             x = self.act(x)
+#         return x
         
 
 class CrossAttention(nn.Module):
@@ -206,11 +225,6 @@ class CrossAttention(nn.Module):
         attn_cls = attn_cls.softmax(dim=-1)
         attn = torch.cat((attn_cls, attn_pat), dim=-1)
         #======================================================================#     
-        # # DropKey
-        # m_r = torch.ones_like(attn) * self.mask_ratio 
-        # attn = attn + torch.bernoulli(m_r) * -1e12
-        # attn = attn.softmax(dim=-1)
-        
         attn = self.attn_drop(attn)
         x = (attn @ v).transpose(1, 2).reshape( # B x Nd x (Cls+Nt) x d
             B, (self.Cls+Nt), -1)               # B x (Cls+Nt) x Ct

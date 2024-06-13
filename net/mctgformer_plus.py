@@ -23,24 +23,29 @@ class MCTGFormer(VisionTransformer):
         self.Hp, self.Wp = math.ceil(img_size[0] / patch_size[0]), math.ceil(img_size[1] / patch_size[1])
         self.num_patches = self.Hp * self.Wp
         self.spatial_dims = [self.embed_dim] * self.stages
-        self.spatial_scales = (8, 16, 32, 64)   
-        self.spatial_strides = (2, 2, 2)       
+
+        # self.spatial_scales = (8, 16, 32, 64)   
+        # self.spatial_strides = (2, 2, 2)  
+
+        self.spatial_scales = (16, 16, 32, 64)   
+        self.spatial_strides = (1, 2, 2)       
          
         self.dilations = [1, 2, 3, 4]
         self.num_knn = [18, 15, 12, 9]
         
         self.dilations_spatial = [1, 2, 2, 2]
+
         if input_size < 448:
             self.num_knn_spatial = [10, 8, 6, 4]
         else:
             self.num_knn_spatial = [20, 16, 12, 8]
 
         self.decay_parameter = decay_parameter
-        self.spatial_sizes = [(math.ceil(img_size[0]/scale), math.ceil(img_size[1]/scale)) 
+        self.spatial_sizes = [(math.ceil(img_size[0] / scale), math.ceil(img_size[1] / scale)) 
                               for scale in self.spatial_scales]
         self.sptial_pos_embed = [nn.Parameter(
             torch.zeros(1, self.spatial_dims[i], self.spatial_sizes[i][0], self.spatial_sizes[i][1]))
-                for i in range(self.stages)]
+            for i in range(self.stages)]
         
         for i in range(self.stages):
             trunc_normal_(self.sptial_pos_embed[i], std=.02)
@@ -58,7 +63,8 @@ class MCTGFormer(VisionTransformer):
         
         self.spatial_prior = SpatialPriorModule(
             inplanes=64, 
-            embed_dims=self.spatial_dims)
+            embed_dims=self.spatial_dims,
+            first_down_ratio=self.spatial_scales[0])
         
         self.spatial_fuse = nn.ModuleList([
             SemanticAttnGNNModule(
@@ -84,7 +90,7 @@ class MCTGFormer(VisionTransformer):
                 in_dim=self.spatial_dims[i], 
                 out_dim=self.spatial_dims[i+1],
                 stride=self.spatial_strides[i])
-            for i in range(self.stages-1)])
+            for i in range(self.stages - 1)])
         
         self.channel_reduction = nn.Sequential(
             nn.Conv2d(self.embed_dim * 5, self.embed_dim, 1),
@@ -161,7 +167,7 @@ class MCTGFormer(VisionTransformer):
             x = x + self.pos_embed_pat
             for i in range(self.stages):
                 x_spatial[i] += self.sptial_pos_embed[i].to(x.device)
-                
+            
         nn_cls_tokens = self.cls_token.expand(B, -1, -1) + self.pos_embed_cls
         cls_tokens = self.build_class_tokens(x_spatial) + nn_cls_tokens
         
