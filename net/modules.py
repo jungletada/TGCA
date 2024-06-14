@@ -119,10 +119,10 @@ class SpatialPriorModule(nn.Module):
                 norm_layer(2 * inplanes),
                 act_layer()])
             
-            self.conv3 = nn.Sequential(*[ # downsample by 2
-                nn.Conv2d(2 * inplanes, 4 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
-                norm_layer(4 * inplanes),
-                act_layer()])
+            # self.conv3 = nn.Sequential(*[ # downsample by 2
+            #     nn.Conv2d(2 * inplanes, 4 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
+            #     norm_layer(4 * inplanes),
+            #     act_layer()])
 
         elif first_down_ratio == 16:
             self.conv2 = nn.Sequential(*[ # downsample by 4
@@ -132,13 +132,14 @@ class SpatialPriorModule(nn.Module):
                 norm_layer(2 * inplanes),
                 act_layer(),
             ])
-            self.conv3 = nn.Sequential(*[ # downsample by 1
-                nn.Conv2d(2 * inplanes, 4 * inplanes, kernel_size=3, stride=1, padding=1, bias=False),
-                norm_layer(4 * inplanes),
-                act_layer()])
-
+        
         else: raise NotImplementedError
         
+        self.conv3 = nn.Sequential(*[ # downsample by 2
+            nn.Conv2d(2 * inplanes, 4 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
+            norm_layer(4 * inplanes),
+            act_layer()])
+
         self.conv4 = nn.Sequential(*[ # downsample by 2
             nn.Conv2d(4 * inplanes, 4 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
             norm_layer(4 * inplanes),
@@ -170,19 +171,6 @@ class SpatialPriorModule(nn.Module):
         c5 = self.fc5(c5) # 64s
     
         return [c2, c3, c4, c5]
-
-
-# class Conv1dProj(nn.Module):
-#     def __init__(self, in_dim, out_dim, bias=False, act=nn.ReLU):
-#         super().__init__()
-#         self.conv = nn.Conv1d(in_dim, out_dim, 1, bias=bias)
-#         self.act = act
-    
-#     def forward(self, x):
-#         x = self.conv(x)
-#         if self.act is not None:
-#             x = self.act(x)
-#         return x
         
 
 class CrossAttention(nn.Module):

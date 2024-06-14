@@ -22,23 +22,21 @@ class MCTGFormer(VisionTransformer):
         patch_size = to_2tuple(self.patch_embed.patch_size)
         self.Hp, self.Wp = math.ceil(img_size[0] / patch_size[0]), math.ceil(img_size[1] / patch_size[1])
         self.num_patches = self.Hp * self.Wp
-        self.spatial_dims = [self.embed_dim] * self.stages
-
-        # self.spatial_scales = (8, 16, 32, 64)   
-        # self.spatial_strides = (2, 2, 2)  
-
-        self.spatial_scales = (16, 16, 32, 64)   
-        self.spatial_strides = (1, 2, 2)       
+        self.spatial_dims = [self.embed_dim] * self.stages      
          
         self.dilations = [1, 2, 3, 4]
         self.num_knn = [18, 15, 12, 9]
-        
         self.dilations_spatial = [1, 2, 2, 2]
-
+        
+        assert input_size >= 224, f"Input size {input_size} is too small."
         if input_size < 448:
             self.num_knn_spatial = [10, 8, 6, 4]
+            self.spatial_scales = (8, 16, 32, 64)   
+            self.spatial_strides = (2, 2, 2) 
         else:
             self.num_knn_spatial = [20, 16, 12, 8]
+            self.spatial_scales = (16, 32, 64, 128)   
+            self.spatial_strides = (2, 2, 2)
 
         self.decay_parameter = decay_parameter
         self.spatial_sizes = [(math.ceil(img_size[0] / scale), math.ceil(img_size[1] / scale)) 
