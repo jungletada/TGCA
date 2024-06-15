@@ -30,9 +30,9 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --train_list ${TRAINID} \
     --work_space ${WORKDIR} \
     --input_size ${INPUTSIZE} \
-    --seed 8 \
+    --seed 3 \
     --epoch 30 \
-    --batch_per_gpu 21 \
+    --batch_per_gpu 16 \
     
 
 # ============= Make Class Activation Maps of Model=============#
