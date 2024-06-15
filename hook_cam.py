@@ -64,10 +64,10 @@ def get_args_parser():
 def get_intermediate_feature(name, hook_type='post'):
     """hook function to capture both pre and post intermediate features"""
     def pre_hook(model, input):
-        intermediate_features[name] = input[0].detach()# Captures input to the layer
+        intermediate_features[name] = input[0].detach() # Captures input to the layer
 
     def post_hook(model, input, output):
-        intermediate_features[name] = output.detach()# Captures output from the layer
+        intermediate_features[name] = output.detach() # Captures output from the layer
 
     # Return the appropriate hook function based on the specified hook_type
     if hook_type == 'pre':
@@ -114,12 +114,11 @@ def _work(process_id, model, dataset, args):
             cls2pat_post_feat = intermediate_features['cls2pat_post']
 
             # Now you have access to cls2pat both before and after model.graph_b
-
             B, _, H, W = cls2pat_pre_feat.shape
             cls2pat_pre_feat = cls2pat_pre_feat.view(B, -1, args.num_classes, H, W)
             cls2pat_post_feat = cls2pat_post_feat.view(B, -1, args.num_classes, H, W)
-            # print("cls2pat pre-processed features shape:", cls2pat_pre_feat.shape)
-            # print("cls2pat post-processed features shape:", cls2pat_post_feat.shape)
+            print("cls2pat pre-processed features shape:", cls2pat_pre_feat.shape)
+            print("cls2pat post-processed features shape:", cls2pat_post_feat.shape)
             
             cls2spt_pre_feat = intermediate_features['cls2spt_pre']
             cls2spt_post_feat = intermediate_features['cls2spt_post']
