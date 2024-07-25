@@ -5,7 +5,7 @@ from functools import partial
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
 import torch.nn.functional as F
-from net.modules import DownConv, SpatialPriorModule, SemanticAttnGNNModule
+from net.modules import DownConv, SpatialPriorModule, SemanticAttnGNNModule, resize_input
 from net.base_vit import VisionTransformer, _cfg
 
 __all__ = ['deit_small_mctgformer']
@@ -17,7 +17,7 @@ class MCTGFormer(VisionTransformer):
         self.stages = 4 
         interval = int(self.depth // self.stages)
         self.stage_indices = tuple(i for i in range(0, self.depth + 1, interval))
-        
+        self.input_size = input_size
         img_size = to_2tuple(input_size)
         patch_size = to_2tuple(self.patch_embed.patch_size)
         self.Hp, self.Wp = math.ceil(img_size[0] / patch_size[0]), math.ceil(img_size[1] / patch_size[1])
@@ -29,14 +29,22 @@ class MCTGFormer(VisionTransformer):
         self.dilations_spatial = [1, 2, 2, 2]
         
         assert input_size >= 224, f"Input size {input_size} is too small."
+        
         if input_size < 448:
             self.num_knn_spatial = [10, 8, 6, 4]
-            self.spatial_scales = (8, 16, 32, 64)   
-            self.spatial_strides = (2, 2, 2) 
+            self.spatial_scales = [8, 16, 32, 64]
         else:
             self.num_knn_spatial = [20, 16, 12, 8]
-            self.spatial_scales = (16, 32, 64, 128)   
-            self.spatial_strides = (2, 2, 2)
+            self.spatial_scales = [16, 32, 64, 64]  
+            
+        self.spatial_strides = [
+            self.spatial_scales[i+1] // self.spatial_scales[i] 
+            for i in range(len(self.spatial_scales)-1)]
+        
+        self.spatial_prior = SpatialPriorModule(
+            inplanes=64, 
+            embed_dims=self.spatial_dims,
+            spt_strides=[self.spatial_scales[0]//4] + self.spatial_strides)
 
         self.decay_parameter = decay_parameter
         self.spatial_sizes = [(math.ceil(img_size[0] / scale), math.ceil(img_size[1] / scale)) 
@@ -58,11 +66,6 @@ class MCTGFormer(VisionTransformer):
         
         self.avgpool2d = nn.AdaptiveAvgPool2d(1)
         self.proj_cls_embed = nn.Linear(self.stages, self.num_classes)
-        
-        self.spatial_prior = SpatialPriorModule(
-            inplanes=64, 
-            embed_dims=self.spatial_dims,
-            first_down_ratio=self.spatial_scales[0])
         
         self.spatial_fuse = nn.ModuleList([
             SemanticAttnGNNModule(
@@ -286,21 +289,21 @@ class MCTGFormer_CAM(MCTGFormer):
         return cams
     
     def forward(self, x):
+        # H, W = x.shape[2:]
+        # min_tokens = self.dilations_spatial[-1] * self.num_knn_spatial[-1]
+        # scaled_size = self.spatial_scales[-1] * self.spatial_scales[-1]
+        # if (H * W) // scaled_size <= min_tokens:
+        #     H_ = int(math.sqrt(min_tokens * H / W) * self.spatial_scales[-1] + 1)
+        #     W_ = int(math.sqrt(min_tokens * W / H) * self.spatial_scales[-1] + 1)
+        #     x = F.interpolate(
+        #         input=x,
+        #         size=(H_, W_),
+        #         mode='bilinear',
+        #         align_corners=False)
+        #     H, W = H_, W_
+        x = resize_input(x, min_side=self.input_size)
         H, W = x.shape[2:]
-        min_tokens = self.dilations_spatial[-1] * self.num_knn_spatial[-1]
-        scaled_size = self.spatial_scales[-1] * self.spatial_scales[-1]
-        if (H * W) // scaled_size <= min_tokens:
-            H_ = int(math.sqrt(min_tokens * H / W) * self.spatial_scales[-1] + 1)
-            W_ = int(math.sqrt(min_tokens * W / H) * self.spatial_scales[-1] + 1)
-            x = F.interpolate(
-                input=x,
-                size=(H_, W_),
-                mode='bilinear',
-                align_corners=False)
-            H, W = H_, W_
-
         feat_dict = self.forward_features(x)
-        
         patch_tokens = self.reshape_patch_tokens(feat_dict['x_pat'], H, W) # B x C x Hp x Wp  
         out_spatial = [patch_tokens]
      

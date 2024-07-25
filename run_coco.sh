@@ -21,36 +21,36 @@ VALID=${DATACONFIG}/val_id.txt
 
 
 
-# ============= Train Model ===============#
-OMP_NUM_THREADS=${NODES} \
-torchrun --nproc_per_node=${NODES} --nnodes=1 \
-    train_model.py \
-    --dataset ${DATASET} \
-    --model ${MODELNAME} \
-    --train_list ${TRAINID} \
-    --work_space ${WORKDIR} \
-    --input_size ${INPUTSIZE} \
-    --seed 3 \
-    --epoch 30 \
-    --batch_per_gpu 16 \
+# # ============= Train Model ===============#
+# OMP_NUM_THREADS=${NODES} \
+# torchrun --nproc_per_node=${NODES} --nnodes=1 \
+#     train_model.py \
+#     --dataset ${DATASET} \
+#     --model ${MODELNAME} \
+#     --train_list ${TRAINID} \
+#     --work_space ${WORKDIR} \
+#     --input_size ${INPUTSIZE} \
+#     --seed 3 \
+#     --epoch 30 \
+#     --batch_per_gpu 16 \
     
 
-# ============= Make Class Activation Maps of Model=============#
-python make_cam.py \
-    --dataset ${DATASET} \
-    --model ${MODELNAME} \
-    --work_space ${WORKDIR} \
-    --train_list ${TRAINID} \
-    --input_size ${INPUTSIZE} \
-    --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
+# # ============= Make Class Activation Maps of Model=============#
+# python make_cam.py \
+#     --dataset ${DATASET} \
+#     --model ${MODELNAME} \
+#     --work_space ${WORKDIR} \
+#     --train_list ${TRAINID} \
+#     --input_size ${INPUTSIZE} \
+#     --checkpoint ${WORKDIR}/${MODELNAME}_4560.pth \
     
 
-# ============= Evaluate Class Activation Maps =============#
-python eval_cam.py \
-    --dataset ${DATASET} \
-    --work_space ${WORKDIR} \
-    --train_list ${TRAINID} \
-    --curve_threshold \
+# # ============= Evaluate Class Activation Maps =============#
+# python eval_cam.py \
+#     --dataset ${DATASET} \
+#     --work_space ${WORKDIR} \
+#     --train_list ${TRAINID} \
+#     --curve_threshold \
 
 
 # #============= Train and Infer Pixel Semantic Affnity =============
@@ -61,11 +61,10 @@ python eval_cam.py \
 #     --work_space ${WORKDIR} \
 #     --train_list ${TRAINID} \
 #     --weights checkpoints/res38_cls.pth \
-#     --batch_per_gpu 8 \
 #     --seed 3 \
 #     --epoch 5 \
-#     --low_alpha 0.38 \
-#     --high_alpha 0.48 \
+#     --low_alpha 0.40 \
+#     --high_alpha 0.50 \
 
 
 # #============= Infer with Pixel Semantic Affnity =============#
@@ -82,7 +81,8 @@ python eval_cam.py \
 # #============= Evaluate =============#
 # python steps_coco/eval_sem_seg.py \
 #     --work_space ${WORKDIR} \
-#     --seg_out_dir ${SEGDIR} \
+#     --seg_out_dir pseudo_mask_448 \
+#     # --seg_out_dir ${SEGDIR} \
 
 
 # # Save the generated mask to zip

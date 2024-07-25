@@ -10,12 +10,6 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from collections import defaultdict, deque
 
-'''
-modified from Kai Zhang (github: https://github.com/cszn)
-03/03/2019
-https://github.com/xinntao/BasicSR
-'''
-
 
 def data_mkdir(directory_path):
     if not os.path.exists(directory_path):

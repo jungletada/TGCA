@@ -18,7 +18,23 @@ def nchw2nlc(x):
     x = x.permute(0, 2, 3, 1).reshape(B, -1, C).contiguous()
     return x
   
+
+def resize_input(x, min_side=448):
+    B, C, H, W = x.shape
+    if H >= min_side and W >= min_side:
+        return x
     
+    if H < W:
+        new_H = min_side
+        new_W = int(W * (min_side / H))
+    else:
+        new_W = min_side
+        new_H = int(H * (min_side / W))
+    
+    resized_x = F.interpolate(x, size=(new_H, new_W), mode='bilinear', align_corners=False)
+    return resized_x
+
+  
 class DownConv(nn.Module):
     def __init__(self, in_dim, out_dim, kernel_size=3, stride=1, padding=1, 
                  norm_layer=nn.BatchNorm2d):
@@ -95,10 +111,10 @@ class GraphConvolution(nn.Module):
 class SpatialPriorModule(nn.Module):
     def __init__(self, 
                  inplanes=64, 
+                 spt_strides=[4, 2, 2, 1],
                  embed_dims=[384, 384, 384, 384], 
                  norm_layer=nn.BatchNorm2d, 
-                 act_layer=nn.GELU,
-                 first_down_ratio=8):
+                 act_layer=nn.GELU):
         super().__init__()
         self.stem = nn.Sequential(*[ # downsample by 4
             nn.Conv2d(3, inplanes, kernel_size=3, stride=2, padding=1, bias=False),
@@ -113,40 +129,35 @@ class SpatialPriorModule(nn.Module):
             nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         ]) 
 
-        if first_down_ratio == 8:
-            self.conv2 = nn.Sequential(*[ # downsample by 2
-                nn.Conv2d(inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
-                norm_layer(2 * inplanes),
-                act_layer()])
-            
-            # self.conv3 = nn.Sequential(*[ # downsample by 2
-            #     nn.Conv2d(2 * inplanes, 4 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
-            #     norm_layer(4 * inplanes),
-            #     act_layer()])
-
-        elif first_down_ratio == 16:
-            self.conv2 = nn.Sequential(*[ # downsample by 4
+        if spt_strides[0] == 4:
+            self.conv2 = nn.Sequential(*[
                 nn.Conv2d(inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
                 norm_layer(2 * inplanes),
                 nn.Conv2d(2 * inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
                 norm_layer(2 * inplanes),
                 act_layer(),
             ])
-        
+        elif spt_strides[0] == 2:
+            self.conv2 = nn.Sequential(*[ 
+                nn.Conv2d(inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
+                norm_layer(2 * inplanes),
+                act_layer(),
+            ])
         else: raise NotImplementedError
-        
-        self.conv3 = nn.Sequential(*[ # downsample by 2
-            nn.Conv2d(2 * inplanes, 4 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
+             
+        self.conv3 = nn.Sequential(*[ 
+            nn.Conv2d(2 * inplanes, 4 * inplanes, kernel_size=3, stride=spt_strides[1], padding=1, bias=False),
             norm_layer(4 * inplanes),
             act_layer()])
 
-        self.conv4 = nn.Sequential(*[ # downsample by 2
-            nn.Conv2d(4 * inplanes, 4 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
+        self.conv4 = nn.Sequential(*[
+            nn.Conv2d(4 * inplanes, 4 * inplanes, kernel_size=3, stride=spt_strides[2], padding=1, bias=False),
             norm_layer(4 * inplanes),
             act_layer(),
         ])
-        self.conv5 = nn.Sequential(*[ # downsample by 2
-            nn.Conv2d(4 * inplanes, 8 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
+
+        self.conv5 = nn.Sequential(*[
+            nn.Conv2d(4 * inplanes, 8 * inplanes, kernel_size=3, stride=spt_strides[3], padding=1, bias=False),
             norm_layer(8 * inplanes),
             act_layer(),
         ])
