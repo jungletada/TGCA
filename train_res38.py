@@ -20,28 +20,18 @@ from torch.utils.data.distributed import DistributedSampler
 
 import utils
 from engine import compute_mAP
+from utils import str2bool
 from datasets_cam import build_dataset
 import net.resnet38d
 
 import warnings
 warnings.filterwarnings("ignore")
 
-
-def str2bool(v):
-    if isinstance(v, bool):
-        return v
-    if v.lower() in ('yes', 'true', 't', 'y', '1'):
-        return True
-    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
-        return False
-    else:
-        raise argparse.ArgumentTypeError('Boolean value expected.')
-        
-        
+ 
 def get_args_parser():
     parser = argparse.ArgumentParser('DeiT training and evaluation script', add_help=False)
     parser.add_argument('--batch_per_gpu', default=16, type=int)
-    parser.add_argument('--epochs', default=25, type=int)
+    parser.add_argument('--epochs', default=30, type=int)
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument("--work_space", default="results_voc", type=str)
     

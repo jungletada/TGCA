@@ -75,7 +75,16 @@ def flip_cam(cam_list):
     cam_list = [torch.sum(cam, dim=0) for cam in cam_list]
     return cam_list
 
-     
+
+def get_strided_size(origin_size, stride):
+    return ((origin_size[0]-1)//stride+1, (origin_size[1]-1)//stride+1)
+
+
+def get_strided_up_size(origin_size, stride):
+    strided_size = get_strided_size(origin_size, stride)
+    return strided_size[0]*stride, strided_size[1]*stride
+
+
 def _work(process_id, model, dataset, args):
     databin = dataset[process_id]
     n_gpus = torch.cuda.device_count()
@@ -87,126 +96,54 @@ def _work(process_id, model, dataset, args):
         pin_memory=True)
 
     with torch.no_grad(), cuda.device(process_id):
-        
         model.cuda()
         model.eval()
-        
         for iter_, pack in enumerate(tqdm(data_loader, position=process_id, desc=f'[PID{process_id}]')):
             img_name = pack['name'][0] # Img_id->str
             label = pack['label'][0]   # image-level label->Torch.Tensor [1]
             size = pack['size']        # image size->Torch.tensor [2]
+            strided_size = get_strided_size(size, 4)
+            strided_up_size = get_strided_up_size(size, 16)
             
             valid_cat = torch.nonzero(label)[:, 0] # get validate class->[#val_cls]
             
             if valid_cat.shape[0] == 0: # No validate category
                 np.save(osp.join(args.cam_out_dir, img_name + '.npy'), dict())
+                np.save(osp.join(args.cam_out_dir, img_name + '.npy'),
+                        {"keys": valid_cat,
+                         "cam": torch.zeros((0,strided_size[0],strided_size[1])),
+                         "high_res": torch.zeros((0, size[0], size[1]))})
                 continue
             
-            try:
-                outputs = [model.forward(img[0].cuda(non_blocking=True)) # img[0]->[(2, 3, H', W')]
-                        for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
-            except:
-                with open('error.txt', 'a') as f:
-                    f.write(img_name + '\n')
-                continue
-            # if os.path.exists((osp.join(args.cam_out_dir, img_name + '.npy'))):
-            #     continue
-            
-            # if size[0] <= args.input_size and size[1] <= args.input_size:
-            #     outputs = [model.forward(img[0].cuda(non_blocking=True)) # img[0]->[(2, 3, H', W')]
-            #             for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
-            # else: # use sliding window test
-            #     outputs = []
-            #     for img in pack['img']:
-            #         input_img = img[0].cuda(non_blocking=True)
-            #         out = resize_and_sliding_window_test(
-            #             input_img, 
-            #             model, 
-            #             train_size=args.input_size,
-            #             stride=args.input_size // 4)
-            #         outputs.append(out)
-            
+            outputs = [model.forward(img[0].cuda(non_blocking=True)) # img[0]->[(2, 3, H', W')]
+                    for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
+    
             #=================== high resolution cam list ===================#
             upsample_cam_list = [# upsample all multi-scale CAMs
                     F.interpolate(cam, size, mode='bilinear', align_corners=False)
                     for cam in outputs] # ->[(2, Cls, H, W)
             upsample_cam_list = flip_cam(upsample_cam_list)
             upsample_cam = torch.sum(torch.stack(upsample_cam_list, 0), 0) # (Cls, H, W)
-            
             upsample_cam = upsample_cam[valid_cat]
             upsample_cam = normalize_cam(upsample_cam)
             
-            cam_dict = {}
-            upsample_cam = upsample_cam.cpu().numpy()
-            for i, cls in enumerate(valid_cat):
-                cam_dict[cls] = upsample_cam[i]
+            strided_cam_list = [
+                F.interpolate(cam, strided_size, mode='bilinear', align_corners=False)
+                    for cam in outputs] # ->[(2, Cls, H//4, W//4)
+            strided_cam_list = flip_cam(strided_cam_list)
+            strided_cam = torch.sum(torch.stack(strided_cam_list, 0), 0) # (Cls, H//4, W//4)
+            strided_cam = strided_cam[valid_cat]
+            strided_cam = normalize_cam(strided_cam)
+            
+            cam_dict = {
+                "keys": valid_cat, 
+                "cam": strided_cam.cpu(), 
+                "high_res": upsample_cam.cpu().numpy()}
                 
             np.save(osp.join(args.cam_out_dir, img_name + '.npy'), cam_dict)  
             
             if process_id == n_gpus - 1 and iter_ % (len(databin) // 20) == 0:
                 print("%d " % ((5*iter_+1)//(len(databin) // 20)), end='')
-                    
- 
-def sliding_window_tensor(tensor, window_size, stride):
-    """Splits the input tensor using a sliding window of specified size and stride."""
-    patches = tensor.unfold(2, window_size, stride).unfold(3, window_size, stride)
-    patches = patches.contiguous().view(-1, tensor.size(1), window_size, window_size)
-    return patches
-
-
-def combine_patches(patches, original_shape, stride):
-    """Recombine patches into the original image shape."""
-    n, c, h, w = original_shape
-    patch_size = patches.size(2)
-    output = torch.zeros(n, c, h, w, dtype=patches.dtype, device=patches.device)
-    # Overlap counter to average overlapping regions
-    count = torch.zeros_like(output)
-    patch_idx = 0
-    for i in range(0, h - patch_size + 1, stride):
-        for j in range(0, w - patch_size + 1, stride):
-            output[:, :, i:i+patch_size, j:j+patch_size] += patches[patch_idx]
-            count[:, :, i:i+patch_size, j:j+patch_size] += 1
-            patch_idx += 1
-
-    # Avoid division by zero for regions that are not overlapped
-    output = output / torch.clamp(count, min=1)
-    return output
-
-
-def resize_and_sliding_window_test(X, model, train_size=448, stride=224):
-    batch_size, _, height, width = X.shape
-    
-    # Rescale the tensor so that the shortest side is at least train_size
-    min_side = min(height, width)
-    scale_factor = train_size / min_side
-    new_height = int(height * scale_factor)
-    new_width = int(width * scale_factor)
-    
-    # Rescale the input tensor
-    X_rescaled = F.interpolate(X, size=(new_height, new_width), mode='bilinear', align_corners=False)
-    
-    # Split the rescaled tensor into patches of size (2, 3, 448, 448)
-    patches = sliding_window_tensor(X_rescaled, train_size, stride)
-    # Pass each patch through the model and get the output
-    outputs = []
-    for patch in patches:
-        patch = patch.unsqueeze(0)  # Add batch dimension
-        output = model(patch)  # Forward pass through the model
-        # Rescale the output back to the patch size
-        output_rescaled = F.interpolate(output, size=(train_size, train_size), mode='bilinear', align_corners=False)
-        outputs.append(output_rescaled.squeeze(0))  # Remove batch dimension
-
-    # Concatenate all the outputs
-    outputs = torch.stack(outputs, dim=0)
-    channels = outputs.shape[1]
-    # Combine the model's outputs to get the combined result
-    output_shape = (batch_size, channels, new_height, new_width)
-    combined_output = combine_patches(outputs, output_shape, stride)
-    
-    # Resize the final combined output to the original input size
-    # final_output = F.interpolate(combined_output, size=(height, width), mode='bilinear', align_corners=False)
-    
-    return combined_output #final_output
 
        
 if __name__ == '__main__':

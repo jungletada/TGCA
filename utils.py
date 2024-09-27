@@ -45,6 +45,8 @@ def get_model_name(model):
         model_name = 'MCTGCN'      
     elif model.__contains__('MCTG'):
         model_name = 'MCTG'  
+    elif model.__contains__('ResNet38d'):
+        model_name = 'ResNet38d_patch_224'
     else:
         raise NotImplementedError    
     return model_name

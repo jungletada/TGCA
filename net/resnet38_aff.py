@@ -35,9 +35,12 @@ class ResNet38d_Aff(ResNet38d):
         super(ResNet38d_Aff, self).__init__()
         if self.head is not None:
             del self.head
-        self.f8_3 = nn.Conv2d(512, 64, 1, bias=False)
+        self.chns = [64, 128, 256] # default settings
+        
+        self.f8_3 = nn.Conv2d(512, 64, 1, bias=False)   # change to CBR
         self.f8_4 = nn.Conv2d(1024, 128, 1, bias=False)
         self.f8_5 = nn.Conv2d(4096, 256, 1, bias=False)
+        
         self.f9 = nn.Conv2d(448, 448, 1, bias=False)
         
         nn.init.kaiming_normal_(self.f8_3.weight)

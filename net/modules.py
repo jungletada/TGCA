@@ -19,22 +19,45 @@ def nchw2nlc(x):
     return x
   
 
-def resize_input(x, min_side=448):
-    B, C, H, W = x.shape
-    if H >= min_side and W >= min_side:
+def resize_input_minbound(x, min_size=336):
+    """
+        Wrapper Around resize input
+    """
+    H, W = x.shape[2:]
+    if H >= min_size and W >= min_size:
         return x
     
     if H < W:
-        new_H = min_side
-        new_W = int(W * (min_side / H))
+        new_H = min_size
+        new_W = int(W * (min_size / H))
     else:
-        new_W = min_side
-        new_H = int(H * (min_side / W))
+        new_W = min_size
+        new_H = int(H * (min_size / W))
     
     resized_x = F.interpolate(x, size=(new_H, new_W), mode='bilinear', align_corners=False)
     return resized_x
 
-  
+
+def resize_input_maxbound(x, max_size=448):
+    """
+        Wrapper Around resize input
+    """
+    H, W = x.shape[2:]
+    if H <= max_size and W <= max_size:
+        return x
+
+    if H < W:
+        new_W = max_size
+        new_H = int(H * (max_size / W))
+        print(H, W, new_H, new_W)
+    else:
+        new_H = max_size
+        new_W = int(W * (max_size/ H))
+    
+    resized_x = F.interpolate(x, size=(new_H, new_W), mode='bilinear', align_corners=False)
+    return resized_x
+
+
 class DownConv(nn.Module):
     def __init__(self, in_dim, out_dim, kernel_size=3, stride=1, padding=1, 
                  norm_layer=nn.BatchNorm2d):
@@ -478,3 +501,4 @@ class SemanticAttnGNNModule(nn.Module):
         x_spatial = nlc2nchw(x_spatial, d_size=(H, W))
         
         return x_cls, x_spatial
+    

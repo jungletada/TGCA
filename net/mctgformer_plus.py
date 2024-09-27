@@ -5,7 +5,7 @@ from functools import partial
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
 import torch.nn.functional as F
-from net.modules import DownConv, SpatialPriorModule, SemanticAttnGNNModule, resize_input
+from net.modules import DownConv, SpatialPriorModule, SemanticAttnGNNModule, resize_input_minbound
 from net.base_vit import VisionTransformer, _cfg
 
 __all__ = ['deit_small_mctgformer']
@@ -34,8 +34,8 @@ class MCTGFormer(VisionTransformer):
             self.num_knn_spatial = [10, 8, 6, 4]
             self.spatial_scales = [8, 16, 32, 64]
         else:
-            self.num_knn_spatial = [20, 16, 12, 8]
-            self.spatial_scales = [16, 32, 64, 64]  
+            self.num_knn_spatial = [20, 16, 12, 8]  # modified to ablate
+            self.spatial_scales = [16, 32, 64, 64]  # modified to ablate
             
         self.spatial_strides = [
             self.spatial_scales[i+1] // self.spatial_scales[i] 
@@ -259,7 +259,8 @@ class MCTGFormer_CAM(MCTGFormer):
         """fuse_layers: The attention of the last L layers to fuse"""
         super().__init__(*args, **kwargs)
         self.fuse_layers = fuse_layers
-        
+    
+    @torch.no_grad()
     def forward_cam(self, tokens, attn_weights):
         """
         Input: 
@@ -269,7 +270,7 @@ class MCTGFormer_CAM(MCTGFormer):
             Refined class activation maps -> B x Cls x Hp x Wp
         """
         B, Cls, Hp, Wp = tokens.shape
-        attn_weights = torch.mean(torch.stack(attn_weights), dim=2)     # L x B x (Cls+Np) x (Cls+Np) 
+        attn_weights = torch.mean(torch.stack(attn_weights), dim=2).detach()     # L x B x (Cls+Np) x (Cls+Np) 
         if self.fuse_layers == 0:
             cams = patch_cam
         else:
@@ -288,20 +289,9 @@ class MCTGFormer_CAM(MCTGFormer):
             ).reshape(B, Cls, Hp, Wp)
         return cams
     
+    @torch.no_grad()
     def forward(self, x):
-        # H, W = x.shape[2:]
-        # min_tokens = self.dilations_spatial[-1] * self.num_knn_spatial[-1]
-        # scaled_size = self.spatial_scales[-1] * self.spatial_scales[-1]
-        # if (H * W) // scaled_size <= min_tokens:
-        #     H_ = int(math.sqrt(min_tokens * H / W) * self.spatial_scales[-1] + 1)
-        #     W_ = int(math.sqrt(min_tokens * W / H) * self.spatial_scales[-1] + 1)
-        #     x = F.interpolate(
-        #         input=x,
-        #         size=(H_, W_),
-        #         mode='bilinear',
-        #         align_corners=False)
-        #     H, W = H_, W_
-        x = resize_input(x, min_side=self.input_size)
+        x = resize_input_minbound(x)
         H, W = x.shape[2:]
         feat_dict = self.forward_features(x)
         patch_tokens = self.reshape_patch_tokens(feat_dict['x_pat'], H, W) # B x C x Hp x Wp  

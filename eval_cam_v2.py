@@ -30,18 +30,15 @@ def run(args, dataset):
             pack = dataset[i]
             filename = pack['name_id']
             try:
-                cam_dict = np.load(osp.join(args.eval_cam_dir, filename + '.npy'), 
-                                allow_pickle=True).item()
+                cam_dict = np.load(
+                    osp.join(args.eval_cam_dir, filename + '.npy'), 
+                    allow_pickle=True).item()
             except EOFError as e:
                 print(f'{e}, {filename}')
                 
-            if len(tuple(cam_dict.keys())) == 0:
-                continue         
-            cams = np.stack(list(cam_dict.values()), axis=0) # (#val_cls, H, W)
-            cams = np.pad(cams, ((1, 0), (0, 0), (0, 0)), mode='constant', constant_values=threshold)
-            
-            keys = (torch.stack(tuple(cam_dict.keys())) + 1).numpy()
-            keys = np.pad(keys, (1, 0), mode='constant')
+            cams = np.pad(cam_dict['high_res'], ((1, 0), (0, 0), (0, 0)), 
+                          mode='constant', constant_values=threshold)
+            keys = np.pad(cam_dict['keys'] + 1, (1, 0), mode='constant') # [0, cls1, ...]      
             
             cls_labels = np.argmax(cams, axis=0)
             cls_labels = keys[cls_labels].astype(np.uint8)

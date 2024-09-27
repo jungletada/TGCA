@@ -7,8 +7,10 @@ echo "  |-- COCO dataset path: datasets/MSCOCO";
 GPU=0,1
 NODES=2
 DATASET=VOC12
-MODEL=mctgformer
-MODELNAME=deit_small_mctgformer
+# MODEL=mctgformer
+# MODELNAME=deit_small_mctgformer
+MODEL=resnet38d
+MODELNAME=ResNet38d_patch_224
 SEG_DIR=pseudo_mask
 INPUTSIZE=448
 
@@ -21,32 +23,32 @@ TRAINID=${DATACONFIG}/train_id.txt
 VALID=${DATACONFIG}/val_id.txt
 
 
-# #============= Train Model ===============#
-# OMP_NUM_THREADS=${NODES} \
-# torchrun --nproc_per_node=${NODES} --nnodes=1 \
-#     train_model.py \
-#     --dataset ${DATASET} \
-#     --model ${MODELNAME} \
-#     --train_list ${TRAINAUGID} \
-#     --work_space ${WORKDIR} \
-#     --input_size ${INPUTSIZE} \
-#     --seed 8 \
-#     --epoch 30 \
-#     --batch_per_gpu 19 \
+#============= Train Model ===============#
+OMP_NUM_THREADS=${NODES} \
+torchrun --nproc_per_node=${NODES} --nnodes=1 \
+    train_res38.py \
+    --dataset ${DATASET} \
+    --model ${MODELNAME} \
+    --train_list ${TRAINAUGID} \
+    --work_space ${WORKDIR} \
+    --input_size ${INPUTSIZE} \
+    --seed 8 \
+    --epoch 30 \
+    --batch_per_gpu 16 \
     
 
 # # ============= Make Class Activation Maps of Model=============#
-# python make_cam.py \
+# python make_cam_v2.py \
 #     --dataset ${DATASET} \
 #     --model ${MODELNAME} \
 #     --work_space ${WORKDIR} \
 #     --train_list ${TRAINAUGID} \
 #     --input_size ${INPUTSIZE} \
-#     --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
+#     --checkpoint ${WORKDIR}/${MODELNAME}_7273.pth \
     
 
 # # ============= Evaluate Class Activation Maps =============#
-# python eval_cam.py \
+# python eval_cam_v2.py \
 #     --dataset ${DATASET} \
 #     --work_space ${WORKDIR} \
 #     --train_list ${TRAINID} \
@@ -78,10 +80,10 @@ VALID=${DATACONFIG}/val_id.txt
 #     --threshold 0.45 \
 
 
-#============= Evaluate =============#
-python steps_voc/eval_sem_seg.py \
-    --work_space ${WORKDIR} \
-    --seg_out_dir pseudo_mask_448 \
+# #============= Evaluate =============#
+# python steps_voc/eval_sem_seg.py \
+#     --work_space ${WORKDIR} \
+#     --seg_out_dir pseudo_mask_448 \
     ##--seg_out_dir ${SEG_DIR} \
 
 

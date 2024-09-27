@@ -31,26 +31,26 @@ VALID=${DATACONFIG}/val_id.txt
 #     --work_space ${WORKDIR} \
 #     --input_size ${INPUTSIZE} \
 #     --seed 3 \
-#     --epoch 30 \
-#     --batch_per_gpu 16 \
+#     --epoch 35 \
+#     --batch_per_gpu 18 \
     
 
-# # ============= Make Class Activation Maps of Model=============#
-# python make_cam.py \
-#     --dataset ${DATASET} \
-#     --model ${MODELNAME} \
-#     --work_space ${WORKDIR} \
-#     --train_list ${TRAINID} \
-#     --input_size ${INPUTSIZE} \
-#     --checkpoint ${WORKDIR}/${MODELNAME}_4560.pth \
+# ============= Make Class Activation Maps of Model=============#
+python make_cam_v2.py \
+    --dataset ${DATASET} \
+    --model ${MODELNAME} \
+    --work_space ${WORKDIR} \
+    --train_list ${TRAINID} \
+    --input_size ${INPUTSIZE} \
+    --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
     
 
-# # ============= Evaluate Class Activation Maps =============#
-# python eval_cam.py \
-#     --dataset ${DATASET} \
-#     --work_space ${WORKDIR} \
-#     --train_list ${TRAINID} \
-#     --curve_threshold \
+# ============= Evaluate Class Activation Maps =============#
+python eval_cam_v2.py \
+    --dataset ${DATASET} \
+    --work_space ${WORKDIR} \
+    --train_list ${TRAINID} \
+    --curve_threshold \
 
 
 # #============= Train and Infer Pixel Semantic Affnity =============

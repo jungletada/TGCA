@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from net.modules import DownConv, SpatialPriorModule, SemanticAttnGNNModule
 from net.base_vit import VisionTransformer, _cfg
 
+
 __all__ = ['deit_small_mctgformer']
 
 

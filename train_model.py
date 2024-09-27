@@ -26,7 +26,7 @@ from utils import str2bool
 
 import net.mctgformer_plus
 # import net.mctformer_plus
-
+import net.resnet38d
 import warnings
 warnings.filterwarnings("ignore")
         
@@ -245,7 +245,8 @@ def main(args):
     # Train and Validation for image classification
     dataset_train, args.nb_classes = build_dataset(
         is_train=True, make_cam=False, args=args)
-    dataset_val, _ = build_dataset(is_train=False, make_cam=False, args=args)
+    dataset_val, _ = build_dataset(
+        is_train=False, make_cam=False, args=args)
     sampler_train = DistributedSampler(dataset_train)
     
     data_loader_train = torch.utils.data.DataLoader(
