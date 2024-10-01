@@ -53,7 +53,7 @@ def get_args_parser():
     parser.add_argument("--local_rank", type=int, help='rank in current node')  
     parser.add_argument('--device', default='cuda',help='device id (i.e. 0 or 0,1 or cpu)')
     # training settings
-    parser.add_argument('--seed', default=0, type=int)
+    parser.add_argument('--seed', default=3, type=int)
     parser.add_argument("--network", default="network.resnet38_aff", type=str)
     parser.add_argument("--batch_per_gpu", default=4, type=int)
     parser.add_argument("--epoch", default=5, type=int)
@@ -70,7 +70,8 @@ def get_args_parser():
     # hyper parameters settings
     parser.add_argument("--beta", default=11, type=int)
     parser.add_argument("--logt", default=7, type=int)
-    parser.add_argument("--threshold", default=0.41, type=float, help='the optimal one obtained for seeds')
+    parser.add_argument("--threshold", default=0.45, type=float, 
+                        help='the optimal one obtained for seeds')
     args = parser.parse_args()
     return args
 
@@ -278,7 +279,7 @@ def _work(process_id, model, dataset, args):
             
             if len(tuple(cam_dict.keys())) == 0:
                 cam = np.zeros((original_shape[2], original_shape[3]), np.uint8)
-                mask = Image.fromarray(cam, mode='P')
+                mask = Image.fromarray(cam, mode='L')
                 mask.save(osp.join(args.seg_out_dir, name + '.png'))
                 continue
             
@@ -306,10 +307,11 @@ def _work(process_id, model, dataset, args):
                     size=(img.shape[2], img.shape[3]), 
                     mode='bilinear', 
                     align_corners=False)
+                
                 _, cam_rw_pred = torch.max(cam_rw, 1)
                     
                 res = np.uint8(cam_rw_pred.cpu().data[0])[:original_shape[2], :original_shape[3]]
-                mask = Image.fromarray(res, mode='P')
+                mask = Image.fromarray(res, mode='L')
                 mask.save(osp.join(args.seg_out_dir, name + '.png'))
 
             if process_id == n_gpus - 1 and iter_ % (len(databin) // 20) == 0:

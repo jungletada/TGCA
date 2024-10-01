@@ -15,7 +15,7 @@ from utils import create_cam_model
 import warnings
 warnings.filterwarnings("ignore")
 
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
 
 
 def get_args_parser():
@@ -101,14 +101,16 @@ def _work(process_id, model, dataset, args):
             if valid_cat.shape[0] == 0: # No validate category
                 np.save(osp.join(args.cam_out_dir, img_name + '.npy'), dict())
                 continue
-            
-            try:
-                outputs = [model.forward(img[0].cuda(non_blocking=True)) # img[0]->[(2, 3, H', W')]
+
+            outputs = [model.forward(img[0].cuda(non_blocking=True)) # img[0]->[(2, 3, H', W')]
                         for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
-            except:
-                with open('error.txt', 'a') as f:
-                    f.write(img_name + '\n')
-                continue
+            # try:
+            #     outputs = [model.forward(img[0].cuda(non_blocking=True)) # img[0]->[(2, 3, H', W')]
+            #             for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
+            # except:
+            #     with open('error.txt', 'a') as f:
+            #         f.write(img_name + '\n')
+            #     continue
             # if os.path.exists((osp.join(args.cam_out_dir, img_name + '.npy'))):
             #     continue
             
@@ -142,9 +144,9 @@ def _work(process_id, model, dataset, args):
                 cam_dict[cls] = upsample_cam[i]
                 
             np.save(osp.join(args.cam_out_dir, img_name + '.npy'), cam_dict)  
-            
+        
             if process_id == n_gpus - 1 and iter_ % (len(databin) // 20) == 0:
-                print("%d " % ((5*iter_+1)//(len(databin) // 20)), end='')
+                print("%d " % ((5*iter_+1) // (len(databin) // 20)), end='')
                     
  
 def sliding_window_tensor(tensor, window_size, stride):

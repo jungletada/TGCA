@@ -280,8 +280,11 @@ class VOC12AffGtDataset(VOC12ImageDataset):
     
 
 class VOC12AffDatasetCRF(VOC12ImageDataset):
-    def __init__(self, img_name_list_path, cam_npy_dir, cropsize, voc12_root, low_alpha=1, high_alpha=12, radius=5,
-                 joint_transform_list=None, img_transform_list=None, label_transform_list=None):
+    def __init__(self, img_name_list_path, cam_npy_dir, cropsize, voc12_root, 
+                 low_alpha=1, high_alpha=12, radius=5,
+                 joint_transform_list=None, 
+                 img_transform_list=None, 
+                 label_transform_list=None):
         super().__init__(img_name_list_path, voc12_root, transform=None)
         self.cam_npy_dir = cam_npy_dir
         self.low_alpha = low_alpha

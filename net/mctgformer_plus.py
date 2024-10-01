@@ -291,7 +291,7 @@ class MCTGFormer_CAM(MCTGFormer):
     
     @torch.no_grad()
     def forward(self, x):
-        x = resize_input_minbound(x)
+        x = resize_input_minbound(x, min_size=448)
         H, W = x.shape[2:]
         feat_dict = self.forward_features(x)
         patch_tokens = self.reshape_patch_tokens(feat_dict['x_pat'], H, W) # B x C x Hp x Wp  

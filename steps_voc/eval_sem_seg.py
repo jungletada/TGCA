@@ -1,5 +1,7 @@
-import os, sys
+import os
+import sys
 import argparse
+import cv2
 import numpy as np
 import os.path as osp
 import imageio.v2 as imageio
@@ -18,7 +20,11 @@ def run_eval_seg(args):
     labels = []
     
     for i, id_ in enumerate(dataset.ids):
-        cls_labels = imageio.imread(os.path.join(args.seg_out_dir, id_ + '.png')).astype(np.uint8)
+        cls_labels = imageio.imread(
+            os.path.join(args.seg_out_dir, id_ + '.png')).astype(np.uint8)
+        # cls_labels = cv2.imread(
+        #     os.path.join(args.seg_out_dir, id_ + '.png'), 
+        #     cv2.IMREAD_UNCHANGED).astype(np.uint8)
         cls_labels[cls_labels == 255] = 0
         preds.append(cls_labels.copy())
         labels.append(dataset[i]["label"])
