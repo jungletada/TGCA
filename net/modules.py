@@ -16,8 +16,16 @@ def nlc2nchw(x, d_size):
 def nchw2nlc(x):
     B, C = x.shape[:2]
     x = x.permute(0, 2, 3, 1).reshape(B, -1, C).contiguous()
-    return x
-  
+    return x  
+
+
+def auto_resize_input(x, min_size=448):
+    """Resize input tensor to a minimum size while maintaining aspect ratio."""
+    resized_x = resize_input_minbound(x, min_size=min_size)
+    if resized_x.shape[2] * resized_x.shape[3] > min_size * 2800:
+        resized_x = resize_input_minbound(x, min_size=384)
+    return resized_x
+    
 
 def resize_input_minbound(x, min_size=336):
     """
@@ -45,7 +53,6 @@ def resize_input_maxbound(x, max_size=448):
     H, W = x.shape[2:]
     if H <= max_size and W <= max_size:
         return x
-
     if H < W:
         new_W = max_size
         new_H = int(H * (max_size / W))
@@ -320,45 +327,24 @@ class SpatialFuseModule(nn.Module):
         x_query = nlc2nchw(x_query, d_size=(H, W))
         
         return x_query
-                      
-            
-class SemanticGraph(nn.Module):
-    def __init__(self, kernel_size=9, num_classes=20, mid_channels=64, drop_path=0., dilation=1):
-        super().__init__()
-        self.grapher = Grapher(
-            in_channels=num_classes, 
-            mid_channels=mid_channels,
-            kernel_size=kernel_size, 
-            dilation=dilation, 
-            conv='mr', 
-            act='gelu', 
-            norm='instance',
-            bias=True, 
-            stochastic=False, 
-            epsilon=0.2, 
-            r=1, 
-            drop_path=drop_path)
-    
-    def forward(self, x):
-        x = self.grapher(x)
-        return x
-        
+                              
 
 class SemanticAttnGNNModule(nn.Module):
-    def __init__(self, 
-                 query_dim, 
-                 key_dim, 
-                 num_classes=20, 
-                 num_heads=6,
-                 attn_drop=0., 
-                 proj_drop=0., 
-                 drop_path=0.1, 
-                 mask_ratio=0.1, 
-                 qkv_bias=True,
-                 qk_scale=None,
-                 kernel_dict={'backbone':9, 'spatial':9}, 
-                 dilation_dict={'backbone':1, 'spatial':1},
-                 norm_layer=nn.LayerNorm,):
+    def __init__(
+            self,
+            query_dim,
+            key_dim,
+            num_classes=20,
+            num_heads=6,
+            attn_drop=0.,
+            proj_drop=0.,
+            drop_path=0.,
+            mask_ratio=0.,
+            qkv_bias=True,
+            qk_scale=None,
+            kernel_dict={'backbone':9, 'spatial':9}, 
+            dilation_dict={'backbone':1, 'spatial':1},
+            norm_layer=nn.LayerNorm,):
         super().__init__()
         self.norm1 = norm_layer(query_dim)
         self.norm2 = norm_layer(key_dim)
@@ -398,14 +384,14 @@ class SemanticAttnGNNModule(nn.Module):
             in_channels=self.num_heads*num_classes, 
             kernel_size=kernel_dict['spatial'],
             dilation=dilation_dict['spatial'],
-            conv='mr', 
-            act='gelu', 
+            conv='mr',
+            act='gelu',
             groups=self.num_heads,
             norm='instance',
-            bias=True, 
-            stochastic=False, 
-            epsilon=0.2, 
-            r=1, 
+            bias=True,
+            stochastic=False,
+            epsilon=0.2,
+            r=1,
             drop_path=drop_path)
         
         self.mlp = MLP(
@@ -413,16 +399,13 @@ class SemanticAttnGNNModule(nn.Module):
             hidden_features=self.dim * 4,
             out_features=self.dim)
     
-    
     def forward_attention_gnn(self, input_query, input_key, token_size, spatial_size):
         B, Ni, _ = input_query.shape
         N = input_key.shape[1] - self.Cls
-        
         # Concat class tokens to query
         cls_tokens = self.proj_cls(input_key[:, :self.Cls, :])
         input_query = self.proj_q(input_query)
         input_query = torch.cat((cls_tokens, input_query), dim=1)
-        
         q = input_query.reshape(
             B, (self.Cls + Ni), self.num_heads, self.head_dim).permute(0, 2, 1, 3)
         kv = self.proj_kv(input_key).reshape(
@@ -430,7 +413,7 @@ class SemanticAttnGNNModule(nn.Module):
         k, v = kv[0], kv[1] # B x Nd x (Cls+N) x d
         attn = (q @ k.transpose(-2, -1)) * self.scale  # B x Nd x (Cls+Ni) x (Cls+N)
         
-        #=============== Forward GNN ===============#               
+        #=============== Forward GNN ===============#            
         cls2pat = attn[:, :, :self.Cls, self.Cls:] # B x Nd x Cls x N
         cls2pat = cls2pat.reshape(
             B, self.num_heads * self.Cls, token_size[0], token_size[1]).contiguous()
@@ -439,18 +422,21 @@ class SemanticAttnGNNModule(nn.Module):
         cls2spa = attn[:, :, self.Cls:, :self.Cls] # B x Nd x Ni x Cls
         cls2spa = cls2spa.permute(0, 1, 3, 2).reshape(
             B, self.num_heads * self.Cls, spatial_size[0], spatial_size[1]).contiguous()
-        cls2spa = self.graph_s(cls2spa) 
+        cls2spa = self.graph_s(cls2spa)
         
-        #=============== Reshape and Softmax ===============#
+        # =============== Reshape and Softmax ===============#
         attn[:, :, :self.Cls, self.Cls:] = cls2pat.reshape(B, self.num_heads, self.Cls, N)
         attn[:, :, self.Cls:, :self.Cls] = cls2spa.reshape(B, self.num_heads, self.Cls, -1).permute(0, 1, 3, 2)
         
+        # =============== Prbability Reasonable Softmax ===============#
         attn_cls, attn_pat = torch.split(attn, [self.Cls, N], dim=-1)
         attn_pat = attn_pat.softmax(dim=-1)
         attn_cls = attn_cls.softmax(dim=-1)
         attn = torch.cat((attn_cls, attn_pat), dim=-1)
         
-        #=============== Reshape Attention and times Value ===============#     
+        ## Vanilla Softmax
+        # attn = attn.softmax(dim=-1) # traditional softmax
+        #===============================================================# 
         attn = self.attn_drop(attn)
         x = (attn @ v).transpose(1, 2).reshape( # B x Nd x (Cls+Nt) x d
             B, (self.Cls+Ni), -1)               # B x (Cls+Ni) x Ct
@@ -467,32 +453,110 @@ class SemanticAttnGNNModule(nn.Module):
         Output:
             x_spatial: updated spatial features 
         """
-        # H, W = x_spatial.shape[2:]
-        # x_spatial = nchw2nlc(x_spatial)
-        # idendity = x_spatial.clone()
-
-        # x_cls, x_spatial = self.forward_attention_gnn(
-        #     self.norm1(x_spatial), 
-        #     self.norm2(x_backbone), 
-        #     token_size=token_size, 
-        #     spatial_size=(H, W))
-        
-        # x_spatial = idendity + self.drop_path(x_spatial)
-        # x_spatial = x_spatial + self.drop_path(self.mlp(self.norm3(x_spatial)))
-        
-        # x_spatial = nlc2nchw(x_spatial, d_size=(H, W))
-        # return x_cls, x_spatial 
-        
         H, W = x_spatial.shape[2:]
         x_spatial = nchw2nlc(x_spatial)
         x_cls = x_backbone[:,:self.Cls]
         x_cat = torch.cat((x_cls, x_spatial), dim=1).clone() # B, (Cls+Ni), C
     
         x_cls, x_spatial = self.forward_attention_gnn(
-            self.norm1(x_spatial), 
-            self.norm2(x_backbone), 
-            token_size=token_size, 
+            self.norm1(x_spatial),
+            self.norm2(x_backbone),
+            token_size=token_size,
             spatial_size=(H, W))
+        
+        x_cat = x_cat + self.drop_path(torch.cat((x_cls, x_spatial), dim=1))
+        x_cat = x_cat + self.drop_path(self.mlp(self.norm3(x_cat)))
+        
+        x_cls, x_spatial = x_cat[:, :self.Cls], x_cat[:, self.Cls:]
+        x_spatial = nlc2nchw(x_spatial, d_size=(H, W))
+        
+        return x_cls, x_spatial
+    
+  
+class SRMCTModule(nn.Module):
+    def __init__(
+            self,
+            query_dim,
+            key_dim,
+            num_classes=20,
+            num_heads=6,
+            attn_drop=0.,
+            proj_drop=0.,
+            drop_path=0.1,
+            qkv_bias=True,
+            qk_scale=None,
+            norm_layer=nn.LayerNorm):
+        super().__init__()
+        self.norm1 = norm_layer(query_dim)
+        self.norm2 = norm_layer(key_dim)
+        self.norm3 = norm_layer(query_dim)
+        self.num_heads = num_heads
+        self.dim = min(query_dim, key_dim)
+        self.head_dim = self.dim // num_heads
+        self.scale = qk_scale or self.head_dim ** -0.5
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.Cls = num_classes
+        
+        self.proj_q = nn.Linear(query_dim, self.dim, bias=qkv_bias)
+        self.proj_kv = nn.Linear(key_dim, self.dim * 2, bias=qkv_bias)
+        self.proj_cls = nn.Linear(key_dim, self.dim, bias=qkv_bias)
+        
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(self.dim, query_dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+        
+        self.mlp = MLP(
+            in_features=self.dim,
+            hidden_features=self.dim * 4,
+            out_features=self.dim)
+       
+    def forward_attention(self, input_query, input_key):
+        B, Ni, _ = input_query.shape
+        N = input_key.shape[1] - self.Cls
+        # Concat class tokens to query
+        cls_tokens = self.proj_cls(input_key[:, :self.Cls, :])
+        input_query = self.proj_q(input_query)
+        input_query = torch.cat((cls_tokens, input_query), dim=1)
+        q = input_query.reshape(
+            B, (self.Cls + Ni), self.num_heads, self.head_dim).permute(0, 2, 1, 3)
+        kv = self.proj_kv(input_key).reshape(
+            B, (self.Cls + N), 2, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+        k, v = kv[0], kv[1] # B x Nd x (Cls+N) x d
+        attn = (q @ k.transpose(-2, -1)) * self.scale  # B x Nd x (Cls+Ni) x (Cls+N)
+         
+        #=============== Reshape and Softmax ===============#
+        # attn_cls, attn_pat = torch.split(attn, [self.Cls, N], dim=-1)
+        # attn_pat = attn_pat.softmax(dim=-1)
+        # attn_cls = attn_cls.softmax(dim=-1)
+        # attn = torch.cat((attn_cls, attn_pat), dim=-1)
+        
+        ### Vanilla Softmax
+        attn = attn.softmax(dim=-1) # traditional softmax
+        #===============================================================#     
+        attn = self.attn_drop(attn)
+        x = (attn @ v).transpose(1, 2).reshape( # B x Nd x (Cls+Nt) x d
+            B, (self.Cls+Ni), -1)               # B x (Cls+Ni) x Ct
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        
+        return x[:, :self.Cls], x[:, self.Cls:]
+               
+    def forward(self, x_spatial, x_backbone, token_size):
+        """
+        Input:
+            x_spatial: spatial features from prior module->[B, Cq, Hi, Wi]
+            x_backbone: multi-class token transformer features->[B, (Cls+N'), Ck]
+        Output:
+            x_spatial: updated spatial features 
+        """
+        H, W = x_spatial.shape[2:]
+        x_spatial = nchw2nlc(x_spatial)
+        x_cls = x_backbone[:,:self.Cls]
+        x_cat = torch.cat((x_cls, x_spatial), dim=1).clone() # B, (Cls+Ni), C
+    
+        x_cls, x_spatial = self.forward_attention(
+            self.norm1(x_spatial),
+            self.norm2(x_backbone))
         
         x_cat = x_cat + self.drop_path(torch.cat((x_cls, x_spatial), dim=1))
         x_cat = x_cat + self.drop_path(self.mlp(self.norm3(x_cat)))

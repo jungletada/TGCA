@@ -9,16 +9,19 @@ NODES=2
 
 DATASET=VOC12
 DATACONFIG=configs/voc12
-INPUTSIZE=448
-SEG_DIR=pseudo_mask
-# MODELNAME=ResNet38d_patch_224
-MODELNAME=deit_small_mctgformer
-# WORKDIR=results_voc/resnet38d_${INPUTSIZE}
-WORKDIR=results_voc/mctgformer_${INPUTSIZE}
 
 TRAINAUGID=${DATACONFIG}/train_aug_id.txt
 TRAINID=${DATACONFIG}/train_id.txt
 VALID=${DATACONFIG}/val_id.txt
+
+INPUTSIZE=448
+SEG_DIR=pseudo_mask
+
+MODELNAME=msgformer
+WORKDIR=results_voc/msgformer_${INPUTSIZE}
+
+# MODELNAME=srmctformer
+# WORKDIR=results_voc/srmctformer_${INPUTSIZE}
 
 CUDA_VISIBLE_DEVICES=${GPU}
 
@@ -32,9 +35,9 @@ CUDA_VISIBLE_DEVICES=${GPU}
 #     --train_list ${TRAINAUGID} \
 #     --work_space ${WORKDIR} \
 #     --input_size ${INPUTSIZE} \
-#     --seed 3 \
-#     --epoch 30 \
-#     --batch_per_gpu 18 \
+#     --seed 8 \
+#     --epoch 27 \
+#     --batch_per_gpu 19 \
     
 
 # # ============= Make Class Activation Maps of Model=============#
@@ -42,46 +45,46 @@ CUDA_VISIBLE_DEVICES=${GPU}
 #     --dataset ${DATASET} \
 #     --model ${MODELNAME} \
 #     --work_space ${WORKDIR} \
-#     --train_list ${TRAINAUGID} \
+#     --train_list ${TRAINID} \
 #     --input_size ${INPUTSIZE} \
 #     --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
     
 
-# # ============= Evaluate Class Activation Maps =============#
-# python eval_cam.py \
+# ============= Evaluate Class Activation Maps =============#
+python eval_cam.py \
+    --dataset ${DATASET} \
+    --work_space ${WORKDIR} \
+    --train_list ${TRAINID} \
+    --curve_threshold \
+
+
+# #============= Train and Infer Pixel Semantic Affnity =============
+# OMP_NUM_THREADS=${NODES} \
+# torchrun --nproc_per_node=${NODES} --nnodes=1 \
+#     train_infer_psa.py --train True \
 #     --dataset ${DATASET} \
 #     --work_space ${WORKDIR} \
-#     --train_list ${TRAINID} \
-#     --curve_threshold \
+#     --train_list ${TRAINAUGID} \
+#     --seed 3 \
+#     --low_alpha 0.32 \
+#     --high_alpha 0.50 \
+#     # --weights results_voc/resnet38d_448/ResNet38d_patch_224_last.pth \
 
 
-#============= Train and Infer Pixel Semantic Affnity =============
-OMP_NUM_THREADS=${NODES} \
-torchrun --nproc_per_node=${NODES} --nnodes=1 \
-    train_infer_psa.py --train True \
-    --dataset ${DATASET} \
-    --work_space ${WORKDIR} \
-    --train_list ${TRAINAUGID} \
-    --seed 3 \
-    --low_alpha 0.30 \
-    --high_alpha 0.50 \
-    # --weights results_voc/resnet38d_448/ResNet38d_patch_224_last.pth \
+# #============= Infer with Pixel Semantic Affnity =============#
+# python train_infer_psa.py --inference True \
+#     --dataset ${DATASET} \
+#     --work_space ${WORKDIR} \
+#     --infer_list ${TRAINAUGID} \
+#     --seg_out_dir ${SEG_DIR} \
+#     --threshold 0.45 \
 
 
-#============= Infer with Pixel Semantic Affnity =============#
-python train_infer_psa.py --inference True \
-    --dataset ${DATASET} \
-    --work_space ${WORKDIR} \
-    --infer_list ${TRAINAUGID} \
-    --seg_out_dir ${SEG_DIR} \
-    --threshold 0.45 \
-
-
-#============= Evaluate =============#
-python steps_voc/eval_sem_seg.py \
-    --work_space ${WORKDIR} \
-    --seg_out_dir ${SEG_DIR} \
-    #--seg_out_dir pseudo_mask_448 \
+# #============= Evaluate =============#
+# python steps_voc/eval_sem_seg.py \
+#     --work_space ${WORKDIR} \
+#     --seg_out_dir ${SEG_DIR} \
+#     #--seg_out_dir pseudo_mask_448 \
 
 # # Save the generated mask to zip
 # cd ${WORKDIR} && zip -r ${SEG_DIR}.zip ${SEG_DIR} && cd -

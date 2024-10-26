@@ -36,7 +36,7 @@ def run(args, dataset):
                 print(f'{e}, {filename}')
                 
             if len(tuple(cam_dict.keys())) == 0:
-                continue         
+                continue       
             cams = np.stack(list(cam_dict.values()), axis=0) # (#val_cls, H, W)
             cams = np.pad(cams, ((1, 0), (0, 0), (0, 0)), mode='constant', constant_values=threshold)
             
@@ -115,20 +115,20 @@ if __name__ == '__main__':
 
     if args.dataset == 'VOC12':
         dataset = VOCSegmentationLabelDataset( 
-            data_dir=args.voc12_root, 
+            data_dir=args.voc12_root,
             id_list_file=args.train_list)
         args.low_thres, args.high_thres = 40, 55
 
     elif args.dataset == 'COCO':
         dataset = COCOSegmentationLabelDataset(
-            data_dir=args.mscoco_root, 
+            data_dir=args.mscoco_root,
             id_list_file=args.train_list,
             annotation_dir='MaskSets')
         args.low_thres, args.high_thres = 43, 50
 
-    time = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M") 
+    time = datetime.datetime.now().strftime("%Y%m%d-%H%M") 
     args.log_file = osp.join(args.work_space, f"eval_cam_{time}.log")
-    with open(args.log_file, "a") as f:
-        f.write("{}: Evaluation class activation map for {}\n".format(time, args.dataset))
+    with open(args.log_file, "a", encoding="utf-8") as f:
+        f.write(f"{time}: Evaluation class activation map for {args.dataset}\n")
         
     run(args=args, dataset=dataset)

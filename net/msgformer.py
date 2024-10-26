@@ -6,41 +6,61 @@ from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
 import torch.nn.functional as F
 from net.modules import DownConv, SpatialPriorModule, SemanticAttnGNNModule
+from net.modules import auto_resize_input
 from net.base_vit import VisionTransformer, _cfg
 
+__all__ = ['msgformer']
 
-__all__ = ['deit_small_mctgformer']
 
-
-class MCTGFormer(VisionTransformer):
-    def __init__(self, decay_parameter=0.996, input_size=224, *args, **kwargs):
+class MSGFormer(VisionTransformer):
+    """Multi-scale Graph Attention Vision Transformer."""
+    def __init__(self, *args, decay_parameter=0.996, input_size=448, **kwargs):
+        """
+        Args:
+            *args: Variable length argument list.
+            decay_parameter (float): Decay parameter for the model.
+            input_size (int): Size of the input image.
+            **kwargs: Arbitrary keyword arguments.
+        """
         super().__init__(*args, **kwargs)
-        self.stages = 4 
+        self.stages = 4
         interval = int(self.depth // self.stages)
         self.stage_indices = tuple(i for i in range(0, self.depth + 1, interval))
-        
+        self.input_size = input_size
         img_size = to_2tuple(input_size)
         patch_size = to_2tuple(self.patch_embed.patch_size)
         self.Hp, self.Wp = math.ceil(img_size[0] / patch_size[0]), math.ceil(img_size[1] / patch_size[1])
         self.num_patches = self.Hp * self.Wp
         self.spatial_dims = [self.embed_dim] * self.stages
-        self.spatial_scales = (8, 16, 32, 64)   
-        self.spatial_strides = (2, 2, 2)        
+         
         self.dilations = [1, 2, 3, 4]
-        self.num_knn = [18, 15, 12, 9] 
-        self.dilations_spatial = [1, 2, 2, 2]
-        if input_size < 448:
-            self.num_knn_spatial = [10, 8, 6, 4]
-        else:
-            # self.num_knn_spatial = [9, 9, 9, 9]
-            self.num_knn_spatial = [20, 16, 12, 8]
-        self.decay_parameter = decay_parameter
+        self.num_knn = [18, 15, 12, 9]
         
-        self.spatial_sizes = [(math.ceil(img_size[0]/scale), math.ceil(img_size[1]/scale)) 
+        assert input_size >= 224, f"Input size {input_size} is too small."
+        
+        # if input_size < 448:
+        #     self.num_knn_spatial = [10, 8, 6, 4]
+        #     self.spatial_scales = [8, 16, 32, 64]
+        # else:
+        self.num_knn_spatial = [12, 8, 6, 2]  # modified to ablate
+        self.spatial_scales = [16, 16, 32, 64]  # modified to ablate
+        self.dilations_spatial = [1, 2, 2, 2] # [1, 2, 2, 2]
+
+        self.spatial_strides = [
+            self.spatial_scales[i+1] // self.spatial_scales[i]
+            for i in range(len(self.spatial_scales)-1)]
+        
+        self.spatial_prior = SpatialPriorModule(
+            inplanes=64,
+            embed_dims=self.spatial_dims,
+            spt_strides=[self.spatial_scales[0]//4] + self.spatial_strides)
+
+        self.decay_parameter = decay_parameter
+        self.spatial_sizes = [(math.ceil(img_size[0] / scale), math.ceil(img_size[1] / scale)) 
                               for scale in self.spatial_scales]
         self.sptial_pos_embed = [nn.Parameter(
             torch.zeros(1, self.spatial_dims[i], self.spatial_sizes[i][0], self.spatial_sizes[i][1]))
-                for i in range(self.stages)]
+            for i in range(self.stages)]
         
         for i in range(self.stages):
             trunc_normal_(self.sptial_pos_embed[i], std=.02)
@@ -56,21 +76,17 @@ class MCTGFormer(VisionTransformer):
         self.avgpool2d = nn.AdaptiveAvgPool2d(1)
         self.proj_cls_embed = nn.Linear(self.stages, self.num_classes)
         
-        self.spatial_prior = SpatialPriorModule(
-            inplanes=64, 
-            embed_dims=self.spatial_dims)
-        
         self.spatial_fuse = nn.ModuleList([
             SemanticAttnGNNModule(
-                query_dim=self.spatial_dims[i], 
-                key_dim=self.embed_dim, 
-                num_classes=self.num_classes, 
-                attn_drop=0., 
-                proj_drop=0., 
-                drop_path=0., 
-                qkv_bias=True, 
-                norm_layer=partial(
-                    nn.LayerNorm, eps=1e-6), 
+                query_dim=self.spatial_dims[i],
+                key_dim=self.embed_dim,
+                num_classes=self.num_classes,
+                num_heads=self.num_heads,
+                attn_drop=0.,
+                proj_drop=0.,
+                drop_path=0.,
+                qkv_bias=True,
+                norm_layer=partial(nn.LayerNorm, eps=1e-6),
                 kernel_dict={
                     'backbone':self.num_knn[i],
                     'spatial':self.num_knn_spatial[i]}, 
@@ -81,25 +97,30 @@ class MCTGFormer(VisionTransformer):
         
         self.down_convs = nn.ModuleList([
             DownConv(
-                in_dim=self.spatial_dims[i], 
+                in_dim=self.spatial_dims[i],
                 out_dim=self.spatial_dims[i+1],
                 stride=self.spatial_strides[i])
-            for i in range(self.stages-1)])
+            for i in range(self.stages - 1)])
         
+        # feature fusion
         self.channel_reduction = nn.Sequential(
             nn.Conv2d(self.embed_dim * 5, self.embed_dim, 1),
             nn.BatchNorm2d(self.embed_dim),
             nn.GELU())
         
+        self.weights = nn.ParameterList([
+            nn.Parameter(torch.zeros(1, self.num_classes, 1))
+            for _ in range(self.stages)])
+        
         self.head = nn.Conv2d(
             self.embed_dim, self.num_classes, kernel_size=3, stride=1, padding=1)
         
-    def interpolate_pos_encoding(self, x, token_size):
+    def interpolate_pos_encoding(self, patch_tokens, token_size):
         if self.Hp == token_size[0] and self.Wp == token_size[1]:
             return self.pos_embed_pat
         patch_pos_embed = self.pos_embed_pat
         
-        dim = x.shape[-1]
+        dim = patch_tokens.shape[-1]
         patch_pos_embed = F.interpolate(
             patch_pos_embed.reshape(1, self.Hp, self.Wp, dim).permute(0, 3, 1, 2),
             size=token_size,
@@ -144,7 +165,7 @@ class MCTGFormer(VisionTransformer):
         B, _, H, W = x.shape                # B x 3 x H x W
         x_spatial = self.spatial_prior(x)   # list [B x C x H^ x W^]
         x = self.patch_embed(x)
-        token_size = (H // self.patch_embed.patch_size[0], 
+        token_size = (H // self.patch_embed.patch_size[0],
                       W // self.patch_embed.patch_size[1])
         
         if not self.training:
@@ -157,7 +178,7 @@ class MCTGFormer(VisionTransformer):
             x = x + self.pos_embed_pat
             for i in range(self.stages):
                 x_spatial[i] += self.sptial_pos_embed[i].to(x.device)
-                
+            
         nn_cls_tokens = self.cls_token.expand(B, -1, -1) + self.pos_embed_cls
         cls_tokens = self.build_class_tokens(x_spatial) + nn_cls_tokens
         
@@ -165,26 +186,33 @@ class MCTGFormer(VisionTransformer):
         x = self.pos_drop(x)                  # B x (N') x C, where N' = Nc + Np
         
         attn_weights = []
-
+       
+        #########  Modify block for ablation study #########
         for i in range(self.stages):
-            for j in range(self.stage_indices[i], self.stage_indices[i+1]):# for each layer
-                x, weights_j = self.blocks[j](x) # weights_j: the j-th layer attention weights
+            for j in range(self.stage_indices[i], self.stage_indices[i+1]):
+                x, weights_j = self.blocks[j](x)
                 attn_weights.append(weights_j)
             
-            # graph transformer part
-            _, x_spatial[i] = self.spatial_fuse[i](
-                x_spatial=x_spatial[i], x_backbone=x, token_size=token_size)
-            # downsample multi-scale sfeatures
+            # if i == 0 or i == 1:
+            cls_stru, x_spatial[i] = self.spatial_fuse[i](
+                x_spatial=x_spatial[i],
+                x_backbone=x,
+                token_size=token_size)
+            
+            # zero initialized weights for adding new class tokens
+            x_cls = x[:, :self.num_classes] + self.weights[i] * cls_stru
+            x_pat = x[:, self.num_classes:]
+            x = torch.cat((x_cls, x_pat), dim=1)
+            
             if i != self.stages - 1:
                 z = self.down_convs[i](x_spatial[i])
                 x_spatial[i + 1] = x_spatial[i + 1] + z
-        
+
         return {
             'x_cls_last': x[:, :self.num_classes], 
             'x_pat': x[:, self.num_classes:], 
             'attn': attn_weights, 
-            'x_stru': x_spatial,
-            }
+            'x_stru': x_spatial,}
     
     def reshape_patch_tokens(self, patch_tokens, H, W):
         B, _, C = patch_tokens.shape
@@ -201,7 +229,8 @@ class MCTGFormer(VisionTransformer):
         Return
             out-> B x C
         """
-        B, C, Hp, Wp = x.shape; N = Hp * Wp
+        B, C, Hp, Wp = x.shape
+        N = Hp * Wp
         flatten_x = x.view(B, C, -1).permute(0, 2, 1) # B x (Hp x Wp) x C
         sorted_x, _ = torch.sort(flatten_x, -2, descending=True)
         weights = torch.logspace(start=0, end=N-1, steps=N, base=self.decay_parameter).cuda()
@@ -222,14 +251,14 @@ class MCTGFormer(VisionTransformer):
         last_cls_tokens = feat_dict['x_cls_last']
         cls_logits = last_cls_tokens.mean(-1)
         # patch tokens
-        patch_tokens = self.reshape_patch_tokens(feat_dict['x_pat'], H, W) # B x C x Hp x Wp  
+        patch_tokens = self.reshape_patch_tokens(feat_dict['x_pat'], H, W) # B x C x Hp x Wp 
         out_spatial = [patch_tokens]
         # spatial tokens
         out_size = patch_tokens.shape[2:]
         for x in feat_dict['x_stru']:
             x = F.interpolate(x, size=out_size, mode="bilinear", align_corners=False)
             out_spatial.append(x)
-        # concat spatial and patch tokens        
+        # concat spatial and patch tokens       
         out_spatial = torch.cat(out_spatial, dim=1)
         out_spatial = self.channel_reduction(out_spatial)
         # classification head and GWP
@@ -238,30 +267,36 @@ class MCTGFormer(VisionTransformer):
         return cls_logits, pat_logits
 
 
-class MCTGFormer_CAM(MCTGFormer):
-    def __init__(self, fuse_layers=4, *args, **kwargs):
+class MSGFormer_CAM(MSGFormer):
+    def __init__(self, *args, fuse_layers=4, min_size=448, **kwargs):
+        """fuse_layers: The attention of the last L layers to fuse"""
         super().__init__(*args, **kwargs)
         self.fuse_layers = fuse_layers
-        
+        self.min_size = min_size
+    
+    @torch.no_grad()
     def forward_cam(self, tokens, attn_weights):
         """
         Input: 
-            patch_tokens: patch tokens from the last backbone layer
-            x_spatial: Spatial features from the spatial model
+            tokens: patch tokens from the last backbone layer
             attn_weights: attention weights from last L layers -> L x B x d x (Cls+Np) x (Cls+Np)
-            fuse_layers: The attention of the last L layers to fuse
         Output: 
             Refined class activation maps -> B x Cls x Hp x Wp
         """
         B, Cls, Hp, Wp = tokens.shape
-        attn_weights = torch.mean(torch.stack(attn_weights), dim=2)     # L x B x (Cls+Np) x (Cls+Np) 
-        
-        attn_maps = attn_weights[-self.fuse_layers:].mean(0)                 # B x (Cls+Np) x (Cls+Np)
-        cls2pat = attn_maps[:, :Cls, Cls:].reshape([B, Cls, Hp, Wp])    # B x Cls x Hp x Wp
-        patch_cam = tokens.detach().clone()   # B x Cls x Hp x Wp
-        patch_cam = F.relu(patch_cam)   # With ReLU Activation
-        cams = torch.pow(cls2pat * patch_cam, 1/2)
-    
+        attn_weights = torch.mean(torch.stack(attn_weights), dim=2).detach()     # L x B x (Cls+Np) x (Cls+Np)
+
+        if self.fuse_layers == 0:
+            cams = tokens.detach().clone()   # B x Cls x Hp x Wp
+            cams = F.relu(cams)         # With ReLU Activation
+
+        else:
+            attn_maps = attn_weights[-self.fuse_layers:].mean(0)         # B x (Cls+Np) x (Cls+Np)
+            cls2pat = attn_maps[:, :Cls, Cls:].reshape([B, Cls, Hp, Wp]) # B x Cls x Hp x Wp
+            patch_cam = tokens.detach().clone()   # B x Cls x Hp x Wp
+            patch_cam = F.relu(patch_cam)         # With ReLU Activation
+            cams = torch.pow(cls2pat * patch_cam, 1/2)
+ 
         # Apply pat2pat affinity refinement
         pat2pat = attn_weights[:, :, Cls:, Cls:] #  L x B x Np x Np
         pat2pat = torch.sum(pat2pat, dim=0)      # B x Np x Np
@@ -269,28 +304,16 @@ class MCTGFormer_CAM(MCTGFormer):
                 pat2pat.unsqueeze(1),    # B x 1 x Np x Np
                 cams.view(B, Cls, -1, 1) # B x Cls x Np x 1
             ).reshape(B, Cls, Hp, Wp)
-        
         return cams
     
+    @torch.no_grad()
     def forward(self, x):
+        x = auto_resize_input(x, min_size=self.min_size)
         H, W = x.shape[2:]
-        min_tokens = self.dilations_spatial[-1] * self.num_knn_spatial[-1]
-        scaled_size = self.spatial_scales[-1] * self.spatial_scales[-1]
-        if (H * W) // scaled_size <= min_tokens:
-            H_ = int(math.sqrt(min_tokens * H / W) * self.spatial_scales[-1] + 1)
-            W_ = int(math.sqrt(min_tokens * W / H) * self.spatial_scales[-1] + 1)
-            x = F.interpolate(
-                input=x,
-                size=(H_, W_),
-                mode='bilinear',
-                align_corners=False)
-            H, W = H_, W_
-
         feat_dict = self.forward_features(x)
-        
-        patch_tokens = self.reshape_patch_tokens(feat_dict['x_pat'], H, W) # B x C x Hp x Wp  
+        patch_tokens = self.reshape_patch_tokens(feat_dict['x_pat'], H, W) # B x C x Hp x Wp 
+        ############################################################
         out_spatial = [patch_tokens]
-     
         out_size = patch_tokens.shape[2:]
         for x in feat_dict['x_stru']:
             x = F.interpolate(x, size=out_size, mode="bilinear", align_corners=False)
@@ -298,7 +321,9 @@ class MCTGFormer_CAM(MCTGFormer):
         # concat spatial and patch tokens        
         out_spatial = torch.cat(out_spatial, dim=1)
         out_spatial = self.channel_reduction(out_spatial)
-        # class activation map
+        ############################################################    
+        
+        ############################################################
         out_spatial = self.head(out_spatial)  # B x Cls x Hp x Wp
         cams = self.forward_cam(out_spatial, feat_dict['attn'])
 
@@ -306,8 +331,8 @@ class MCTGFormer_CAM(MCTGFormer):
 
 
 @register_model
-def deit_small_mctgformer(pretrained=False, **kwargs):
-    model = MCTGFormer(
+def msgformer(pretrained=False, **kwargs):
+    model = MSGFormer(
         patch_size=16, 
         embed_dim=384, 
         depth=12, 

@@ -1,7 +1,7 @@
-
-import PIL.Image
 import random
+import PIL.Image
 import numpy as np
+import torch.nn.functional as F
 
 
 class RandomResizeLong():
@@ -237,3 +237,41 @@ def refine_crf_cam(cam_dict, original_image, low_alpha=1, high_alpha=12,):
         label[alpha] = _crf_with_alpha(cam_dict, value, image_)
     
     return label['low'], label['high']
+
+
+def get_padding(shape, radius, stride):
+    """
+    Calculate the padding size for the input image based on the given radius and stride.
+    """
+    min_size = 2 * radius * stride
+    if shape[3] < min_size:
+        pad_w = min_size - shape[3]
+    else:
+        pad_w = int(np.ceil(shape[3] / stride) * stride) - shape[3]
+    
+    if shape[2] < min_size:
+        pad_h = min_size - shape[2]
+    else:
+        pad_h = int(np.ceil(shape[2] / stride) * stride) - shape[2]
+            
+    p2d = (0, pad_w, 0, pad_h)
+    return p2d
+
+
+def resize_input_minbound(x, min_size=448):
+    """
+        Wrapper Around resize input
+    """
+    H, W = x.shape[2:]
+    if H >= min_size and W >= min_size:
+        return x
+    
+    if H < W:
+        new_H = min_size
+        new_W = int(W * (min_size / H))
+    else:
+        new_W = min_size
+        new_H = int(H * (min_size / W))
+    
+    resized_x = F.interpolate(x, size=(new_H, new_W), mode='bilinear', align_corners=False)
+    return resized_x

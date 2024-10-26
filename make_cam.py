@@ -11,6 +11,7 @@ from torch.backends import cudnn
 cudnn.enabled = True
 
 from misc import torchutils
+from net.modules import auto_resize_input
 from utils import create_cam_model
 import warnings
 warnings.filterwarnings("ignore")
@@ -26,6 +27,7 @@ def get_args_parser():
                         help='Name of model to train')
     parser.add_argument('--checkpoint', default='', help='checkpoint for generating maps')
     parser.add_argument('--input_size', default=224, type=int, help='images input size')
+    parser.add_argument('--min_size', default=224, type=int, help='images input size')
     parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
                         help='Dropout rate (default: 0.)')
     parser.add_argument('--drop-path', type=float, default=0.1, metavar='PCT',
@@ -56,6 +58,7 @@ def get_args_parser():
                                                                                                                         
         
 def normalize_cam(cam_mask):
+    """Normalize the CAM mask."""
     for i in range(cam_mask.size(0)):
         channel = cam_mask[i]
         min_val = torch.min(channel)
@@ -66,16 +69,65 @@ def normalize_cam(cam_mask):
 
 
 def flip_cam(cam_list):
-    for i in range(len(cam_list)):
-        cam_scale = cam_list[i]
+    """Flip cam with scales in the given cam_list."""
+    for i, cam_scale in enumerate(cam_list):
         group1, group2 = cam_scale[0], cam_scale[1]
         group2_flipped = torch.flip(group2, dims=[2])
-        cam_list[i] = torch.stack([group1, group2_flipped])
-        
+        cam_list[i] = torch.stack([group1, group2_flipped])  
     cam_list = [torch.sum(cam, dim=0) for cam in cam_list]
     return cam_list
 
-     
+
+def sliding_window_test(x, model, patch_size, stride):
+    """
+    Perform a sliding window test with overlapping patches for a batch of images.
+
+    Parameters:
+    x (torch.Tensor): Input image tensor of shape (b, 3, H, W).
+    model (torch.nn.Module): Model to process each patch.
+    patch_size (int): Size of each patch (patch will be of shape (3, patch_size, patch_size)).
+    stride (int): Stride for sliding window; must be less than patch_size for overlap.
+
+    Returns:
+    torch.Tensor: Reconstructed image tensor of shape (b, K, H, W), where K is the model's output channels.
+    """
+    x = auto_resize_input(x, min_size=patch_size)
+    b, _, H, W = x.shape
+    output_channels = model(x[:, :, :patch_size, :patch_size]).shape[1]
+    # Calculate padding needed to make sure the last patch in each dimension is patch_size
+    pad_h = (patch_size - (H % patch_size)) % patch_size
+    pad_w = (patch_size - (W % patch_size)) % patch_size
+
+    # Apply padding to the input tensor
+    x_padded = F.pad(x, (0, pad_w, 0, pad_h), mode='constant', value=0)  # Shape: (b, 3, H + pad_h, W + pad_w)
+    H_padded, W_padded = H + pad_h, W + pad_w
+
+    # Calculate output dimensions after downsampling
+    out_H, out_W = H_padded // 16, W_padded // 16
+
+    # Prepare output and count tensors for averaging overlapping regions
+    output = torch.zeros((b, output_channels, out_H, out_W), device=x.device)
+    count = torch.zeros((b, output_channels, out_H, out_W), device=x.device)
+
+    # Slide over the padded image
+    for i in range(0, H_padded - patch_size + 1, stride):
+        for j in range(0, W_padded - patch_size + 1, stride):
+            # Extract patch for each image in the batch
+            patch = x_padded[:, :, i:i + patch_size, j:j + patch_size]  # Shape: (b, 3, patch_size, patch_size)
+            output_patch = model(patch)  # Shape: (b, K, patch_size//16, patch_size//16)
+
+            # Calculate the coordinates in the output (downsampled by 16)
+            out_i, out_j = i // 16, j // 16
+            output[:, :, out_i:out_i + output_patch.shape[2], out_j:out_j + output_patch.shape[3]] += output_patch
+            count[:, :, out_i:out_i + output_patch.shape[2], out_j:out_j + output_patch.shape[3]] += 1
+
+    # Average overlapping areas
+    output /= count
+
+    # Crop to the original output size (H//16, W//16) if any padding was added
+    return output[:, :, :H // 16, :W // 16]
+
+    
 def _work(process_id, model, dataset, args):
     databin = dataset[process_id]
     n_gpus = torch.cuda.device_count()
@@ -104,29 +156,11 @@ def _work(process_id, model, dataset, args):
 
             outputs = [model.forward(img[0].cuda(non_blocking=True)) # img[0]->[(2, 3, H', W')]
                         for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
-            # try:
-            #     outputs = [model.forward(img[0].cuda(non_blocking=True)) # img[0]->[(2, 3, H', W')]
-            #             for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
-            # except:
-            #     with open('error.txt', 'a') as f:
-            #         f.write(img_name + '\n')
-            #     continue
-            # if os.path.exists((osp.join(args.cam_out_dir, img_name + '.npy'))):
-            #     continue
-            
-            # if size[0] <= args.input_size and size[1] <= args.input_size:
-            #     outputs = [model.forward(img[0].cuda(non_blocking=True)) # img[0]->[(2, 3, H', W')]
-            #             for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
-            # else: # use sliding window test
-            #     outputs = []
-            #     for img in pack['img']:
-            #         input_img = img[0].cuda(non_blocking=True)
-            #         out = resize_and_sliding_window_test(
-            #             input_img, 
-            #             model, 
-            #             train_size=args.input_size,
-            #             stride=args.input_size // 4)
-            #         outputs.append(out)
+            # outputs = []
+            # for img in pack['img']:
+            #     x = img[0].cuda(non_blocking=True)
+            #     out = sliding_window_test(x, model, patch_size=448, stride=336)
+            #     outputs.append(out)
             
             #=================== high resolution cam list ===================#
             upsample_cam_list = [# upsample all multi-scale CAMs
@@ -148,81 +182,20 @@ def _work(process_id, model, dataset, args):
             if process_id == n_gpus - 1 and iter_ % (len(databin) // 20) == 0:
                 print("%d " % ((5*iter_+1) // (len(databin) // 20)), end='')
                     
- 
-def sliding_window_tensor(tensor, window_size, stride):
-    """Splits the input tensor using a sliding window of specified size and stride."""
-    patches = tensor.unfold(2, window_size, stride).unfold(3, window_size, stride)
-    patches = patches.contiguous().view(-1, tensor.size(1), window_size, window_size)
-    return patches
 
-
-def combine_patches(patches, original_shape, stride):
-    """Recombine patches into the original image shape."""
-    n, c, h, w = original_shape
-    patch_size = patches.size(2)
-    output = torch.zeros(n, c, h, w, dtype=patches.dtype, device=patches.device)
-    # Overlap counter to average overlapping regions
-    count = torch.zeros_like(output)
-    patch_idx = 0
-    for i in range(0, h - patch_size + 1, stride):
-        for j in range(0, w - patch_size + 1, stride):
-            output[:, :, i:i+patch_size, j:j+patch_size] += patches[patch_idx]
-            count[:, :, i:i+patch_size, j:j+patch_size] += 1
-            patch_idx += 1
-
-    # Avoid division by zero for regions that are not overlapped
-    output = output / torch.clamp(count, min=1)
-    return output
-
-
-def resize_and_sliding_window_test(X, model, train_size=448, stride=224):
-    batch_size, _, height, width = X.shape
-    
-    # Rescale the tensor so that the shortest side is at least train_size
-    min_side = min(height, width)
-    scale_factor = train_size / min_side
-    new_height = int(height * scale_factor)
-    new_width = int(width * scale_factor)
-    
-    # Rescale the input tensor
-    X_rescaled = F.interpolate(X, size=(new_height, new_width), mode='bilinear', align_corners=False)
-    
-    # Split the rescaled tensor into patches of size (2, 3, 448, 448)
-    patches = sliding_window_tensor(X_rescaled, train_size, stride)
-    # Pass each patch through the model and get the output
-    outputs = []
-    for patch in patches:
-        patch = patch.unsqueeze(0)  # Add batch dimension
-        output = model(patch)  # Forward pass through the model
-        # Rescale the output back to the patch size
-        output_rescaled = F.interpolate(output, size=(train_size, train_size), mode='bilinear', align_corners=False)
-        outputs.append(output_rescaled.squeeze(0))  # Remove batch dimension
-
-    # Concatenate all the outputs
-    outputs = torch.stack(outputs, dim=0)
-    channels = outputs.shape[1]
-    # Combine the model's outputs to get the combined result
-    output_shape = (batch_size, channels, new_height, new_width)
-    combined_output = combine_patches(outputs, output_shape, stride)
-    
-    # Resize the final combined output to the original input size
-    # final_output = F.interpolate(combined_output, size=(height, width), mode='bilinear', align_corners=False)
-    
-    return combined_output #final_output
-
-       
 if __name__ == '__main__':
-   
     args = get_args_parser()
     args.cam_out_dir = os.path.join(args.work_space, args.cam_out_dir) 
     os.makedirs(args.cam_out_dir, exist_ok=True)
-    
+
     from datasets_cam import build_dataset
     # change to multi-scale dataset
     if args.dataset == 'VOC12':
-        args.dataset = 'VOC12MS' 
+        args.dataset = 'VOC12MS'
+        args.min_size = 448 if args.input_size >= 448 else 224
     elif args.dataset == 'COCO':
         args.dataset = 'COCOMS'
+        args.min_size = 384 if args.input_size >= 384 else 224
     else:
         raise NotImplementedError
     
@@ -232,7 +205,7 @@ if __name__ == '__main__':
     
     model = create_cam_model(args)
     model_dict = torch.load(
-        args.checkpoint, 
+        args.checkpoint,
         map_location='cpu')['model']
     
     model.load_state_dict(model_dict)

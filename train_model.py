@@ -24,8 +24,8 @@ from engine import train_one_epoch_mctformerplus, train_one_epoch_mctgformer
 from datasets_cam import build_dataset
 from utils import str2bool
 
-import net.mctgformer_plus
-# import net.mctformer_plus
+import net.msgformer
+import net.srmct
 import net.resnet38d
 import warnings
 warnings.filterwarnings("ignore")
@@ -34,7 +34,7 @@ warnings.filterwarnings("ignore")
 def get_args_parser():
     parser = argparse.ArgumentParser('DeiT training and evaluation script', add_help=False)
     parser.add_argument('--batch_per_gpu', default=16, type=int)
-    parser.add_argument('--epochs', default=45, type=int)
+    parser.add_argument('--epochs', default=30, type=int)
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument("--work_space", default="results/MCTG", type=str)
     
@@ -45,14 +45,14 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',help='device id (i.e. 0 or 0,1 or cpu)')
 
     # Model parameters
-    parser.add_argument('--model', default='deit_small_mctgformer', type=str, metavar='MODEL',
+    parser.add_argument('--model', default=None, type=str, metavar='MODEL',
                         help='Name of model to train')
-    parser.add_argument('--input_size', default=224, type=int, help='images input size')
+    parser.add_argument('--input_size', default=448, type=int, help='images input size')
     parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
                         help='Dropout rate (default: 0.)')
     parser.add_argument('--drop-path', type=float, default=0.1, metavar='PCT',
                         help='Drop path rate (default: 0.1)')
-    parser.add_argument('--cls_weight', type=float, default=3.0, 
+    parser.add_argument('--cls_weight', type=float, default=3.0,
                         help='weight for class output loss')
 
     # Optimizer parameters
@@ -100,8 +100,7 @@ def get_args_parser():
     parser.add_argument('--color-jitter', type=float, default=0.4, metavar='PCT',
                         help='Color jitter factor (default: 0.4)')
     parser.add_argument('--aa', type=str, default='rand-m9-mstd0.5-inc1', metavar='NAME',
-                        help='Use Auto Augment policy. "v0" or "original". " + \
-                             "(default: rand-m9-mstd0.5-inc1)'),
+                        help='Use Auto Augment policy. "v0" or "original". (default: rand-m9-mstd0.5-inc1)')
     parser.add_argument('--smoothing', type=float, default=0.1, help='Label smoothing (default: 0.1)')
     parser.add_argument('--train-interpolation', type=str, default='bicubic',
                         help='Training interpolation (random, bilinear, bicubic default: "bicubic")')
@@ -273,9 +272,7 @@ def main(args):
         num_classes=args.nb_classes,
         drop_rate=args.drop,
         drop_path_rate=args.drop_path,
-        input_size=args.input_size) 
-   
-    args.cls_weight = 3.0 if args.model.__contains__('mctgformer') else 1.0
+        input_size=args.input_size)
 
     best_ckpt_name = f'{args.model}_best.pth'
     utils.data_mkdir(args.work_space)

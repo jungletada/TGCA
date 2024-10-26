@@ -1,3 +1,5 @@
+from net.mctformer import MCTformerV2_cam
+
 import io
 import os
 import sys
@@ -180,21 +182,33 @@ def load_model_weight_onecls(args, model):
 
 def create_cam_model(args):
     if args.model.__contains__('MCTformerV2'):
-        from net.mctformer import MCTformerV2_cam
-        model_cam = MCTformerV2_cam
-    elif args.model.__contains__('mctformerplus'):
-        from net.mctformer_plus import MCTformerPlus_CAM
-        model_cam = MCTformerPlus_CAM
+        model = MCTformerV2_cam(
+            num_classes=args.num_classes,
+            input_size=args.input_size)
+        
+    elif args.model.__contains__('msgformer'):
+        from net.msgformer import MSGFormer_CAM
+        model = MSGFormer_CAM(
+            num_classes=args.num_classes,
+            input_size=args.input_size,
+            min_size=args.min_size)
+        
     elif args.model.__contains__('mctgformer'):
-        # from net.mctgformer import MCTGFormer_CAM
-        from net.mctgformer_plus import MCTGFormer_CAM
-        model_cam = MCTGFormer_CAM
+        from net.msgformer import MSGFormer_CAM
+        model = MSGFormer_CAM(
+            num_classes=args.num_classes,
+            input_size=args.input_size,
+            min_size=args.min_size)
+        
+    elif 'srmctformer' in args.model:
+        from net.srmct import SRMCTformer_CAM
+        model = SRMCTformer_CAM(
+            num_classes=args.num_classes,
+            input_size=args.input_size,
+            min_size=args.min_size)
     else:
         raise NotImplementedError   
     
-    model = model_cam(
-        num_classes=args.num_classes,
-        input_size=args.input_size)
     print(f'Using {args.model} for making class activation maps.')
     
     return model

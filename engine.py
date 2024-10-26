@@ -364,7 +364,7 @@ def visualize_attention(attn, save_name, args):
     save_path = os.path.join(args.visualize_dir, f'{save_name}_attn_mct.png')
     plt.savefig(save_path, dpi=300)  
     plt.close()
-
+    
 
 def calc_semantic_segmentation_confusion(pred_labels, gt_labels):
     """Collect a confusion matrix.
