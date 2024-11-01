@@ -22,7 +22,7 @@ import utils
 from engine import compute_mAP
 from utils import str2bool
 from datasets_cam import build_dataset
-import net.resnet38d
+import net.simplevit
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -177,14 +177,14 @@ def ddp_print(logger, log_msg):
 
 
 def train_one_epoch(model, data_loader, optimizer, device, epoch,
-        loss_scaler, max_norm, set_training_mode=True):
+                    loss_scaler, max_norm, set_training_mode=True):
     print_freq = 10
     model.train(set_training_mode)
     criterion = nn.MultiLabelSoftMarginLoss(weight=None)
     
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
-    header = 'Epoch: [{}]'.format(epoch)
+    header = f'Epoch: [{epoch}]'
     
     for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
         samples = samples.to(device, non_blocking=True)
@@ -193,10 +193,8 @@ def train_one_epoch(model, data_loader, optimizer, device, epoch,
         with torch.cuda.amp.autocast():
             outputs = model(samples)
 
-            cls_loss = criterion(outputs, targets)
-            metric_logger.update(cls_loss=cls_loss.item())
-            
-            total_loss = cls_loss
+            total_loss = criterion(outputs, targets)
+            metric_logger.update(loss=total_loss.item())
                         
         loss_value = total_loss.item()
         if not math.isfinite(loss_value):
@@ -215,9 +213,9 @@ def train_one_epoch(model, data_loader, optimizer, device, epoch,
     
     if dist.get_rank() == 0:
         print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}        
-         
-         
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}   
+   
+     
 @torch.no_grad()
 def evaluate(data_loader, model, device):
     criterion = torch.nn.MultiLabelSoftMarginLoss()
@@ -294,7 +292,6 @@ def main(args):
     logger = logging.getLogger(session_name)
     ddp_print(logger, f"Use seed: {args.seed}")
     
-    checkpoint_model = torch.load('checkpoints/res38_cls.pth')
     model.load_state_dict(checkpoint_model, strict=False)
     
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)

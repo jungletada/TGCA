@@ -16,7 +16,7 @@ import torch.distributed as dist
 from sklearn.metrics import average_precision_score
 # import seaborn as sns
     
-def train_one_epoch_mctgformer(
+def train_one_epoch_proposed(
     args,model, data_loader, optimizer, device, epoch,
     loss_scaler, max_norm, set_training_mode=True, rank=0):
 
@@ -60,16 +60,48 @@ def train_one_epoch_mctgformer(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}  
 
 
+def train_one_epoch_basic(
+    args, model, data_loader, optimizer, device, epoch,
+    loss_scaler, max_norm, set_training_mode=True, rank=0):
+
+    print_freq = 10
+    model.train(set_training_mode)
+    criterion = nn.MultiLabelSoftMarginLoss()
+    
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    header = 'Epoch: [{}]'.format(epoch)
+        
+    for samples, targets in metric_logger.log_every(data_loader, print_freq, header, rank=rank):
+        samples = samples.to(device, non_blocking=True)
+        targets = targets.to(device, non_blocking=True)
+
+        with torch.cuda.amp.autocast():
+            outputs = model(samples)
+
+            total_loss = criterion(outputs[0], targets)
+            metric_logger.update(total_loss=total_loss.item())
+            
+        loss_value = total_loss.item()
+
+        optimizer.zero_grad()
+        is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
+        loss_scaler(total_loss, optimizer, clip_grad=max_norm,
+                    parameters=model.parameters(), create_graph=is_second_order)
+        torch.cuda.synchronize()
+        metric_logger.update(loss=loss_value)
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+    # gather the stats from all processes
+    metric_logger.synchronize_between_processes()
+    
+    if dist.get_rank() == 0:
+        print("Averaged stats:", metric_logger)
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}  
+
+
 def train_one_epoch_mctformerplus(
-    args,
-    model,
-    data_loader,
-    optimizer, 
-    device,
-    epoch, 
-    loss_scaler, 
-    max_norm,
-    set_training_mode=True):
+        args,model,data_loader,optimizer, device,epoch, loss_scaler, 
+        max_norm, set_training_mode=True):
     model.train(set_training_mode)
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
@@ -147,7 +179,10 @@ def evaluate(data_loader, model, device):
 
         with torch.cuda.amp.autocast():
             output = model(images)
-            pred = output[0]
+            if isinstance(output, list):
+                pred = output[0]
+            else:
+                pred = output
             loss = criterion(pred, target)
             pred = torch.sigmoid(pred)
 

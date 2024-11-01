@@ -20,13 +20,14 @@ from torch.utils.data.distributed import DistributedSampler
 
 import utils
 from engine import evaluate
-from engine import train_one_epoch_mctformerplus, train_one_epoch_mctgformer
+from engine import train_one_epoch_mctformerplus, \
+    train_one_epoch_proposed, train_one_epoch_basic
 from datasets_cam import build_dataset
 from utils import str2bool
 
 import net.msgformer
 import net.srmct
-import net.resnet38d
+import net.simplevit
 import warnings
 warnings.filterwarnings("ignore")
         
@@ -277,10 +278,8 @@ def main(args):
     best_ckpt_name = f'{args.model}_best.pth'
     utils.data_mkdir(args.work_space)
     
-    utils.logger_info(logger_name=session_name, 
-                      log_path=os.path.join(
-                          args.work_space, 
-                          f'train_cam_{args.dataset}.log'))
+    utils.logger_info(logger_name=session_name, log_path=os.path.join(
+                      args.work_space, f'train_cam_{args.dataset}.log'))
     logger = logging.getLogger(session_name)
     ddp_print(logger, f"Use seed: {args.seed}", dist.get_rank())
     
@@ -309,10 +308,12 @@ def main(args):
     model = nn.parallel.DistributedDataParallel(
         model, find_unused_parameters=True, device_ids=[args.local_rank])
     
-    if args.model.__contains__("mctformerplus"):
+    if "mctformerplus" in args.model:
         train_one_epoch = train_one_epoch_mctformerplus
+    elif "msgformer" in args.model:
+        train_one_epoch = train_one_epoch_proposed
     else:
-        train_one_epoch = train_one_epoch_mctgformer
+        train_one_epoch = train_one_epoch_basic
         
     for epoch in range(args.start_epoch, args.epochs):
         data_loader_train.sampler.set_epoch(epoch)

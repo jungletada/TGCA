@@ -5,9 +5,10 @@ from functools import partial
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
 import torch.nn.functional as F
-from net.modules import DownConv, SpatialPriorModule, SemanticAttnGNNModule
-from net.modules import auto_resize_input
+from net.msg_modules import DownConv, SpatialPriorModule, SemanticAttnGNNModule
+from net.msg_modules import auto_resize_input
 from net.base_vit import VisionTransformer, _cfg
+
 
 __all__ = ['msgformer']
 
@@ -32,19 +33,18 @@ class MSGFormer(VisionTransformer):
         self.Hp, self.Wp = math.ceil(img_size[0] / patch_size[0]), math.ceil(img_size[1] / patch_size[1])
         self.num_patches = self.Hp * self.Wp
         self.spatial_dims = [self.embed_dim] * self.stages
-         
+   
         self.dilations = [1, 2, 3, 4]
         self.num_knn = [18, 15, 12, 9]
-        
+       
         assert input_size >= 224, f"Input size {input_size} is too small."
-        
         # if input_size < 448:
         #     self.num_knn_spatial = [10, 8, 6, 4]
         #     self.spatial_scales = [8, 16, 32, 64]
         # else:
-        self.num_knn_spatial = [12, 8, 6, 2]  # modified to ablate
-        self.spatial_scales = [16, 16, 32, 64]  # modified to ablate
-        self.dilations_spatial = [1, 2, 2, 2] # [1, 2, 2, 2]
+        self.num_knn_spatial = [8, 6, 4, 2]
+        self.spatial_scales = [16, 16, 32, 64]
+        self.dilations_spatial = [2, 2, 1, 1]
 
         self.spatial_strides = [
             self.spatial_scales[i+1] // self.spatial_scales[i]
@@ -60,7 +60,7 @@ class MSGFormer(VisionTransformer):
                               for scale in self.spatial_scales]
         self.sptial_pos_embed = [nn.Parameter(
             torch.zeros(1, self.spatial_dims[i], self.spatial_sizes[i][0], self.spatial_sizes[i][1]))
-            for i in range(self.stages)]
+                for i in range(self.stages)]
         
         for i in range(self.stages):
             trunc_normal_(self.sptial_pos_embed[i], std=.02)
@@ -73,7 +73,6 @@ class MSGFormer(VisionTransformer):
         trunc_normal_(self.pos_embed_cls, std=.02)
         trunc_normal_(self.pos_embed_pat, std=.02)
         
-        self.avgpool2d = nn.AdaptiveAvgPool2d(1)
         self.proj_cls_embed = nn.Linear(self.stages, self.num_classes)
         
         self.spatial_fuse = nn.ModuleList([
@@ -102,7 +101,6 @@ class MSGFormer(VisionTransformer):
                 stride=self.spatial_strides[i])
             for i in range(self.stages - 1)])
         
-        # feature fusion
         self.channel_reduction = nn.Sequential(
             nn.Conv2d(self.embed_dim * 5, self.embed_dim, 1),
             nn.BatchNorm2d(self.embed_dim),
@@ -165,8 +163,7 @@ class MSGFormer(VisionTransformer):
         B, _, H, W = x.shape                # B x 3 x H x W
         x_spatial = self.spatial_prior(x)   # list [B x C x H^ x W^]
         x = self.patch_embed(x)
-        token_size = (H // self.patch_embed.patch_size[0],
-                      W // self.patch_embed.patch_size[1])
+        token_size = (H // self.patch_embed.patch_size[0], W // self.patch_embed.patch_size[1])
         
         if not self.training:
             pos_embed_pat = self.interpolate_pos_encoding(x, token_size=token_size)
@@ -193,12 +190,10 @@ class MSGFormer(VisionTransformer):
                 x, weights_j = self.blocks[j](x)
                 attn_weights.append(weights_j)
             
-            # if i == 0 or i == 1:
             cls_stru, x_spatial[i] = self.spatial_fuse[i](
                 x_spatial=x_spatial[i],
                 x_backbone=x,
                 token_size=token_size)
-            
             # zero initialized weights for adding new class tokens
             x_cls = x[:, :self.num_classes] + self.weights[i] * cls_stru
             x_pat = x[:, self.num_classes:]
@@ -333,11 +328,11 @@ class MSGFormer_CAM(MSGFormer):
 @register_model
 def msgformer(pretrained=False, **kwargs):
     model = MSGFormer(
-        patch_size=16, 
-        embed_dim=384, 
-        depth=12, 
-        num_heads=6, 
-        mlp_ratio=4, 
+        patch_size=16,
+        embed_dim=384,
+        depth=12,
+        num_heads=6,
+        mlp_ratio=4,
         qkv_bias=True,
         norm_layer=partial(nn.LayerNorm, eps=1e-6), 
         **kwargs)

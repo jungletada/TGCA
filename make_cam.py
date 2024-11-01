@@ -204,10 +204,7 @@ if __name__ == '__main__':
     args.num_classes = num_classes
     
     model = create_cam_model(args)
-    model_dict = torch.load(
-        args.checkpoint,
-        map_location='cpu')['model']
-    
+    model_dict = torch.load(args.checkpoint,map_location='cpu')['model']
     model.load_state_dict(model_dict)
     model.eval()
     

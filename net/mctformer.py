@@ -12,7 +12,6 @@ __all__ = ['deit_small_MCTformerV2']
 
 
 class MCTformerV2(VisionTransformer):
-   
     def __init__(self, input_size=224, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.head = nn.Conv2d(self.embed_dim, self.num_classes, kernel_size=3, stride=1, padding=1)
@@ -27,6 +26,7 @@ class MCTformerV2(VisionTransformer):
         self.pos_embed_cls = nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim))
         self.pos_embed_pat = nn.Parameter(torch.zeros(1, num_patches, self.embed_dim))
         self.avgpool = nn.AdaptiveAvgPool2d(1)
+        
         trunc_normal_(self.cls_token, std=.02)
         trunc_normal_(self.pos_embed_cls, std=.02)
         trunc_normal_(self.pos_embed_pat, std=.02)

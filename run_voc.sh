@@ -17,27 +17,27 @@ VALID=${DATACONFIG}/val_id.txt
 INPUTSIZE=448
 SEG_DIR=pseudo_mask
 
-MODELNAME=msgformer
-WORKDIR=results_voc/msgformer_${INPUTSIZE}
+# MODELNAME=msgformer
+# WORKDIR=results_voc/msgformer_${INPUTSIZE}
 
-# MODELNAME=srmctformer
-# WORKDIR=results_voc/srmctformer_${INPUTSIZE}
+MODELNAME=simplevit
+WORKDIR=results_voc/simplevit_${INPUTSIZE}
 
 CUDA_VISIBLE_DEVICES=${GPU}
 
 
-# #============= Train Model ===============#
-# OMP_NUM_THREADS=${NODES} \
-# torchrun --nproc_per_node=${NODES} --nnodes=1 \
-#     train_model.py \
-#     --dataset ${DATASET} \
-#     --model ${MODELNAME} \
-#     --train_list ${TRAINAUGID} \
-#     --work_space ${WORKDIR} \
-#     --input_size ${INPUTSIZE} \
-#     --seed 8 \
-#     --epoch 27 \
-#     --batch_per_gpu 19 \
+#============= Train Model ===============#
+OMP_NUM_THREADS=${NODES} \
+torchrun --nproc_per_node=${NODES} --nnodes=1 \
+    train_model.py \
+    --dataset ${DATASET} \
+    --model ${MODELNAME} \
+    --train_list ${TRAINAUGID} \
+    --work_space ${WORKDIR} \
+    --input_size ${INPUTSIZE} \
+    --seed 8 \
+    --epoch 27 \
+    --batch_per_gpu 19 \
     
 
 # # ============= Make Class Activation Maps of Model=============#
@@ -47,15 +47,16 @@ CUDA_VISIBLE_DEVICES=${GPU}
 #     --work_space ${WORKDIR} \
 #     --train_list ${TRAINID} \
 #     --input_size ${INPUTSIZE} \
-#     --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
+#     --checkpoint ${WORKDIR}/msgformer_deit_small_7323.pth \
+    #--checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
     
 
-# ============= Evaluate Class Activation Maps =============#
-python eval_cam.py \
-    --dataset ${DATASET} \
-    --work_space ${WORKDIR} \
-    --train_list ${TRAINID} \
-    --curve_threshold \
+# # ============= Evaluate Class Activation Maps =============#
+# python eval_cam.py \
+#     --dataset ${DATASET} \
+#     --work_space ${WORKDIR} \
+#     --train_list ${TRAINID} \
+#     --curve_threshold \
 
 
 # #============= Train and Infer Pixel Semantic Affnity =============
@@ -66,7 +67,7 @@ python eval_cam.py \
 #     --work_space ${WORKDIR} \
 #     --train_list ${TRAINAUGID} \
 #     --seed 3 \
-#     --low_alpha 0.32 \
+#     --low_alpha 0.35 \
 #     --high_alpha 0.50 \
 #     # --weights results_voc/resnet38d_448/ResNet38d_patch_224_last.pth \
 
@@ -77,7 +78,7 @@ python eval_cam.py \
 #     --work_space ${WORKDIR} \
 #     --infer_list ${TRAINAUGID} \
 #     --seg_out_dir ${SEG_DIR} \
-#     --threshold 0.45 \
+#     --threshold 0.46 \
 
 
 # #============= Evaluate =============#

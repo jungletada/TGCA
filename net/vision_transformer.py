@@ -71,7 +71,8 @@ class Mlp(nn.Module):
 
 
 class Attention(nn.Module):
-    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0., num_classes=20):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0.,
+                 proj_drop=0., num_classes=20):
         super().__init__()
         self.num_classes = num_classes
         self.num_heads = num_heads
@@ -102,17 +103,21 @@ class Attention(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
-                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, num_classes=20):
+    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, 
+                 drop=0., attn_drop=0., drop_path=0., act_layer=nn.GELU, 
+                 norm_layer=nn.LayerNorm, num_classes=20, clear_block=False):
         super().__init__()
+        self.clear_block = clear_block
         self.norm1 = norm_layer(dim)
         self.attn = Attention(
-            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop, num_classes=num_classes)
-
+            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, 
+            attn_drop=attn_drop, proj_drop=drop, num_classes=num_classes)
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
-        mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+        self.mlp = Mlp(in_features=dim, 
+                    hidden_features=int(dim * mlp_ratio), 
+                    act_layer=act_layer, 
+                    drop=drop)
 
     def forward(self, x):
         o, weights = self.attn(self.norm1(x))
@@ -142,7 +147,8 @@ class PatchEmbed(nn.Module):
 class VisionTransformer(nn.Module):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=384, depth=12,
                  num_heads=6, mlp_ratio=4., qkv_bias=True, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
-                 drop_path_rate=0., norm_layer=partial(nn.LayerNorm, eps=1e-6), mask_type=None):
+                 drop_path_rate=0., norm_layer=partial(nn.LayerNorm, eps=1e-6), 
+                 mask_type=None):
         super().__init__()
         self.num_classes = num_classes
         self.mask_type = mask_type
@@ -158,11 +164,13 @@ class VisionTransformer(nn.Module):
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
-        self.blocks = nn.ModuleList([
-            Block(
-                dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
-                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, num_classes=num_classes)
-            for i in range(depth)])
+        blocks = [Block(dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, 
+                        qkv_bias=qkv_bias, qk_scale=qk_scale,drop=drop_rate, 
+                        attn_drop=attn_drop_rate, drop_path=dpr[i], 
+                        norm_layer=norm_layer, num_classes=num_classes,
+                        clear_block=False) for i in range(depth)]
+        self.blocks = nn.ModuleList(blocks)
+        
         self.norm = norm_layer(embed_dim)
         # Classifier head
         self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
@@ -241,12 +249,3 @@ class VisionTransformer(nn.Module):
         else:
             return x, attn_weights
 
-
-def _conv_filter(state_dict, patch_size=16):
-    """ convert patch embedding weight from manual patchify + linear proj to conv"""
-    out_dict = {}
-    for k, v in state_dict.items():
-        if 'patch_embed.proj.weight' in k:
-            v = v.reshape((v.shape[0], 3, patch_size, patch_size))
-        out_dict[k] = v
-    return out_dict

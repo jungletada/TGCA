@@ -125,6 +125,22 @@ class Block(nn.Module):
         return x, weights
 
 
+class ClearBlock(nn.Module):
+    def __init__(self, dim, num_heads, qkv_bias=False, qk_scale=None, 
+                 drop=0., attn_drop=0., drop_path=0., 
+                 norm_layer=nn.LayerNorm, num_classes=20):
+        super().__init__()
+        self.norm1 = norm_layer(dim)
+        self.attn = Attention(
+            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, 
+            attn_drop=attn_drop, proj_drop=drop, num_classes=num_classes)
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+
+    def forward(self, x):
+        o, weights = self.attn(self.norm1(x))
+        return o, weights
+
+
 class PatchEmbed(nn.Module):
     """ Image to Patch Embedding"""
     def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768):
@@ -163,11 +179,16 @@ class VisionTransformer(nn.Module):
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
-        self.blocks = nn.ModuleList([
-            Block(
-                dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
-                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, num_classes=num_classes)
-            for i in range(depth)])
+        
+        blocks = [Block(
+                dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, 
+                qkv_bias=qkv_bias, qk_scale=qk_scale,
+                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], 
+                norm_layer=norm_layer, num_classes=num_classes)
+            for i in range(depth)]
+        
+        self.blocks = nn.ModuleList(blocks)
+        
         self.norm = norm_layer(embed_dim)
         # Classifier head
         self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
