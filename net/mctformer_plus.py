@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from net.vision_transformer import VisionTransformer, _cfg
 
 
-__all__ = ['deit_small_mctformerplus']
+__all__ = ['mctformerplus']
 
 
 class MCTformerPlus(VisionTransformer):
@@ -108,11 +108,44 @@ class MCTformerPlus(VisionTransformer):
 class MCTformerPlus_CAM(MCTformerPlus):
     def __init__(self, decay_parameter=0.996, input_size=448, *args, **kwargs):
         super().__init__(decay_parameter, input_size, *args, **kwargs)
+        self.n_layers = 3
         
-    def forward(self, x, n_layers=3):
-        w, h = x.shape[2:]
-        x_cls, x_patch, attn_weights, all_x_cls = self.forward_features(x)
+    def get_cam(self, x_patch, attn_weights):
+        feature_map = x_patch.detach().clone()  # B * C * 14 * 14
+        feature_map = F.relu(feature_map)
+        n, c, h, w = feature_map.shape
+        
+        cls2pat = attn_weights[-self.n_layers:].mean(0)[:, 0:self.num_classes, self.num_classes:].reshape([n, c, h, w])
+        patch_attn = attn_weights[:, :, self.num_classes:, self.num_classes:]
 
+        cams = cls2pat * feature_map  # B * C * 14 * 14
+        cams = torch.sqrt(cams)
+        
+        patch_attn = torch.sum(patch_attn, dim=0) # B x Np x Np
+        B, _, hp, wp = cams.shape
+        cams = torch.matmul(
+                patch_attn.unsqueeze(1),    # B x 1 x Np x Np
+                cams.view(B, self.num_classes, -1, 1) # B x Cls x Np x 1
+        ).reshape(B, self.num_classes, hp, wp)
+        return cams
+    
+    def get_cls2pat(self, x_patch, attn_weights):
+        feature_map = x_patch.detach().clone()  # B * C * 14 * 14
+        feature_map = F.relu(feature_map)
+        n, c, h, w = feature_map.shape
+        cls2pat = attn_weights[-self.n_layers:].mean(0)[:, 0:self.num_classes, self.num_classes:].reshape([n, c, h, w])
+        return cls2pat
+        
+    def forward(self, x, return_attn=False):
+        w, h = x.shape[2:]
+        _, x_patch, attn_weights, _ = self.forward_features(x)
+        
+        attn_weights = torch.stack(attn_weights)  # 12 * B * H * N * N
+        attn_weights = torch.mean(attn_weights, dim=2)  # 12 * B * N * N
+        
+        if return_attn:
+            return attn_weights
+        
         n, p, c = x_patch.shape
         if w != h:
             w0 = w // self.patch_embed.patch_size[0]
@@ -123,31 +156,12 @@ class MCTformerPlus_CAM(MCTformerPlus):
         
         x_patch = x_patch.permute([0, 3, 1, 2]).contiguous()
         x_patch = self.head(x_patch)
-
-        feature_map = x_patch.detach().clone()  # B * C * 14 * 14
-        feature_map = F.relu(feature_map)
-        n, c, h, w = feature_map.shape
-
-        attn_weights = torch.stack(attn_weights)  # 12 * B * H * N * N
-        attn_weights = torch.mean(attn_weights, dim=2)  # 12 * B * N * N
-        mtatt = attn_weights[-n_layers:].mean(0)[:, 0:self.num_classes, self.num_classes:].reshape([n, c, h, w])
-        patch_attn = attn_weights[:, :, self.num_classes:, self.num_classes:]
-
-        cams = mtatt * feature_map  # B * C * 14 * 14
-        cams = torch.sqrt(cams)
-        
-        patch_attn = torch.sum(patch_attn, dim=0) # B x Np x Np
-        B, _, Hf, Wf = cams.shape
-        cams = torch.matmul(
-                patch_attn.unsqueeze(1),    # B x 1 x Np x Np
-                cams.view(B, self.num_classes, -1, 1) # B x Cls x Np x 1
-        ).reshape(B, self.num_classes, Hf, Wf)
-        
-        return cams
+        outputs = self.get_cam(x_patch, attn_weights)
+        return outputs
 
         
 @register_model
-def deit_small_mctformerplus(pretrained=False, **kwargs):
+def mctformerplus(pretrained=False, **kwargs):
     model = MCTformerPlus(
         patch_size=16, embed_dim=384, depth=12, num_heads=6, mlp_ratio=4, qkv_bias=True,
         norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)

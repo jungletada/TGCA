@@ -7,13 +7,13 @@ from timm.models.layers import trunc_normal_, to_2tuple
 import torch.nn.functional as F
 from net.modules import DownConv, SpatialPriorModule, SRMCTModule
 from net.modules import auto_resize_input
-from net.base_vit import VisionTransformer, _cfg
+from net.base_vit import MCTViT, _cfg
 
 
 __all__ = ['srmctformer']
 
 
-class SRMCTformer(VisionTransformer):
+class SRMCTformer(MCTViT):
     def __init__(self, *args, decay_parameter=0.996, input_size=448, **kwargs):
         super().__init__(*args, **kwargs)
         self.stages = 4 

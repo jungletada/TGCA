@@ -78,18 +78,19 @@ def get_intermediate_feature(name, hook_type='post'):
         raise ValueError("hook_type must be 'pre' or 'post'")
 
 
-def _work(process_id, model, dataset, args):
+def _work(process_id, model, dataset, layer, args):
     databin = dataset[process_id]
     n_gpus = torch.cuda.device_count()
     
     data_loader = DataLoader(
-        databin, 
-        shuffle=False, 
+        databin,
+        shuffle=False,
         num_workers=args.num_workers // n_gpus, 
         pin_memory=False)
     
     stage = 3
-    assert stage in [0, 1, 2, 3]
+    assert stage in [0, 1, 2, 3], f"{stage} should be in [0, 3]"
+    assert layer in range(12), f"{layer} should be in [0, 11]"
     
     # Register pre and post hooks for model.graph_b
     model.spatial_fuse[stage].graph_b.register_forward_pre_hook(
@@ -108,7 +109,7 @@ def _work(process_id, model, dataset, args):
         for iter_, pack in enumerate(tqdm(data_loader, position=process_id, desc=f'[PID{process_id}]')):
             img_name = pack['name'][0] 
             img = pack['img']
-            outputs = model.forward(img.cuda(non_blocking=True))
+            outputs = model(img.cuda(non_blocking=True))
             
             cls2pat_pre_feat = intermediate_features['cls2pat_pre']
             cls2pat_post_feat = intermediate_features['cls2pat_post']
@@ -129,13 +130,13 @@ def _work(process_id, model, dataset, args):
             print("cls2spt post-processed features shape:", cls2spt_post_feat.shape)
             break
             
-            if process_id == n_gpus - 1 and iter_ % (len(databin) // 20) == 0:
-                print("%d " % ((5*iter_+1)//(len(databin) // 20)), end='')
+            # if process_id == n_gpus - 1 and iter_ % (len(databin) // 20) == 0:
+            #     print("%d " % ((5*iter_+1)//(len(databin) // 20)), end='')
                 
 
 if __name__ == '__main__':
     args = get_args_parser()
-    args.feat_out_dir = os.path.join(args.work_space, args.feat_out_dir) 
+    args.feat_out_dir = os.path.join(args.work_space, args.feat_out_dir)
     os.makedirs(args.feat_out_dir, exist_ok=True)
     
     from datasets_cam import build_dataset
@@ -148,10 +149,10 @@ if __name__ == '__main__':
     
     model = create_cam_model(args)
     model_dict = torch.load(
-        args.checkpoint, 
+        args.checkpoint,
         map_location='cpu')['model']
     
-    model.load_state_dict(model_dict)
+    model.load_state_dict(model_dict, strict=False)
     model.eval()
     
     n_gpus = torch.cuda.device_count()

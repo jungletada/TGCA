@@ -10,8 +10,8 @@ from torch.utils.data import DataLoader
 from torch.backends import cudnn
 cudnn.enabled = True
 
-from misc import torchutils
-from utils import create_cam_model
+import torchutils
+from .utils import create_cam_model
 from net.msg_modules import resize_input_minbound
 
 import warnings
@@ -52,7 +52,7 @@ def get_args_parser():
     # generating attention maps
     parser.add_argument('--layer-index', type=int, default=3, help='extract attention maps from the last layers')
     parser.add_argument("--scales", default=(1.0,), help="Multi-scale inferences")
-    parser.add_argument("--cam_out_dir", default="cam_mask", type=str)
+    parser.add_argument("--attn_dir", default="attns_dir", type=str)
     
     args = parser.parse_args()
     return args
@@ -79,56 +79,6 @@ def flip_cam(cam_list):
     return cam_list
 
 
-def sliding_window_test(x, model, patch_size, stride):
-    """
-    Perform a sliding window test with overlapping patches for a batch of images.
-
-    Parameters:
-    x (torch.Tensor): Input image tensor of shape (b, 3, H, W).
-    model (torch.nn.Module): Model to process each patch.
-    patch_size (int): Size of each patch (patch will be of shape (3, patch_size, patch_size)).
-    stride (int): Stride for sliding window; must be less than patch_size for overlap.
-
-    Returns:
-    torch.Tensor: Reconstructed image tensor of shape (b, K, H, W), where K is the model's output channels.
-    """
-    x = auto_resize_input(x, min_size=patch_size)
-    b, _, H, W = x.shape
-    output_channels = model(x[:, :, :patch_size, :patch_size]).shape[1]
-    # Calculate padding needed to make sure the last patch in each dimension is patch_size
-    pad_h = (patch_size - (H % patch_size)) % patch_size
-    pad_w = (patch_size - (W % patch_size)) % patch_size
-
-    # Apply padding to the input tensor
-    x_padded = F.pad(x, (0, pad_w, 0, pad_h), mode='constant', value=0)  # Shape: (b, 3, H + pad_h, W + pad_w)
-    H_padded, W_padded = H + pad_h, W + pad_w
-
-    # Calculate output dimensions after downsampling
-    out_H, out_W = H_padded // 16, W_padded // 16
-
-    # Prepare output and count tensors for averaging overlapping regions
-    output = torch.zeros((b, output_channels, out_H, out_W), device=x.device)
-    count = torch.zeros((b, output_channels, out_H, out_W), device=x.device)
-
-    # Slide over the padded image
-    for i in range(0, H_padded - patch_size + 1, stride):
-        for j in range(0, W_padded - patch_size + 1, stride):
-            # Extract patch for each image in the batch
-            patch = x_padded[:, :, i:i + patch_size, j:j + patch_size]  # Shape: (b, 3, patch_size, patch_size)
-            output_patch = model(patch)  # Shape: (b, K, patch_size//16, patch_size//16)
-
-            # Calculate the coordinates in the output (downsampled by 16)
-            out_i, out_j = i // 16, j // 16
-            output[:, :, out_i:out_i + output_patch.shape[2], out_j:out_j + output_patch.shape[3]] += output_patch
-            count[:, :, out_i:out_i + output_patch.shape[2], out_j:out_j + output_patch.shape[3]] += 1
-
-    # Average overlapping areas
-    output /= count
-
-    # Crop to the original output size (H//16, W//16) if any padding was added
-    return output[:, :, :H // 16, :W // 16]
-
-    
 def _work(process_id, model, dataset, args):
     databin = dataset[process_id]
     n_gpus = torch.cuda.device_count()
@@ -151,46 +101,43 @@ def _work(process_id, model, dataset, args):
             
             valid_cat = torch.nonzero(label)[:, 0] # get validate class->[#val_cls]
             
-            # if osp.exists(osp.join(args.cam_out_dir, img_name + '.npy')):
-            #     continue
-            
-            if valid_cat.shape[0] == 0: # No validate category
-                np.save(osp.join(args.cam_out_dir, img_name + '.npy'), dict())
-                continue
-            
             try:
-                outputs = [model(resize_input_minbound(
-                    x=img[0].cuda(non_blocking=True),
-                    min_size=args.min_size)) # img[0]->[(2, 3, H', W')]
-                        for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
+                outputs = [model(
+                    resize_input_minbound(x=img[0].cuda(non_blocking=True),min_size=args.min_size),
+                    return_attn=True) # img[0]->[(2, 3, H', W')]
+                    for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
                 
             except RuntimeError as e:
                 if "out of memory" in str(e):
                     # If we run out of memory, clear cache and try with smaller size
                     # print(f'{str(e)}, with image size={size}')
-                    outputs = [model(resize_input_minbound(
-                    x=img[0].cuda(non_blocking=True),
-                    min_size=int(args.min_size * 0.75))) # img[0]->[(2, 3, H', W')]
+                    outputs = [model(
+                        resize_input_minbound(x=img[0].cuda(non_blocking=True),min_size=int(args.min_size * 0.75)),
+                        return_attn=True) # img[0]->[(2, 3, H', W')]
                         for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
                 else:
                     raise e
-            #=================== high resolution cam list ===================#
-            
-            upsample_cam_list = [# upsample all multi-scale CAMs
-                    F.interpolate(cam, size, mode='bilinear', align_corners=False)
-                    for cam in outputs] # ->[(2, Cls, H, W)
-            upsample_cam_list = flip_cam(upsample_cam_list)
-            upsample_cam = torch.sum(torch.stack(upsample_cam_list, 0), 0) # (Cls, H, W)
-            
-            upsample_cam = upsample_cam[valid_cat]
-            upsample_cam = normalize_cam(upsample_cam)
-            
-            cam_dict = {}
-            upsample_cam = upsample_cam.cpu().numpy()
-            for i, cls in enumerate(valid_cat):
-                cam_dict[cls] = upsample_cam[i]
                 
-            np.save(osp.join(args.cam_out_dir, img_name + '.npy'), cam_dict)  
+            # We only need non flip image for ablation
+            attn_weights = outputs[0][0]
+            print(attn_weights.shape)
+            # #=================== high resolution cam list ===================#
+            
+            # upsample_cam_list = [# upsample all multi-scale CAMs
+            #         F.interpolate(cam, size, mode='bilinear', align_corners=False)
+            #         for cam in outputs] # ->[(2, Cls, H, W)
+            # upsample_cam_list = flip_cam(upsample_cam_list)
+            # upsample_cam = torch.sum(torch.stack(upsample_cam_list, 0), 0) # (Cls, H, W)
+            
+            # upsample_cam = upsample_cam[valid_cat]
+            # upsample_cam = normalize_cam(upsample_cam)
+            
+            # cam_dict = {}
+            # upsample_cam = upsample_cam.cpu().numpy()
+            # for i, cls in enumerate(valid_cat):
+            #     cam_dict[cls] = upsample_cam[i]
+                
+            # np.save(osp.join(args.attn_dir, img_name + '.npy'), cam_dict)  
         
             if process_id == n_gpus - 1 and iter_ % (len(databin) // 20) == 0:
                 print("%d " % ((5*iter_+1) // (len(databin) // 20)), end='')
@@ -198,19 +145,19 @@ def _work(process_id, model, dataset, args):
 
 if __name__ == '__main__':
     args = get_args_parser()
-    args.cam_out_dir = os.path.join(args.work_space, args.cam_out_dir) 
-    os.makedirs(args.cam_out_dir, exist_ok=True)
+    args.attn_dir = os.path.join(args.work_space, args.attn_dir) 
+    os.makedirs(args.attn_dir, exist_ok=True)
 
     from datasets_cam import build_dataset
     # change to multi-scale dataset
     if args.dataset == 'VOC12':
         args.dataset = 'VOC12MS'
-        args.min_size = 448 if args.input_size >= 448 else 224
     elif args.dataset == 'COCO':
         args.dataset = 'COCOMS'
-        args.min_size = 448 if args.input_size >= 448 else 224
     else:
         raise NotImplementedError
+    
+    args.min_size = 448 if args.input_size >= 448 else 224
     
     dataset, num_classes = build_dataset(
         is_train=False, make_cam=True, args=args)

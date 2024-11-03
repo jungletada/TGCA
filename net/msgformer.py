@@ -2,18 +2,19 @@ import math
 import torch
 import torch.nn as nn
 from functools import partial
+import torch.nn.functional as F
+
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
-import torch.nn.functional as F
+
 from net.msg_modules import DownConv, SpatialPriorModule, SemanticAttnGNNModule
-from net.msg_modules import auto_resize_input
-from net.base_vit import VisionTransformer, _cfg
+from net.base_vit import MCTViT, _cfg
 
 
 __all__ = ['msgformer']
 
 
-class MSGFormer(VisionTransformer):
+class MSGFormer(MCTViT):
     """Multi-scale Graph Attention Vision Transformer."""
     def __init__(self, *args, decay_parameter=0.996, input_size=448, **kwargs):
         """
@@ -74,7 +75,7 @@ class MSGFormer(VisionTransformer):
         trunc_normal_(self.pos_embed_pat, std=.02)
         
         self.proj_cls_embed = nn.Linear(self.stages, self.num_classes)
-        
+
         self.spatial_fuse = nn.ModuleList([
             SemanticAttnGNNModule(
                 query_dim=self.spatial_dims[i],
@@ -246,14 +247,14 @@ class MSGFormer(VisionTransformer):
         last_cls_tokens = feat_dict['x_cls_last']
         cls_logits = last_cls_tokens.mean(-1)
         # patch tokens
-        patch_tokens = self.reshape_patch_tokens(feat_dict['x_pat'], H, W) # B x C x Hp x Wp 
+        patch_tokens = self.reshape_patch_tokens(feat_dict['x_pat'], H, W) # B x C x Hp x Wp
         out_spatial = [patch_tokens]
         # spatial tokens
         out_size = patch_tokens.shape[2:]
         for x in feat_dict['x_stru']:
             x = F.interpolate(x, size=out_size, mode="bilinear", align_corners=False)
             out_spatial.append(x)
-        # concat spatial and patch tokens       
+        # concat spatial and patch tokens 
         out_spatial = torch.cat(out_spatial, dim=1)
         out_spatial = self.channel_reduction(out_spatial)
         # classification head and GWP
@@ -263,49 +264,70 @@ class MSGFormer(VisionTransformer):
 
 
 class MSGFormer_CAM(MSGFormer):
-    def __init__(self, *args, fuse_layers=4, min_size=448, **kwargs):
+    def __init__(self, *args, cls_ind=4, **kwargs):
         """fuse_layers: The attention of the last L layers to fuse"""
         super().__init__(*args, **kwargs)
-        self.fuse_layers = fuse_layers
-        self.min_size = min_size
+        self.fuse_layers = cls_ind
     
     @torch.no_grad()
-    def forward_cam(self, tokens, attn_weights):
+    def get_cam(self, tokens, attn_weights):
         """
         Input: 
             tokens: patch tokens from the last backbone layer
-            attn_weights: attention weights from last L layers -> L x B x d x (Cls+Np) x (Cls+Np)
+            attn_weights: attention weights from L layers -> L x B x d x (Cls+Np) x (Cls+Np)
         Output: 
             Refined class activation maps -> B x Cls x Hp x Wp
         """
-        B, Cls, Hp, Wp = tokens.shape
-        attn_weights = torch.mean(torch.stack(attn_weights), dim=2).detach()     # L x B x (Cls+Np) x (Cls+Np)
+        B, nc, hp, wp = tokens.shape
 
         if self.fuse_layers == 0:
             cams = tokens.detach().clone()   # B x Cls x Hp x Wp
             cams = F.relu(cams)         # With ReLU Activation
 
         else:
-            attn_maps = attn_weights[-self.fuse_layers:].mean(0)         # B x (Cls+Np) x (Cls+Np)
-            cls2pat = attn_maps[:, :Cls, Cls:].reshape([B, Cls, Hp, Wp]) # B x Cls x Hp x Wp
+            attn_maps = attn_weights[-4:].mean(0)         # B x (Cls+Np) x (Cls+Np)
+            cls2pat = attn_maps[:, :nc, nc:].reshape([B, nc, hp, wp]) # B x Cls x Hp x Wp
             patch_cam = tokens.detach().clone()   # B x Cls x Hp x Wp
             patch_cam = F.relu(patch_cam)         # With ReLU Activation
             cams = torch.pow(cls2pat * patch_cam, 1/2)
  
         # Apply pat2pat affinity refinement
-        pat2pat = attn_weights[:, :, Cls:, Cls:] #  L x B x Np x Np
+        pat2pat = attn_weights[:, :, nc:, nc:] #  L x B x Np x Np
         pat2pat = torch.sum(pat2pat, dim=0)      # B x Np x Np
         cams = torch.matmul(
                 pat2pat.unsqueeze(1),    # B x 1 x Np x Np
-                cams.view(B, Cls, -1, 1) # B x Cls x Np x 1
-            ).reshape(B, Cls, Hp, Wp)
+                cams.view(B, nc, -1, 1) # B x Cls x Np x 1
+            ).reshape(B, nc, hp, wp)
+        
         return cams
     
     @torch.no_grad()
-    def forward(self, x):
-        x = auto_resize_input(x, min_size=self.min_size)
+    def get_cls2pat(self, tokens, attn_weights):
+        """
+        Input: 
+            tokens: patch tokens from the last backbone layer
+            attn_weights: attention weights from L layers -> L x B x d x (Cls+Np) x (Cls+Np)
+        Output: 
+            Refined class activation maps -> B x Cls x Hp x Wp
+        """
+        B, Cls, Hp, Wp = tokens.shape
+        attn_weights = torch.mean(torch.stack(attn_weights), dim=2).detach() # L x B x (Cls+Np) x (Cls+Np)
+        
+        attn_maps = attn_weights[-self.fuse_layers:].mean(0)         # B x (Cls+Np) x (Cls+Np)
+        cls2pat = attn_maps[:, :Cls, Cls:].reshape([B, Cls, Hp, Wp]) # B x Cls x Hp x Wp
+        return cls2pat
+    
+    @torch.no_grad()
+    def forward(self, x, return_attn=False):
+        # x = auto_resize_input(x, min_size=self.min_size)
         H, W = x.shape[2:]
+
         feat_dict = self.forward_features(x)
+
+        attn_weights = torch.mean(torch.stack(feat_dict['attn']), dim=2).detach() 
+        if return_attn: # L x B x (Cls+Np) x (Cls+Np) 
+            return attn_weights
+        
         patch_tokens = self.reshape_patch_tokens(feat_dict['x_pat'], H, W) # B x C x Hp x Wp 
         ############################################################
         out_spatial = [patch_tokens]
@@ -316,13 +338,10 @@ class MSGFormer_CAM(MSGFormer):
         # concat spatial and patch tokens        
         out_spatial = torch.cat(out_spatial, dim=1)
         out_spatial = self.channel_reduction(out_spatial)
-        ############################################################    
-        
-        ############################################################
         out_spatial = self.head(out_spatial)  # B x Cls x Hp x Wp
-        cams = self.forward_cam(out_spatial, feat_dict['attn'])
-
-        return cams
+        outputs = self.get_cam(
+            out_spatial, attn_weights)
+        return outputs
 
 
 @register_model

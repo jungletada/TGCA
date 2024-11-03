@@ -72,10 +72,11 @@ class Mlp(nn.Module):
 
 
 class Attention(nn.Module):
-    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0., num_classes=20):
+    def __init__(self, dim, num_heads=6, qkv_bias=False, qk_scale=None,
+                 attn_drop=0., proj_drop=0., num_classes=20):
         super().__init__()
-        self.Cls = num_classes
-        self.num_heads = num_heads
+        self.nc = num_classes
+        self.n_heads = num_heads
         head_dim = dim // num_heads
         self.scale = qk_scale or head_dim ** -0.5
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
@@ -84,17 +85,21 @@ class Attention(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, x):
+        """
+
+        """
         B, N, C = x.shape  # Here N = #patches + #class-tokens
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2] 
+        qkv = self.qkv(x).reshape(B, N, 3, self.n_heads, C // self.n_heads).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]
+        # k[:, :, :self.nc, :] = q[:, :, :self.nc, :] # Attn_{qq}
         # d for each head, Nd heads in total. --> B x Nd x N x d for {q, k, v}.
         attn = (q @ k.transpose(-2, -1)) * self.scale  # B x Nd x N x N
-        #======================================================================#               
-        attn_cls, attn_pat = torch.split(attn, [self.Cls, N-self.Cls], dim=-1)
+        #======================================================================#
+        attn_cls, attn_pat = torch.split(attn, [self.nc, N-self.nc], dim=-1)
         attn_pat = attn_pat.softmax(dim=-1)
         attn_cls = attn_cls.softmax(dim=-1)
         attn = torch.cat((attn_cls, attn_pat), dim=-1)   # attn = attn.softmax(dim=-1)
-        #======================================================================#     
+        #======================================================================#
         weights = attn
         attn = self.attn_drop(attn)
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
@@ -103,8 +108,11 @@ class Attention(nn.Module):
 
         return x, weights
 
-    
+
 class Block(nn.Module):
+    """
+    Transformer Block requires both patch tokens and class tokens
+    """
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
                  drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, num_classes=20):
         super().__init__()
@@ -125,20 +133,28 @@ class Block(nn.Module):
         return x, weights
 
 
-class ClearBlock(nn.Module):
-    def __init__(self, dim, num_heads, qkv_bias=False, qk_scale=None, 
-                 drop=0., attn_drop=0., drop_path=0., 
-                 norm_layer=nn.LayerNorm, num_classes=20):
+class MCTBlock(nn.Module):
+    """
+    Transformer Block requires both patch tokens and class tokens
+    """
+    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
+                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, num_classes=20):
         super().__init__()
         self.norm1 = norm_layer(dim)
         self.attn = Attention(
             dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, 
             attn_drop=attn_drop, proj_drop=drop, num_classes=num_classes)
+
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.norm2 = norm_layer(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
     def forward(self, x):
         o, weights = self.attn(self.norm1(x))
-        return o, weights
+        x = x + self.drop_path(o)
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        return x, weights
 
 
 class PatchEmbed(nn.Module):
@@ -159,7 +175,7 @@ class PatchEmbed(nn.Module):
         return x
 
 
-class VisionTransformer(nn.Module):
+class MCTViT(nn.Module):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=384, depth=12,
                  num_heads=6, mlp_ratio=4., qkv_bias=True, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., norm_layer=partial(nn.LayerNorm, eps=1e-6), mask_type=None):
@@ -207,28 +223,28 @@ class VisionTransformer(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
         
-    def interpolate_pos_encoding(self, x, w, h):
-        npatch = x.shape[1] - 1
-        N = self.pos_embed.shape[1] - 1
-        if npatch == N and w == h:
-            return self.pos_embed
-        class_pos_embed = self.pos_embed[:, 0:1]
-        patch_pos_embed = self.pos_embed[:, 1:]
-        dim = x.shape[-1]
+    # def interpolate_pos_encoding(self, x, w, h):
+    #     npatch = x.shape[1] - 1
+    #     N = self.pos_embed.shape[1] - 1
+    #     if npatch == N and w == h:
+    #         return self.pos_embed
+    #     class_pos_embed = self.pos_embed[:, 0:1]
+    #     patch_pos_embed = self.pos_embed[:, 1:]
+    #     dim = x.shape[-1]
 
-        w0 = w // self.patch_embed.patch_size[0]
-        h0 = h // self.patch_embed.patch_size[0]
-        # we add a small number to avoid floating point error in the interpolation
-        # see discussion at https://github.com/facebookresearch/dino/issues/8
-        w0, h0 = w0 + 0.1, h0 + 0.1
-        embedding = patch_pos_embed.reshape(1, int(math.sqrt(N)), int(math.sqrt(N)), dim).permute(0, 3, 1, 2),
-        patch_pos_embed = nn.functional.interpolate(
-            input=embedding,
-            scale_factor=(w0 / math.sqrt(N), h0 / math.sqrt(N)),
-            mode='bicubic')
-        assert int(w0) == patch_pos_embed.shape[-2] and int(h0) == patch_pos_embed.shape[-1]
-        patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
-        return torch.cat((class_pos_embed, patch_pos_embed), dim=1)
+    #     w0 = w // self.patch_embed.patch_size[0]
+    #     h0 = h // self.patch_embed.patch_size[0]
+    #     # we add a small number to avoid floating point error in the interpolation
+    #     # see discussion at https://github.com/facebookresearch/dino/issues/8
+    #     w0, h0 = w0 + 0.1, h0 + 0.1
+    #     embedding = patch_pos_embed.reshape(1, int(math.sqrt(N)), int(math.sqrt(N)), dim).permute(0, 3, 1, 2),
+    #     patch_pos_embed = nn.functional.interpolate(
+    #         input=embedding,
+    #         scale_factor=(w0 / math.sqrt(N), h0 / math.sqrt(N)),
+    #         mode='bicubic')
+    #     assert int(w0) == patch_pos_embed.shape[-2] and int(h0) == patch_pos_embed.shape[-1]
+    #     patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
+    #     return torch.cat((class_pos_embed, patch_pos_embed), dim=1)
 
     @torch.jit.ignore
     def no_weight_decay(self):
@@ -241,31 +257,31 @@ class VisionTransformer(nn.Module):
         self.num_classes = num_classes
         self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
-    def forward_features(self, x, n):
-        B, nc, w, h = x.shape
-        x = self.patch_embed(x)
-        cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
-        x = torch.cat((cls_tokens, x), dim=1)
-        x = x + self.interpolate_pos_encoding(x, w, h)
-        x = self.pos_drop(x)
-        attn_weights = []
+    # def forward_features(self, x, n):
+    #     B, nc, w, h = x.shape
+    #     x = self.patch_embed(x)
+    #     cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+    #     x = torch.cat((cls_tokens, x), dim=1)
+    #     x = x + self.interpolate_pos_encoding(x, w, h)
+    #     x = self.pos_drop(x)
+    #     attn_weights = []
 
-        for i, blk in enumerate(self.blocks):
-            x, weights = blk(x)
-            if len(self.blocks) - i <= n:
-                attn_weights.append(weights)
+    #     for i, blk in enumerate(self.blocks):
+    #         x, weights = blk(x)
+    #         if len(self.blocks) - i <= n:
+    #             attn_weights.append(weights)
 
-        x = self.norm(x)
-        return x[:, 0], attn_weights
+    #     x = self.norm(x)
+    #     return x[:, 0], attn_weights
 
-    def forward(self, x, n=12):
-        x, attn_weights = self.forward_features(x, n)
-        x = self.head(x)
+    # def forward(self, x, n=12):
+    #     x, attn_weights = self.forward_features(x, n)
+    #     x = self.head(x)
 
-        if self.training:
-            return x
-        else:
-            return x, attn_weights
+    #     if self.training:
+    #         return x
+    #     else:
+    #         return x, attn_weights
 
 
 def _conv_filter(state_dict, patch_size=16):

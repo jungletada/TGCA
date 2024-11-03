@@ -70,7 +70,7 @@ def train_one_epoch_basic(
     
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
-    header = 'Epoch: [{}]'.format(epoch)
+    header = f'Epoch: [{epoch}]'
         
     for samples, targets in metric_logger.log_every(data_loader, print_freq, header, rank=rank):
         samples = samples.to(device, non_blocking=True)
@@ -129,9 +129,9 @@ def train_one_epoch_mctformerplus(
 
             ground_truth = torch.arange(targets.size(-1), dtype=torch.long, device=device)  # C
             ground_truth = ground_truth.unsqueeze(0).unsqueeze(0).expand(
-                c_outputs.shape[0], c_outputs.shape[1],c_outputs.shape[2])  # 12xBxC
+                c_outputs.shape[0], c_outputs.shape[1], c_outputs.shape[2])  # 12 x B x C
             regularizer_loss = torch.nn.CrossEntropyLoss(reduction='none')(
-                scores.permute(1, 2, 3, 0), ground_truth.permute(1, 2, 0))  # BxCx12
+                scores.permute(1, 2, 3, 0), ground_truth.permute(1, 2, 0))  # B x C x 12
             regularizer_loss = torch.mean(
                 torch.mean(torch.sum(regularizer_loss * targets.unsqueeze(-1), dim=-2), dim=-1) / (
                             torch.sum(targets, dim=-1) + 1e-8))
@@ -179,7 +179,7 @@ def evaluate(data_loader, model, device):
 
         with torch.cuda.amp.autocast():
             output = model(images)
-            if isinstance(output, list):
+            if isinstance(output, (list, tuple)):
                 pred = output[0]
             else:
                 pred = output

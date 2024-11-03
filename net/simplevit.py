@@ -75,14 +75,17 @@ class SimpleViT(VisionTransformer):
 
 
 class SimpleViTCAM(SimpleViT):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, fuse_layers=4, min_size=448, **kwargs):
+        """fuse_layers: The attention of the last L layers to fuse"""
         super().__init__(*args, **kwargs)
+        self.fuse_layers = fuse_layers
+        self.min_size = min_size
         
-    def forward_attention(self, x, attn_weights, fuse_layers=12):
+    def forward_attention(self, x, attn_weights):
         attn_weights = torch.mean(torch.stack(attn_weights), dim=2)  # L * B * N' * N' with L = 12
         cams = F.relu(x.detach().clone()) # With ReLU Activation
         # patch-to-patch attention L x B x Np x Np
-        pat2pat = torch.sum(attn_weights[-fuse_layers:], dim=0) # B x Np x Np
+        pat2pat = torch.sum(attn_weights[-self.fuse_layers:], dim=0) # B x Np x Np
         B, _, Hf, Wf = cams.shape
         cams = torch.matmul(
                 pat2pat.unsqueeze(1),    # B x 1 x Np x Np
@@ -91,13 +94,13 @@ class SimpleViTCAM(SimpleViT):
         
         return cams
     
-    def forward(self, x, fuse_layers=3):
+    def forward(self, x):
         H, W = x.shape[2:]
         x, attn_weights = self.forward_features(x)
         x = self.reshape_patch_tokens(x, H, W) # B x C x Hp x Wp 
         x = self.head(x) # Make predictions based on patch-tokens
         cams = self.forward_attention(
-            x, attn_weights, fuse_layers)
+            x, attn_weights)
         return cams
 
 

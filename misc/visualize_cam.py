@@ -71,12 +71,11 @@ def normalize_cam(cam_mask):
 
 
 def flip_cam(cam_list):
-    for i in range(len(cam_list)):
-        cam_scale = cam_list[i]
+    for i, cam_scale in enumerate(cam_list):
         group1, group2 = cam_scale[0], cam_scale[1]
         group2_flipped = torch.flip(group2, dims=[2])
         cam_list[i] = torch.stack([group1, group2_flipped])
-        
+    
     cam_list = [torch.sum(cam, dim=0) for cam in cam_list]
     return cam_list
 

@@ -1,3 +1,4 @@
+import os
 import torch
 import argparse
 import datetime
@@ -102,22 +103,25 @@ if __name__ == '__main__':
     parser.add_argument('--voc12_root', default='datasets/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
     parser.add_argument("--train_list", default="configs/voc12/train_aug_id.txt", type=str, 
                         help='configs/coco/train_id.txt or configs/voc12/train_aug_id.txt')
-    parser.add_argument('--work_space', default='results_coco/MCTG', help='work space directory')
+    parser.add_argument('--work_space', default='results_coco/msgformer', help='work space directory')
     parser.add_argument('--eval_cam_dir', default='cam_mask', help='cam_mask directory')
     parser.add_argument('--log_file', default='eval_cam.log', type=str, 
                         help='log file to save the results')
+    parser.add_argument('--log_dir', default='log_dir', type=str, 
+                        help='log dir to save the results')
     parser.add_argument('--curve_threshold', action='store_true', help='whether to use a range of thresholds')
     parser.add_argument('--threshold', default=0.45, type=float, help='threshold for evaluation as background')
     args = parser.parse_args()
     #----------------------------------------------------------------------------------#
     args.eval_cam_dir = osp.join(args.work_space, args.eval_cam_dir)
-    args.log_file = osp.join(args.work_space, args.log_file)
+    args.log_dir = osp.join(args.work_space, args.log_dir)
+    os.makedirs(args.log_dir, exist_ok=True)
 
     if args.dataset == 'VOC12':
         dataset = VOCSegmentationLabelDataset( 
             data_dir=args.voc12_root,
             id_list_file=args.train_list)
-        args.low_thres, args.high_thres = 40, 55
+        args.low_thres, args.high_thres = 40, 50
 
     elif args.dataset == 'COCO':
         dataset = COCOSegmentationLabelDataset(
@@ -127,8 +131,8 @@ if __name__ == '__main__':
         args.low_thres, args.high_thres = 43, 50
 
     time = datetime.datetime.now().strftime("%Y%m%d-%H%M") 
-    args.log_file = osp.join(args.work_space, f"eval_cam_{time}.log")
-    with open(args.log_file, "a", encoding="utf-8") as f:
+    args.log_file = osp.join(args.log_dir, f"eval_cam_{time}.log")
+    with open(args.log_file, "w", encoding="utf-8") as f:
         f.write(f"{time}: Evaluation class activation map for {args.dataset}\n")
         
     run(args=args, dataset=dataset)

@@ -190,22 +190,25 @@ def create_cam_model(args):
         from net.msgformer import MSGFormer_CAM
         model = MSGFormer_CAM(
             num_classes=args.num_classes,
-            input_size=args.input_size,
-            min_size=args.min_size)
+            input_size=args.input_size)
         
-    elif args.model.__contains__('mctgformer'):
-        from net.msgformer import MSGFormer_CAM
-        model = MSGFormer_CAM(
+    elif args.model.__contains__('mctformerplus'):
+        from net.mctformer_plus import MCTformerPlus_CAM
+        model = MCTformerPlus_CAM(
             num_classes=args.num_classes,
-            input_size=args.input_size,
-            min_size=args.min_size)
+            input_size=args.input_size)
         
     elif 'srmctformer' in args.model:
         from net.srmct import SRMCTformer_CAM
         model = SRMCTformer_CAM(
             num_classes=args.num_classes,
-            input_size=args.input_size,
-            min_size=args.min_size)
+            input_size=args.input_size)
+        
+    elif 'simplevit' in args.model:
+        from net.simplevit import SimpleViTCAM
+        model = SimpleViTCAM(
+            num_classes=args.num_classes,
+            input_size=args.input_size)
     else:
         raise NotImplementedError   
     

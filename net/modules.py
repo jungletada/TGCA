@@ -22,8 +22,8 @@ def nchw2nlc(x):
 def auto_resize_input(x, min_size=448):
     """Resize input tensor to a minimum size while maintaining aspect ratio."""
     resized_x = resize_input_minbound(x, min_size=min_size)
-    if resized_x.shape[2] * resized_x.shape[3] > min_size * 2800:
-        resized_x = resize_input_minbound(x, min_size=384)
+    # if resized_x.shape[2] * resized_x.shape[3] > min_size * 1800:
+    #     resized_x = resize_input_minbound(x, min_size=384)
     return resized_x
     
 

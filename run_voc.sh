@@ -17,11 +17,14 @@ VALID=${DATACONFIG}/val_id.txt
 INPUTSIZE=448
 SEG_DIR=pseudo_mask
 
-# MODELNAME=msgformer
-# WORKDIR=results_voc/msgformer_${INPUTSIZE}
+MODELNAME=msgformer
+WORKDIR=results_voc/msgformer_${INPUTSIZE}
 
-MODELNAME=simplevit
-WORKDIR=results_voc/simplevit_${INPUTSIZE}
+# MODELNAME=mctformerplus
+# WORKDIR=results_voc/mctformerplus_${INPUTSIZE}
+
+# MODELNAME=simplevit
+# WORKDIR=results_voc/simplevit_${INPUTSIZE}
 
 CUDA_VISIBLE_DEVICES=${GPU}
 
@@ -36,27 +39,27 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --work_space ${WORKDIR} \
     --input_size ${INPUTSIZE} \
     --seed 8 \
-    --epoch 27 \
+    --epoch 30 \
     --batch_per_gpu 19 \
     
 
-# # ============= Make Class Activation Maps of Model=============#
-# python make_cam.py \
-#     --dataset ${DATASET} \
-#     --model ${MODELNAME} \
-#     --work_space ${WORKDIR} \
-#     --train_list ${TRAINID} \
-#     --input_size ${INPUTSIZE} \
-#     --checkpoint ${WORKDIR}/msgformer_deit_small_7323.pth \
-    #--checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
+# ============= Make Class Activation Maps of Model=============#
+python make_cam.py \
+    --dataset ${DATASET} \
+    --model ${MODELNAME} \
+    --work_space ${WORKDIR} \
+    --train_list ${TRAINID} \
+    --input_size ${INPUTSIZE} \
+    --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
+    # --checkpoint ${WORKDIR}/msgformer_deit_small_7323.pth \
     
 
-# # ============= Evaluate Class Activation Maps =============#
-# python eval_cam.py \
-#     --dataset ${DATASET} \
-#     --work_space ${WORKDIR} \
-#     --train_list ${TRAINID} \
-#     --curve_threshold \
+# ============= Evaluate Class Activation Maps =============#
+python eval_cam.py \
+    --dataset ${DATASET} \
+    --work_space ${WORKDIR} \
+    --train_list ${TRAINID} \
+    --curve_threshold \
 
 
 # #============= Train and Infer Pixel Semantic Affnity =============
@@ -89,3 +92,14 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
 
 # # Save the generated mask to zip
 # cd ${WORKDIR} && zip -r ${SEG_DIR}.zip ${SEG_DIR} && cd -
+
+
+# # ============= Make Class Activation Maps of Model=============#
+# python hook_attn.py \
+#     --dataset ${DATASET} \
+#     --model ${MODELNAME} \
+#     --work_space ${WORKDIR} \
+#     --train_list ${TRAINID} \
+#     --input_size ${INPUTSIZE} \
+#     --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
+#     --checkpoint ${WORKDIR}/msgformer_deit_small_7323.pth \
