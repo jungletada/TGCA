@@ -1,4 +1,3 @@
-import math
 import torch
 import torch.nn as nn
 from functools import partial
@@ -98,7 +97,8 @@ class Attention(nn.Module):
         attn_cls, attn_pat = torch.split(attn, [self.nc, N-self.nc], dim=-1)
         attn_pat = attn_pat.softmax(dim=-1)
         attn_cls = attn_cls.softmax(dim=-1)
-        attn = torch.cat((attn_cls, attn_pat), dim=-1)   # attn = attn.softmax(dim=-1)
+        attn = torch.cat((attn_cls, attn_pat), dim=-1)
+        # attn = attn.softmax(dim=-1)
         #======================================================================#
         weights = attn
         attn = self.attn_drop(attn)
@@ -118,7 +118,7 @@ class Block(nn.Module):
         super().__init__()
         self.norm1 = norm_layer(dim)
         self.attn = Attention(
-            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, 
+            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
             attn_drop=attn_drop, proj_drop=drop, num_classes=num_classes)
 
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
@@ -142,7 +142,7 @@ class MCTBlock(nn.Module):
         super().__init__()
         self.norm1 = norm_layer(dim)
         self.attn = Attention(
-            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, 
+            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
             attn_drop=attn_drop, proj_drop=drop, num_classes=num_classes)
 
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
@@ -284,11 +284,11 @@ class MCTViT(nn.Module):
     #         return x, attn_weights
 
 
-def _conv_filter(state_dict, patch_size=16):
-    """ convert patch embedding weight from manual patchify + linear proj to conv"""
-    out_dict = {}
-    for k, v in state_dict.items():
-        if 'patch_embed.proj.weight' in k:
-            v = v.reshape((v.shape[0], 3, patch_size, patch_size))
-        out_dict[k] = v
-    return out_dict
+# def _conv_filter(state_dict, patch_size=16):
+#     """ convert patch embedding weight from manual patchify + linear proj to conv"""
+#     out_dict = {}
+#     for k, v in state_dict.items():
+#         if 'patch_embed.proj.weight' in k:
+#             v = v.reshape((v.shape[0], 3, patch_size, patch_size))
+#         out_dict[k] = v
+#     return out_dict

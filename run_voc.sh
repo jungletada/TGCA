@@ -38,8 +38,8 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --train_list ${TRAINAUGID} \
     --work_space ${WORKDIR} \
     --input_size ${INPUTSIZE} \
-    --seed 8 \
-    --epoch 30 \
+    --seed 3 \
+    --epoch 28 \
     --batch_per_gpu 19 \
     
 

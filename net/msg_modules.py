@@ -72,8 +72,8 @@ class DownConv(nn.Module):
         x = self.act(x)
 
         return x
-        
-    
+
+
 class TopKMaxPooling(nn.Module):
     """
         Top-K Maxpooling
@@ -128,7 +128,7 @@ class GraphConvolution(nn.Module):
         nodes = self.weight(nodes)
         nodes = self.relu(nodes)
         return nodes
-    
+
 
 class SpatialPriorModule(nn.Module):
     def __init__(self, 
@@ -149,7 +149,7 @@ class SpatialPriorModule(nn.Module):
             norm_layer(inplanes),
             act_layer(),
             nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        ]) 
+        ])
 
         if spt_strides[0] == 4:
             self.conv2 = nn.Sequential(*[
@@ -165,14 +165,14 @@ class SpatialPriorModule(nn.Module):
                 norm_layer(2 * inplanes),
                 act_layer(),
             ])
-            
+     
         else: raise NotImplementedError
-             
-        self.conv3 = nn.Sequential(*[ 
+
+        self.conv3 = nn.Sequential(*[
             nn.Conv2d(2 * inplanes, 4 * inplanes, kernel_size=3, stride=spt_strides[1], padding=1, bias=False),
             norm_layer(4 * inplanes),
             act_layer()])
-
+        
         self.conv4 = nn.Sequential(*[
             nn.Conv2d(4 * inplanes, 4 * inplanes, kernel_size=3, stride=spt_strides[2], padding=1, bias=False),
             norm_layer(4 * inplanes),
@@ -205,29 +205,39 @@ class SpatialPriorModule(nn.Module):
         c5 = self.fc5(c5) # 64s
     
         return [c2, c3, c4, c5]
-        
+
 
 class SpatialPriorGNN(nn.Module):
     def __init__(self, 
-                 inplanes=64,
+                 inplanes=96,
                  spt_strides=[4, 2, 2, 1],
                  embed_dims=[384, 384, 384, 384],
                  norm_layer=nn.BatchNorm2d,
                  act_layer=nn.GELU):
         super().__init__()
+        embed_dim = 384
+        inplanes = 96
+        nd = 6
+        knn = [18, 15, 12, 9]
+        dl = [4, 3, 2, 1]
+        assert inplanes % nd == 0, f"{inplanes} should be divided by {nd}"
         self.stem = nn.Sequential(*[ # downsample by 4
-            nn.Conv2d(3, inplanes, kernel_size=4, stride=4, padding=0, bias=False),
+            nn.Conv2d(3, inplanes, kernel_size=3, stride=2, padding=1, bias=False),
             norm_layer(inplanes),
-            act_layer()])
-
+            act_layer(),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1)])
+        
+        self.stem_gnn = Grapher(
+            in_channels=inplanes, kernel_size=21, dilation=5, conv='mr', act='gelu', groups=nd,
+            norm='instance', bias=True, stochastic=False, epsilon=0.2, r=1, drop_path=0.)
+        
         if spt_strides[0] == 4:
             self.conv2 = nn.Sequential(*[
                 nn.Conv2d(inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
                 norm_layer(2 * inplanes),
-                nn.Conv2d(2 * inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
-                norm_layer(2 * inplanes),
                 act_layer(),
             ])
+            
         elif spt_strides[0] == 2:
             self.conv2 = nn.Sequential(*[
                 nn.Conv2d(inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
@@ -237,33 +247,61 @@ class SpatialPriorGNN(nn.Module):
 
         else: raise NotImplementedError
 
+        self.gnn_2 = Grapher(
+            in_channels=2 * inplanes, kernel_size=knn[0], dilation=dl[0], conv='mr', act='gelu', groups=nd,
+            norm='instance', bias=True, stochastic=False, epsilon=0.2, r=1, drop_path=0.)
+        
         self.conv3 = nn.Sequential(*[
             nn.Conv2d(2 * inplanes, 4 * inplanes, kernel_size=3, stride=spt_strides[1], padding=1, bias=False),
             norm_layer(4 * inplanes),
             act_layer()])
+
+        self.gnn_3 = Grapher(
+            in_channels=4 * inplanes, kernel_size=knn[1], dilation=dl[1], conv='mr', act='gelu', groups=nd,
+            norm='instance', bias=True, stochastic=False, epsilon=0.2, r=1, drop_path=0.)
+        
         self.conv4 = nn.Sequential(*[
             nn.Conv2d(4 * inplanes, 4 * inplanes, kernel_size=3, stride=spt_strides[2], padding=1, bias=False),
             norm_layer(4 * inplanes),
             act_layer(),
         ])
+
+        self.gnn_4 = Grapher(
+            in_channels=4 * inplanes, kernel_size=knn[2], dilation=dl[2], conv='mr', act='gelu', groups=nd,
+            norm='instance', bias=True, stochastic=False, epsilon=0.2, r=1, drop_path=0.)
+        
         self.conv5 = nn.Sequential(*[
             nn.Conv2d(4 * inplanes, 8 * inplanes, kernel_size=3, stride=spt_strides[3], padding=1, bias=False),
             norm_layer(8 * inplanes),
             act_layer(),
         ])
+        
+        self.gnn_5 = Grapher(
+            in_channels=8 * inplanes, kernel_size=knn[3], dilation=dl[3], conv='mr', act='gelu', groups=nd,
+            norm='instance', bias=True, stochastic=False, epsilon=0.2, r=1, drop_path=0.)
+        
         # self.fc1 = nn.Conv2d(inplanes, embed_dims[0], kernel_size=1, stride=1, padding=0, bias=True)
-        self.fc2 = nn.Conv2d(2 * inplanes, embed_dims[0], kernel_size=1, stride=1, padding=0, bias=True)
-        self.fc3 = nn.Conv2d(4 * inplanes, embed_dims[1], kernel_size=1, stride=1, padding=0, bias=True)
-        self.fc4 = nn.Conv2d(4 * inplanes, embed_dims[2], kernel_size=1, stride=1, padding=0, bias=True)
-        self.fc5 = nn.Conv2d(8 * inplanes, embed_dims[3], kernel_size=1, stride=1, padding=0, bias=True)
+        self.fc2 = nn.Conv2d(2 * inplanes, embed_dim, kernel_size=1, stride=1, padding=0, bias=True)
+        self.fc3 = nn.Conv2d(4 * inplanes, embed_dim, kernel_size=1, stride=1, padding=0, bias=True)
+        self.fc4 = nn.Conv2d(4 * inplanes, embed_dim, kernel_size=1, stride=1, padding=0, bias=True)
+        self.fc5 = nn.Conv2d(8 * inplanes, embed_dim, kernel_size=1, stride=1, padding=0, bias=True)
 
     def forward(self, x):
         c1 = self.stem(x)
+        c1 = self.stem_gnn(c1)
+
         c2 = self.conv2(c1)
+        c2 = self.gnn_2(c2)
+
         c3 = self.conv3(c2)
+        c3 = self.gnn_3(c3)
+
         c4 = self.conv4(c3)
+        c4 = self.gnn_4(c4)
+
         c5 = self.conv5(c4)
-        
+        c5 = self.gnn_5(c5)
+
         # c1 = self.fc1(c1) # 4s
         c2 = self.fc2(c2) # 8s
         c3 = self.fc3(c3) # 16s
@@ -325,7 +363,7 @@ class CrossAttention(nn.Module):
         x = x[:, self.Cls:, :]
         return x
 
-       
+
 class MLP(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
         super().__init__()
@@ -360,51 +398,6 @@ class SimpleMLP(nn.Module):
         return x
 
 
-# class SpatialFuseModule(nn.Module):
-#     def __init__(self, 
-#                  query_dim, 
-#                  key_dim, 
-#                  num_heads=8, 
-#                  qkv_bias=False, 
-#                  qk_scale=None, 
-#                  attn_drop=0., 
-#                  proj_drop=0., 
-#                  drop_path=0., 
-#                  num_classes=20, 
-#                  norm_layer=nn.LayerNorm, 
-#                  mask_ratio=0.3):
-#         super().__init__()
-#         self.norm1 = norm_layer(query_dim)
-#         self.norm2 = norm_layer(key_dim)
-#         self.norm3 = norm_layer(query_dim)
-#         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-#         self.Cls = num_classes
-#         self.cross_attn = CrossAttention(
-#             query_dim=query_dim,
-#             key_dim=key_dim,
-#             num_classes=num_classes,
-#             num_heads=num_heads,
-#             qkv_bias=qkv_bias,
-#             qk_scale=qk_scale,
-#             attn_drop=attn_drop,
-#             proj_drop=proj_drop,
-#             mask_ratio=mask_ratio)
-
-#         self.mlp = MLP(in_features=query_dim, hidden_features=query_dim * 4)
-
-#     def forward(self, x_query, x_key):
-#         """
-#         z: spatial features
-#         x: transformer features
-#         """
-#         H, W = x_query.shape[2:]
-#         x_query = nchw2nlc(x_query)
-#         x_query = x_query + self.drop_path(self.cross_attn(self.norm1(x_query), self.norm2(x_key)))
-#         x_query = x_query + self.drop_path(self.mlp(self.norm3(x_query)))
-#         x_query = nlc2nchw(x_query, d_size=(H, W))
-#         return x_query
-
-
 class SemanticAttnGNNModule(nn.Module):
     """
     Semantic Cross-Attention for Feature fusion
@@ -428,7 +421,7 @@ class SemanticAttnGNNModule(nn.Module):
         self.norm1 = norm_layer(query_dim)
         self.norm2 = norm_layer(key_dim)
         self.norm3 = norm_layer(query_dim)
-        
+
         self.num_heads = num_heads
         self.dim = min(query_dim, key_dim)
         self.head_dim = self.dim // num_heads
@@ -436,24 +429,20 @@ class SemanticAttnGNNModule(nn.Module):
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.nc = num_classes
         self.mask_ratio = mask_ratio
-        
+
         self.proj_q = nn.Linear(query_dim, self.dim, bias=qkv_bias)
         self.proj_kv = nn.Linear(key_dim, self.dim * 2, bias=qkv_bias)
         self.proj_cls = nn.Linear(key_dim, self.dim, bias=qkv_bias)
-        
+
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(self.dim, query_dim)
         self.proj_drop = nn.Dropout(proj_drop)
-        
-        # self.mlp = MLP(
-        #     in_features=self.dim, 
-        #     hidden_features=self.dim * 4,
-        #     out_features=self.dim)
-        
-        self.mlp = SimpleMLP(
-            in_features=self.dim, 
+
+        self.mlp = MLP(
+            in_features=self.dim,
+            hidden_features=self.dim * 4,
             out_features=self.dim)
-    
+
     def forward_attention_gnn(self, input_query, input_key, token_size, spatial_size):
         B, Ni, _ = input_query.shape
         N = input_key.shape[1] - self.nc
@@ -479,9 +468,9 @@ class SemanticAttnGNNModule(nn.Module):
             B, (self.nc+Ni), -1)               # B x (Cls+Ni) x Ct
         x = self.proj(x)
         x = self.proj_drop(x)
-        
+
         return x[:, :self.nc], x[:, self.nc:]
-               
+
     def forward(self, x_spatial, x_backbone, token_size):
         """
         Input:
@@ -494,18 +483,18 @@ class SemanticAttnGNNModule(nn.Module):
         x_spatial = nchw2nlc(x_spatial)
         x_cls = x_backbone[:, :self.nc]
         x_cat = torch.cat((x_cls, x_spatial), dim=1).clone() # B, (Cls+Ni), C
-    
+
         x_cls, x_spatial = self.forward_attention_gnn(
             self.norm1(x_spatial),
             self.norm2(x_backbone),
             token_size=token_size,
             spatial_size=(h, w))
-        
+
         x_cat = x_cat + self.drop_path(torch.cat((x_cls, x_spatial), dim=1))
         x_cat = x_cat + self.drop_path(self.mlp(self.norm3(x_cat)))
-        
+
         x_cls, x_spatial = x_cat[:, :self.nc], x_cat[:, self.nc:]
         x_spatial = nlc2nchw(x_spatial, d_size=(h, w))
-        
+
         return x_cls, x_spatial
     

@@ -7,7 +7,8 @@ import torch.nn.functional as F
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
 
-from net.msg_modules import DownConv, SpatialPriorModule, SemanticAttnGNNModule
+from net.msg_modules import DownConv, SemanticAttnGNNModule
+from net.msg_modules import SpatialPriorModule, SpatialPriorGNN
 from net.base_vit import MCTViT, _cfg
 
 
@@ -56,6 +57,11 @@ class MSGFormer(MCTViT):
             embed_dims=self.spatial_dims,
             spt_strides=[self.spatial_scales[0]//4] + self.spatial_strides)
 
+        # self.spatial_prior = SpatialPriorGNN(
+        #     inplanes=96,
+        #     embed_dims=self.spatial_dims,
+        #     spt_strides=[self.spatial_scales[0]//4] + self.spatial_strides)
+                
         self.decay_parameter = decay_parameter
         self.spatial_sizes = [(math.ceil(img_size[0] / scale), math.ceil(img_size[1] / scale)) 
                               for scale in self.spatial_scales]
@@ -92,7 +98,8 @@ class MSGFormer(MCTViT):
                     'spatial':self.num_knn_spatial[i]}, 
                 dilation_dict={
                     'backbone':self.dilations[i],
-                    'spatial':self.dilations_spatial[i]})
+                    'spatial':self.dilations_spatial[i]}
+                )
             for i in range(self.stages)])
         
         self.down_convs = nn.ModuleList([
@@ -185,7 +192,7 @@ class MSGFormer(MCTViT):
         
         attn_weights = []
        
-        #########  Modify block for ablation study #########
+        #-------------------  Modify block for ablation study -------------------#
         for i in range(self.stages):
             for j in range(self.stage_indices[i], self.stage_indices[i+1]):
                 x, weights_j = self.blocks[j](x)
@@ -267,8 +274,8 @@ class MSGFormer_CAM(MSGFormer):
     def __init__(self, *args, cls_ind=4, **kwargs):
         """fuse_layers: The attention of the last L layers to fuse"""
         super().__init__(*args, **kwargs)
-        self.fuse_layers = cls_ind
-    
+        self.cls_ind = cls_ind # fusion layer for mixing class-to-patch
+
     @torch.no_grad()
     def get_cam(self, tokens, attn_weights):
         """
@@ -278,26 +285,26 @@ class MSGFormer_CAM(MSGFormer):
         Output: 
             Refined class activation maps -> B x Cls x Hp x Wp
         """
-        B, nc, hp, wp = tokens.shape
+        b, nc, hp, wp = tokens.shape
 
-        if self.fuse_layers == 0:
+        if self.cls_ind == 0:
             cams = tokens.detach().clone()   # B x Cls x Hp x Wp
             cams = F.relu(cams)         # With ReLU Activation
 
         else:
-            attn_maps = attn_weights[-4:].mean(0)         # B x (Cls+Np) x (Cls+Np)
-            cls2pat = attn_maps[:, :nc, nc:].reshape([B, nc, hp, wp]) # B x Cls x Hp x Wp
+            attn_maps = attn_weights[-self.cls_ind:].mean(0)         # B x (Cls+Np) x (Cls+Np)
+            cls2pat = attn_maps[:, :nc, nc:].reshape([b, nc, hp, wp]) # B x Cls x Hp x Wp
             patch_cam = tokens.detach().clone()   # B x Cls x Hp x Wp
             patch_cam = F.relu(patch_cam)         # With ReLU Activation
             cams = torch.pow(cls2pat * patch_cam, 1/2)
- 
+
         # Apply pat2pat affinity refinement
         pat2pat = attn_weights[:, :, nc:, nc:] #  L x B x Np x Np
         pat2pat = torch.sum(pat2pat, dim=0)      # B x Np x Np
         cams = torch.matmul(
                 pat2pat.unsqueeze(1),    # B x 1 x Np x Np
-                cams.view(B, nc, -1, 1) # B x Cls x Np x 1
-            ).reshape(B, nc, hp, wp)
+                cams.view(b, nc, -1, 1) # B x Cls x Np x 1
+            ).reshape(b, nc, hp, wp)
         
         return cams
     
@@ -310,17 +317,17 @@ class MSGFormer_CAM(MSGFormer):
         Output: 
             Refined class activation maps -> B x Cls x Hp x Wp
         """
-        B, Cls, Hp, Wp = tokens.shape
+        B, nc, Hp, Wp = tokens.shape
         attn_weights = torch.mean(torch.stack(attn_weights), dim=2).detach() # L x B x (Cls+Np) x (Cls+Np)
         
-        attn_maps = attn_weights[-self.fuse_layers:].mean(0)         # B x (Cls+Np) x (Cls+Np)
-        cls2pat = attn_maps[:, :Cls, Cls:].reshape([B, Cls, Hp, Wp]) # B x Cls x Hp x Wp
+        attn_maps = attn_weights[-self.cls_ind:].mean(0)         # B x (Cls+Np) x (Cls+Np)
+        cls2pat = attn_maps[:, :nc, nc:].reshape([B, nc, Hp, Wp]) # B x Cls x Hp x Wp
         return cls2pat
     
     @torch.no_grad()
     def forward(self, x, return_attn=False):
         # x = auto_resize_input(x, min_size=self.min_size)
-        H, W = x.shape[2:]
+        h, w = x.shape[2:]
 
         feat_dict = self.forward_features(x)
 
@@ -328,7 +335,7 @@ class MSGFormer_CAM(MSGFormer):
         if return_attn: # L x B x (Cls+Np) x (Cls+Np) 
             return attn_weights
         
-        patch_tokens = self.reshape_patch_tokens(feat_dict['x_pat'], H, W) # B x C x Hp x Wp 
+        patch_tokens = self.reshape_patch_tokens(feat_dict['x_pat'], h, w) # B x C x Hp x Wp 
         ############################################################
         out_spatial = [patch_tokens]
         out_size = patch_tokens.shape[2:]
@@ -353,7 +360,7 @@ def msgformer(pretrained=False, **kwargs):
         num_heads=6,
         mlp_ratio=4,
         qkv_bias=True,
-        norm_layer=partial(nn.LayerNorm, eps=1e-6), 
+        norm_layer=partial(nn.LayerNorm, eps=1e-6),
         **kwargs)
     
     model.default_cfg = _cfg()

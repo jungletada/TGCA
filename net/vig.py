@@ -146,7 +146,6 @@ class DeepGCN(torch.nn.Module):
         for i in range(self.n_blocks):
             x = self.backbone[i](x)
         # pooling
-        
         x = self.prediction(x)
         x = self.head(x)
         x = F.adaptive_avg_pool2d(x, 1)
