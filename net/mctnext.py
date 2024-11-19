@@ -8,14 +8,14 @@ from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
 
 from net.msg_modules import DownConv, SemanticAttnGNNModule
-from net.msg_modules import SpatialPriorGNNTest
+from net.msg_modules import SpatialPriorGNN
 from net.mct_vit import MCTViT, _cfg
 
 
-__all__ = ['msgformer']
+__all__ = ['mctnext']
 
 
-class MSGFormer(MCTViT):
+class MCTNext(MCTViT):
     """Multi-scale Graph Attention Vision Transformer."""
     def __init__(self, *args, decay_parameter=0.996, input_size=448, **kwargs):
         """
@@ -40,10 +40,7 @@ class MSGFormer(MCTViT):
         self.num_knn = [18, 15, 12, 9]
        
         assert input_size >= 224, f"Input size {input_size} is too small."
-        # if input_size < 448:
-        #     self.num_knn_spatial = [10, 8, 6, 4]
-        #     self.spatial_scales = [8, 16, 32, 64]
-        # else:
+
         self.num_knn_spatial = [8, 6, 4, 2]
         self.spatial_scales = [16, 16, 32, 64]
         self.dilations_spatial = [2, 2, 1, 1]
@@ -51,17 +48,12 @@ class MSGFormer(MCTViT):
         self.spatial_strides = [
             self.spatial_scales[i+1] // self.spatial_scales[i]
             for i in range(len(self.spatial_scales)-1)]
-        
-        # self.spatial_prior = SpatialPriorModule(
-        #     inplanes=64,
-        #     embed_dims=self.spatial_dims,
-        #     spt_strides=[self.spatial_scales[0]//4] + self.spatial_strides)
-        spt_strides=[self.spatial_scales[0]//4] + self.spatial_strides
-        self.spatial_prior = SpatialPriorGNNTest(
+
+        self.spatial_prior = SpatialPriorGNN(
             inplanes=96,
             embed_dim=self.embed_dim,
             num_heads=self.num_heads,
-            spt_strides=spt_strides)
+            spt_strides=[self.spatial_scales[0]//4] + self.spatial_strides)
                 
         self.decay_parameter = decay_parameter
         self.spatial_sizes = [(math.ceil(img_size[0] / scale), math.ceil(img_size[1] / scale)) 
@@ -284,7 +276,7 @@ class MSGFormer(MCTViT):
         return cls_logits, x_logits
 
 
-class MSGFormerCam(MSGFormer):
+class MCTNextCam(MCTNext):
     """Class Activation Map variant of MSGFormer for visualization purposes."""
     def __init__(self, *args, cls_ind=4, **kwargs):
         """fuse_layers: The attention of the last L layers to fuse"""
@@ -309,12 +301,14 @@ class MSGFormerCam(MSGFormer):
         else:
             attn_maps = attn_weights[-self.cls_ind:].mean(0)         # B x (Cls+Np) x (Cls+Np)
             cls2pat = attn_maps[:, :nc, nc:].reshape([b, nc, hp, wp]) # B x Cls x Hp x Wp
+            pat2cls = attn_maps[:, nc:, :nc].reshape([b, hp, wp, nc]).permute(0, 3, 1, 2) # B x Cls x Hp x Wp
             patch_cam = tokens.detach().clone()   # B x Cls x Hp x Wp
             patch_cam = F.relu(patch_cam)         # With ReLU Activation
-            cams = torch.pow(cls2pat * patch_cam, 1/2)
+            cls_attn = (cls2pat + pat2cls) / 2
+            cams = torch.pow(cls_attn * patch_cam, 1/2)
 
         # Apply pat2pat affinity refinement
-        pat2pat = attn_weights[-6:, :, nc:, nc:] #  L x B x Np x Np
+        pat2pat = attn_weights[:, :, nc:, nc:] #  L x B x Np x Np
         pat2pat = torch.sum(pat2pat, dim=0)      # B x Np x Np
         cams = torch.matmul(
                 pat2pat.unsqueeze(1),    # B x 1 x Np x Np
@@ -366,7 +360,7 @@ class MSGFormerCam(MSGFormer):
 
 
 @register_model
-def msgformer(pretrained=False, **kwargs):
+def mctnext(pretrained=False, **kwargs):
     """Create a MSGFormer model instance.
        Base: deit_small_patch16_224.fb_in1k
     Args:
@@ -376,7 +370,7 @@ def msgformer(pretrained=False, **kwargs):
     Returns:
         MSGFormer: The constructed model
     """
-    model = MSGFormer(
+    model = MCTNext(
         patch_size=16,
         embed_dim=384,
         depth=12,
@@ -405,94 +399,16 @@ def msgformer(pretrained=False, **kwargs):
     return model
 
 
-@register_model
-def msgformer_base(pretrained=False, **kwargs):
-    """Create a MSGFormer model instance.
-       Base: deit_base_patch16_224.fb_in1k
-    Args:
-        pretrained (bool): Whether to load pretrained weights
-        **kwargs: Additional arguments passed to the MSGFormer constructor
-        
-    Returns:
-        MSGFormer: The constructed model
-    """
-    model = MSGFormer(
-        patch_size=16,
-        embed_dim=768,
-        depth=12,
-        num_heads=12,
-        **kwargs)
-
-    model.default_cfg = _cfg()
-
-    if pretrained:
-        checkpoint = torch.hub.load_state_dict_from_url(
-            url='https://dl.fbaipublicfiles.com/deit/deit_base_patch16_224-b5f2ef4d.pth',
-            map_location="cpu", check_hash=True)['model']
-        model_dict = model.state_dict()
-
-        for k in ['head.weight', 'head.bias', 'head_dist.weight', 'head_dist.bias']:
-            if k in checkpoint and checkpoint[k].shape != model_dict[k].shape:
-                print(f"Removing key {k} from pretrained checkpoint")
-                del checkpoint[k]
-
-        pretrained_dict = {k: v for k, v in checkpoint.items()
-                           if k in model_dict}
-        pretrained_dict = {k: v for k, v in pretrained_dict.items()
-                           if k not in ['cls_token', 'pos_embed']}
-        model_dict.update(pretrained_dict)
-        model.load_state_dict(model_dict)
-    return model
-
-
-def msgformer_cam(**kwargs):
+def mctnext_cam(**kwargs):
     """Create a MSGFormerCam small model instance.
     
     Args:
         **kwargs: Additional arguments passed to the MSGFormerCam constructor.
     """
-    model = MSGFormerCam(
+    model = MCTNextCam(
         patch_size=16,
         embed_dim=384,
         depth=12,
         num_heads=6,
         **kwargs)
     return model
-    
-    
-def msgformer_base_cam(**kwargs):
-    """Create a MSGFormerCam model instance.
-    
-    Args:
-        **kwargs: Additional arguments passed to the MSGFormerCam constructor.
-    """
-    model = MSGFormerCam(
-        patch_size=16,
-        embed_dim=768,
-        depth=12,
-        num_heads=12,
-        **kwargs)
-    return model
-     
-     
-# if __name__ == "__main__":
-#     x = torch.ones(2, 3, 527, 481).cuda()
-    
-#     from timm.models import create_model
-#     model = create_model(
-#         "deit_small_mctgformer",
-#         pretrained=False,
-#         num_classes=20,
-#         drop_block_rate=None,
-#         input_size=448).cuda()
-    
-#     model.eval()
-    
-#     output_logits = model(x)
-#     for i in range(len(output_logits)):
-#         if isinstance(output_logits[i], list):
-#             print(f"{i}-th logits shape:")
-#             for logit in output_logits[i]:
-#                 print(f"--  {logit.shape}")
-#         else:
-#             print(f"{i}-th logits shape: {output_logits[i].shape}")

@@ -24,7 +24,7 @@ def run(args):
     logger = logging.getLogger(session_name)
     
     dataset = COCOSegmentationLabelDataset(
-        data_dir=args.mscoco_root, 
+        data_dir=args.mscoco_root,
         id_list_file="configs/coco/train_id.txt",
         annotation_dir='MaskSets')
     

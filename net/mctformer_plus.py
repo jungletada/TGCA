@@ -5,7 +5,7 @@ from functools import partial
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
 import torch.nn.functional as F
-from net.vision_transformer import VisionTransformer, _cfg
+from net.vit import VisionTransformer, _cfg
 
 
 __all__ = ['mctformerplus']
@@ -105,8 +105,14 @@ class MCTformerPlus(VisionTransformer):
         return output
 
 
-class MCTformerPlus_CAM(MCTformerPlus):
+class MCTformerPlusCam(MCTformerPlus):
+    """
+        CAM Model for MCTformerPlus
+    """
     def __init__(self, decay_parameter=0.996, input_size=448, *args, **kwargs):
+        """
+        Basic Initialization
+        """
         super().__init__(decay_parameter, input_size, *args, **kwargs)
         self.n_layers = 3
         
@@ -115,7 +121,8 @@ class MCTformerPlus_CAM(MCTformerPlus):
         feature_map = F.relu(feature_map)
         n, c, h, w = feature_map.shape
         
-        cls2pat = attn_weights[-self.n_layers:].mean(0)[:, 0:self.num_classes, self.num_classes:].reshape([n, c, h, w])
+        cls2pat = attn_weights[-self.n_layers:].mean(0)[:, 0:self.num_classes, self.num_classes:].reshape([
+            n, c, h, w])
         patch_attn = attn_weights[:, :, self.num_classes:, self.num_classes:]
 
         cams = cls2pat * feature_map  # B * C * 14 * 14
@@ -133,15 +140,16 @@ class MCTformerPlus_CAM(MCTformerPlus):
         feature_map = x_patch.detach().clone()  # B * C * 14 * 14
         feature_map = F.relu(feature_map)
         n, c, h, w = feature_map.shape
-        cls2pat = attn_weights[-self.n_layers:].mean(0)[:, 0:self.num_classes, self.num_classes:].reshape([n, c, h, w])
+        cls2pat = attn_weights[-self.n_layers:].mean(0)[:, 0:self.num_classes, self.num_classes:].reshape([
+            n, c, h, w])
         return cls2pat
         
     def forward(self, x, return_attn=False):
         w, h = x.shape[2:]
         _, x_patch, attn_weights, _ = self.forward_features(x)
         
-        attn_weights = torch.stack(attn_weights)  # 12 * B * H * N * N
-        attn_weights = torch.mean(attn_weights, dim=2)  # 12 * B * N * N
+        # 12 * B * H * N * N -> 12 * B * N * N
+        attn_weights = torch.mean(torch.stack(attn_weights), dim=2)
         
         if return_attn:
             return attn_weights
@@ -162,6 +170,15 @@ class MCTformerPlus_CAM(MCTformerPlus):
         
 @register_model
 def mctformerplus(pretrained=False, **kwargs):
+    """Creates a MCTformerPlus model.
+    
+    Args:
+        pretrained (bool): If True, returns a model pre-trained on ImageNet
+        **kwargs: Additional arguments passed to the model
+        
+    Returns:
+        MCTformerPlus: The constructed model
+    """
     model = MCTformerPlus(
         patch_size=16, embed_dim=384, depth=12, num_heads=6, mlp_ratio=4, qkv_bias=True,
         norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)

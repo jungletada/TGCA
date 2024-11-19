@@ -1,6 +1,7 @@
 import numpy as np
 
-def crf_inference(img, probs, t=10, scale_factor=1, labels=21):
+
+def crf_inference(img, probs, t=5, scale_factor=1, labels=21):
     import pydensecrf.densecrf as dcrf
     from pydensecrf.utils import unary_from_softmax
 
@@ -14,19 +15,16 @@ def crf_inference(img, probs, t=10, scale_factor=1, labels=21):
 
     d.setUnaryEnergy(unary)
     d.addPairwiseGaussian(sxy=3/scale_factor, compat=3)
-    d.addPairwiseBilateral(sxy=80/scale_factor, srgb=13, rgbim=np.copy(img), compat=10)
+    d.addPairwiseBilateral(sxy=70/scale_factor, srgb=3, rgbim=np.copy(img), compat=3)
     Q = d.inference(t)
     return np.array(Q).reshape((n_labels, h, w))
 
 
 def _crf_with_alpha(cam_dict, alpha, original_img):
     v = np.array(list(cam_dict.values()))
-    # bg_score = np.power(1 - np.max(v, axis=0, keepdims=True), alpha)
-    # bgcam_score = np.concatenate((bg_score, v), axis=0)
-    bgcam_score = np.pad(v, 
-                         ((1, 0), (0, 0), (0, 0)), 
-                         mode='constant', 
-                         constant_values=alpha)
+    bg_score = np.power(1 - np.max(v, axis=0, keepdims=True), alpha)
+    bgcam_score = np.concatenate((bg_score, v), axis=0)
+    # bgcam_score = np.pad(v, ((1, 0), (0, 0), (0, 0)), mode='constant', constant_values=alpha)
     crf_score = crf_inference(
         original_img, bgcam_score, labels=bgcam_score.shape[0])
     

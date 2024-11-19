@@ -16,6 +16,7 @@ VALID=${DATACONFIG}/val_id.txt
 
 INPUTSIZE=448
 SEG_DIR=pseudo_mask
+CRF_DIR=crf_mask
 
 MODELNAME=msgformer
 WORKDIR=results_voc/msgformer_${INPUTSIZE}
@@ -23,13 +24,12 @@ WORKDIR=results_voc/msgformer_${INPUTSIZE}
 # MODELNAME=mctformerplus
 # WORKDIR=results_voc/mctformerplus_${INPUTSIZE}
 
-# MODELNAME=simplevit
-# WORKDIR=results_voc/simplevit_${INPUTSIZE}
+# MODELNAME=mctnext
+# WORKDIR=results_voc/mctnext_${INPUTSIZE}
 
 CUDA_VISIBLE_DEVICES=${GPU}
 
-
-#============= Train Model ===============#
+#============= Train Model ============= #
 OMP_NUM_THREADS=${NODES} \
 torchrun --nproc_per_node=${NODES} --nnodes=1 \
     train_model.py \
@@ -39,11 +39,12 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --work_space ${WORKDIR} \
     --input_size ${INPUTSIZE} \
     --seed 3 \
-    --epoch 28 \
+    --epoch 27 \
     --batch_per_gpu 19 \
+    --cls_weight 3.0 \
     
 
-# ============= Make Class Activation Maps of Model=============#
+# ============= Make Class Activation Maps of Model ============= #
 python make_cam.py \
     --dataset ${DATASET} \
     --model ${MODELNAME} \
@@ -51,44 +52,47 @@ python make_cam.py \
     --train_list ${TRAINID} \
     --input_size ${INPUTSIZE} \
     --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
-    # --checkpoint ${WORKDIR}/msgformer_deit_small_7323.pth \
-    
+    # --checkpoint results_voc/msgformer_448/msgformer_7388.pth \
 
 # ============= Evaluate Class Activation Maps =============#
 python eval_cam.py \
     --dataset ${DATASET} \
     --work_space ${WORKDIR} \
     --train_list ${TRAINID} \
+    --alpha 1.35 \
     --curve_threshold \
 
 
 # #============= Train and Infer Pixel Semantic Affnity =============
 # OMP_NUM_THREADS=${NODES} \
 # torchrun --nproc_per_node=${NODES} --nnodes=1 \
-#     train_infer_psa.py --train True \
+#     train_infer_psa.py \
+#     --train True \
 #     --dataset ${DATASET} \
 #     --work_space ${WORKDIR} \
 #     --train_list ${TRAINAUGID} \
+#     --weights checkpoints/res38_cls.pth \
 #     --seed 3 \
-#     --low_alpha 0.35 \
-#     --high_alpha 0.50 \
-#     # --weights results_voc/resnet38d_448/ResNet38d_patch_224_last.pth \
+#     --low_alpha 1 \
+#     --high_alpha 1.45 \
+
 
 
 # #============= Infer with Pixel Semantic Affnity =============#
 # python train_infer_psa.py --inference True \
 #     --dataset ${DATASET} \
 #     --work_space ${WORKDIR} \
-#     --infer_list ${TRAINAUGID} \
+#     --infer_list ${TRAINID} \
 #     --seg_out_dir ${SEG_DIR} \
-#     --threshold 0.46 \
+#     --threshold 0.47 \
 
 
 # #============= Evaluate =============#
 # python steps_voc/eval_sem_seg.py \
 #     --work_space ${WORKDIR} \
 #     --seg_out_dir ${SEG_DIR} \
-#     #--seg_out_dir pseudo_mask_448 \
+#     --infer_list ${TRAINID} \
+    #--seg_out_dir pseudo_mask_448 \
 
 # # Save the generated mask to zip
 # cd ${WORKDIR} && zip -r ${SEG_DIR}.zip ${SEG_DIR} && cd -
@@ -101,5 +105,6 @@ python eval_cam.py \
 #     --work_space ${WORKDIR} \
 #     --train_list ${TRAINID} \
 #     --input_size ${INPUTSIZE} \
-#     --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
-#     --checkpoint ${WORKDIR}/msgformer_deit_small_7323.pth \
+#     --checkpoint ${WORKDIR}/mctformerplus_6887.pth \
+    # --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
+    # --checkpoint ${WORKDIR}/msgformer_7388.pth \

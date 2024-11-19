@@ -48,6 +48,7 @@ def get_args_parser():
     parser.add_argument('--infer_list', default='configs/coco/train_id.txt', type=str,
                         help='configs/coco/train_id.txt or configs/voc12/train_id.txt')
     parser.add_argument("--weights", default='checkpoints/res38_cls.pth', type=str)
+
     # ddp settings
     parser.add_argument('--rank', default=0, type=int, help='rank of current process')  
     parser.add_argument('--gpu_id', default=0, type=int, help="which gpu to use")
@@ -56,19 +57,19 @@ def get_args_parser():
     # training settings
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument("--network", default="network.resnet38_aff", type=str)
-    parser.add_argument("--batch_per_gpu", default=8, type=int)
+    parser.add_argument("--batch_per_gpu", default=12, type=int)
     parser.add_argument("--epoch", default=5, type=int)
     parser.add_argument("--lr", default=0.1, type=float)
     parser.add_argument("--num_workers", default=8, type=int)
     parser.add_argument("--wt_dec", default=5e-4, type=float)
-    
+
     # dataset settings
     parser.add_argument("--dataset", default="COCO", type=str, help='choose `COCO` or `VOC12`')
     parser.add_argument("--crop_size", default=448, type=int)
     parser.add_argument("--low_alpha", default=1, type=float)
     parser.add_argument("--high_alpha", default=2, type=float)
     parser.add_argument("--radius", default=5, type=int)
-        
+
     # hyper parameters settings
     parser.add_argument("--beta", default=11, type=int)
     parser.add_argument("--logt", default=7, type=int)
@@ -86,8 +87,8 @@ class Normalize():
     def __call__(self, imgarr):
         imgarr = (imgarr / 255. - self.mean) / self.std
         return imgarr.astype(np.float32)
-    
-    
+
+
 def init_distributed_mode(args):
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
         args.rank = int(os.environ["RANK"])
@@ -110,8 +111,8 @@ def init_distributed_mode(args):
         world_size=args.world_size,
         rank=args.rank)
     dist.barrier()
-    
-    
+
+   
 def same_seeds(seed):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -202,8 +203,8 @@ def build_train_dataloader(train_dataset, args):
         pin_memory=True, 
         drop_last=True)
     return sampler_train, train_data_loader
-    
-    
+
+
 def build_infer_dataset(args):
     """
     Build the pixel semantic affinity dataset for COCO and VOC
@@ -238,76 +239,6 @@ def build_infer_dataloader(args, infer_dataset):
         num_workers=args.num_workers, 
         pin_memory=False) 
     return infer_data_loader
-
-
-# def _work(process_id, model, dataset, args):
-#     n_gpus = torch.cuda.device_count()
-#     databin = dataset[process_id]
-#     data_loader = DataLoader(
-#         databin, 
-#         shuffle=False, 
-#         num_workers=args.num_workers // n_gpus, 
-#         pin_memory=False) 
-    
-#     stride = 8
-    
-#     with torch.no_grad(), cuda.device(process_id):
-#         model.cuda()
-#         for iter_, (name, img) in enumerate(
-#                 tqdm(data_loader, position=process_id, desc=f'[PID{process_id}]')):
-#             name = name[0]
-#             # if osp.exists(osp.join(args.seg_out_dir, name + '.png')):
-#             #     continue
-#             original_shape = img.shape
-#             p2d = get_padding(original_shape, args.radius, stride)
-#             img = F.pad(img, p2d)   
-#             dheight = int(np.ceil(img.shape[2] / stride))
-#             dwidth = int(np.ceil(img.shape[3] / stride))
-            
-#             cam_dict = np.load(osp.join(args.cam_out_dir, name + '.npy'), allow_pickle=True).item()
-            
-#             if len(tuple(cam_dict.keys())) == 0:
-#                 cam = np.zeros((original_shape[2], original_shape[3]), np.uint8)
-#                 mask = Image.fromarray(cam, mode='L')
-#                 mask.save(osp.join(args.seg_out_dir, name + '.png'))
-#                 continue
-            
-#             cam_full_arr = np.zeros((args.num_classes, original_shape[2], original_shape[3]), np.float32)
-#             for k, v in cam_dict.items():
-#                 cam_full_arr[k + 1] = v
-
-#             cam_full_arr[0] = args.threshold
-#             cam_full_arr = np.pad(cam_full_arr, ((0, 0), (0, p2d[3]), (0, p2d[1])), mode='constant')
-
-#             with torch.no_grad():
-#                 aff_mat = torch.pow(model.forward(img.cuda(), to_dense=True), args.beta)
-#                 trans_mat = aff_mat / torch.sum(aff_mat, dim=0, keepdim=True)
-
-#                 for _ in range(args.logt):
-#                     trans_mat = torch.matmul(trans_mat, trans_mat)
-
-#                 cam_full_arr = torch.from_numpy(cam_full_arr)
-#                 cam_full_arr = F.avg_pool2d(cam_full_arr, stride, stride)
-#                 print(f'cam_full_arr: {cam_full_arr.shape}') # n_cls, H//8, W//8 21, 36, 63
-#                 cam_vec = cam_full_arr.view(args.num_classes, -1)
-#                 cam_rw = torch.matmul(cam_vec.cuda(), trans_mat)
-#                 print(f'{original_shape}') # 1, 3, 281, 500
-#                 print(f'cam_rw: {cam_rw.shape}, {dheight}, {dwidth}') # 21, 2268
-#                 cam_rw = cam_rw.view(1, args.num_classes, dheight, dwidth)
-#                 cam_rw = F.interpolate(
-#                     input=cam_rw,
-#                     size=(img.shape[2], img.shape[3]), 
-#                     mode='bilinear', 
-#                     align_corners=False)
-                
-#                 _, cam_rw_pred = torch.max(cam_rw, 1)
-                    
-#                 res = np.uint8(cam_rw_pred.cpu().data[0])[:original_shape[2], :original_shape[3]]
-#                 mask = Image.fromarray(res, mode='L')
-#                 mask.save(osp.join(args.seg_out_dir, name + '.png'))
-
-#             if process_id == n_gpus - 1 and iter_ % (len(databin) // 20) == 0:
-#                 print("%d " % ((5*iter_+1)//(len(databin) // 20)), end='')
 
 
 def _work(process_id, model, dataset, args):
@@ -362,7 +293,7 @@ def _work(process_id, model, dataset, args):
                 cam_rw = cam_rw.view(1, -1, math.ceil(sH/stride), math.ceil(sW/stride))
                 cam_rw = F.interpolate(
                     input=cam_rw,
-                    size=(oH, oW), 
+                    size=(oH, oW),
                     mode='bilinear', 
                     align_corners=False)
                 
@@ -387,12 +318,12 @@ def train_affinity(args):
     
     train_dataset = build_train_dataset(args)
     sampler_train, train_data_loader = build_train_dataloader(train_dataset, args)
-    
+
     args.world_size = dist.get_world_size()
     args.batch_size = args.batch_per_gpu * args.world_size
     max_step = len(train_dataset) * args.epoch // args.batch_size 
     args.max_step = max_step
-    
+   
     args_dict = vars(args)
     if dist.get_rank() == 0:
         pprint.pprint(args_dict)
@@ -405,6 +336,7 @@ def train_affinity(args):
         {'params': param_groups[2], 'lr': 10 * args.lr, 'weight_decay': args.wt_dec},
         {'params': param_groups[3], 'lr': 20 * args.lr, 'weight_decay': 0}
     ], lr=args.lr, weight_decay=args.wt_dec, max_step=max_step)
+    
     weights_dict = torch.load(args.weights)
     model.load_state_dict(weights_dict, strict=False)
     model.to(device)
@@ -457,7 +389,8 @@ def train_affinity(args):
             if (optimizer.global_step - 1) % 50 == 0 and dist.get_rank() == 0:
                 timer.update_progress(optimizer.global_step / max_step)
                 print('Iter: [%5d/%5d]' % (optimizer.global_step-1, max_step),
-                      'loss:%.4f, bg_loss:%.4f, fg_loss:%.4f, neg_loss:%.4f;' % avg_meter.get('loss', 'bg_loss', 'fg_loss', 'neg_loss'),
+                      'loss: %.4f, bg_loss:%.4f, fg_loss:%.4f, neg_loss:%.4f;' % avg_meter.get(
+                          'loss', 'bg_loss', 'fg_loss', 'neg_loss'),
                       'cnt: %.0f %.0f %.0f;' % avg_meter.get('bg_cnt', 'fg_cnt', 'neg_cnt'),
                       'imps: %.1f;' % ((iteration + 1) * args.batch_size / timer.get_stage_elapsed()),
                       'Fin: %s;' % (timer.str_est_finish()),
@@ -465,8 +398,7 @@ def train_affinity(args):
                 avg_meter.pop()
                 
     if dist.get_rank() == 0:
-        torch.save(model.module.state_dict(), 
-                   osp.join(args.work_space, 'res38_aff_final.pth'))
+        torch.save(model.module.state_dict(), args.ckpt)
     
     
 def infer_affinity(args):
@@ -477,9 +409,7 @@ def infer_affinity(args):
     pprint.pprint(vars(args))
 
     model = ResNet38d_Aff()
-    model_dict = torch.load(
-        osp.join(args.work_space, 'res38_aff_final.pth'), 
-        map_location='cpu')
+    model_dict = torch.load(args.ckpt, map_location='cpu')
     model.load_state_dict(model_dict)
     model.eval()
     model.cuda()
@@ -490,8 +420,11 @@ def infer_affinity(args):
     dataset = split_dataset(dataset, n_gpus)
 
     print("[", end='')
-    multiprocessing.spawn(_work, nprocs=n_gpus, 
-                          args=(model, dataset, args), join=True)
+    multiprocessing.spawn(
+        _work, 
+        nprocs=n_gpus, 
+        args=(model, dataset, args),
+        join=True)
     print("]")
 
     torch.cuda.empty_cache()
@@ -499,9 +432,11 @@ def infer_affinity(args):
     
 if __name__ == '__main__':
     args = get_args_parser()
+    model_name = 'res38_aff'
+    args.ckpt = osp.join(args.work_space, f'{model_name}_final.pth')
     
     if args.dataset == 'COCO':
-        args.num_classes = 80 
+        args.num_classes = 80
     elif args.dataset == 'VOC12':
         args.num_classes = 20 
     else:

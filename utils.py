@@ -1,5 +1,3 @@
-from net.mctformer import MCTformerV2_cam
-
 import io
 import os
 import sys
@@ -11,6 +9,12 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from collections import defaultdict, deque
+
+from net.mctformer import MCTformerV2Cam
+from net.mctformer_plus import MCTformerPlusCam
+from net.msgformer import msgformer_cam
+from net.mctnext import mctnext_cam
+from net.srmct import SRMCTformerCam
 
 
 def data_mkdir(directory_path):
@@ -34,24 +38,8 @@ def get_dataset_imglist(data_set):
     elif data_set.lower().__contains__('coco'):
         imglist = 'configs/coco/val_id.txt'
     else:
-        raise NotImplementedError    
+        raise NotImplementedError
     return imglist
-    
-
-def get_model_name(model):
-    if model.__contains__('MCTformerV2'):
-        model_name = 'MCTformerV2'
-    elif model.__contains__('MCTformerPlus'):
-        model_name = 'MCTformerPlus'
-    elif model.__contains__('MCTGCN'):
-        model_name = 'MCTGCN'      
-    elif model.__contains__('MCTG'):
-        model_name = 'MCTG'  
-    elif model.__contains__('ResNet38d'):
-        model_name = 'ResNet38d_patch_224'
-    else:
-        raise NotImplementedError    
-    return model_name
 
 
 def log(*args, **kwargs):
@@ -90,8 +78,10 @@ def load_model_weight(args, model):
         checkpoint = torch.load(args.finetune, map_location='cpu')
         num_extra_tokens = model.pos_embed.shape[-2] - model_npatches
         
-    try: checkpoint_model = checkpoint['model']
-    except: checkpoint_model = checkpoint
+    try: 
+        checkpoint_model = checkpoint['model']
+    except: 
+        checkpoint_model = checkpoint
         
     state_dict = model.state_dict()
     for k in ['head.weight', 'head.bias', 'head_dist.weight', 'head_dist.bias']:
@@ -132,7 +122,6 @@ def load_model_weight(args, model):
         checkpoint_model['cls_token'] = new_cls_token
     
     return checkpoint_model
-
 
 
 def load_model_weight_onecls(args, model):
@@ -181,36 +170,32 @@ def load_model_weight_onecls(args, model):
 
 
 def create_cam_model(args):
-    if args.model.__contains__('MCTformerV2'):
-        model = MCTformerV2_cam(
+    if 'mctformerv2' in args.model.lower():
+        model = MCTformerV2Cam(
             num_classes=args.num_classes,
             input_size=args.input_size)
         
-    elif args.model.__contains__('msgformer'):
-        from net.msgformer import MSGFormer_CAM
-        model = MSGFormer_CAM(
+    elif 'msgformer' in args.model.lower():
+        model = msgformer_cam(
             num_classes=args.num_classes,
             input_size=args.input_size)
         
-    elif args.model.__contains__('mctformerplus'):
-        from net.mctformer_plus import MCTformerPlus_CAM
-        model = MCTformerPlus_CAM(
+    elif 'mctformerplus' in args.model.lower():
+        model = MCTformerPlusCam(
             num_classes=args.num_classes,
             input_size=args.input_size)
         
-    elif 'srmctformer' in args.model:
-        from net.srmct import SRMCTformer_CAM
-        model = SRMCTformer_CAM(
+    elif 'srmctformer' in args.model.lower():
+        model = SRMCTformerCam(
             num_classes=args.num_classes,
             input_size=args.input_size)
         
-    elif 'simplevit' in args.model:
-        from net.simplevit import SimpleViTCAM
-        model = SimpleViTCAM(
+    elif 'mctnext' in args.model.lower():
+        model = mctnext_cam(
             num_classes=args.num_classes,
             input_size=args.input_size)
     else:
-        raise NotImplementedError   
+        raise NotImplementedError
     
     print(f'Using {args.model} for making class activation maps.')
     

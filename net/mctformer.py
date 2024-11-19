@@ -2,7 +2,7 @@ import math
 import torch
 import torch.nn as nn
 from functools import partial
-from net.vision_transformer import VisionTransformer, _cfg
+from net.vit import VisionTransformer, _cfg
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
 import torch.nn.functional as F
@@ -93,7 +93,10 @@ class MCTformerV2(VisionTransformer):
         return x_cls_logits, x_patch_logits
 
 
-class MCTformerV2_cam(MCTformerV2):
+class MCTformerV2Cam(MCTformerV2):
+    """
+    
+    """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         

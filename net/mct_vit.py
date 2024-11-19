@@ -3,10 +3,10 @@ import torch.nn as nn
 from functools import partial
 
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
-from timm.models.helpers import load_pretrained
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-from timm.models.registry import register_model
-from net.gcn_lib import Grapher
+# from timm.models.helpers import load_pretrained
+# from timm.models.registry import register_model
+# from net.gcn_lib import Grapher
 
 
 def _cfg(url='', **kwargs):
@@ -71,6 +71,9 @@ class Mlp(nn.Module):
 
 
 class Attention(nn.Module):
+    """
+    Base Attention for DeiT.
+    """
     def __init__(self, dim, num_heads=6, qkv_bias=False, qk_scale=None,
                  attn_drop=0., proj_drop=0., num_classes=20):
         super().__init__()
@@ -84,9 +87,6 @@ class Attention(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, x):
-        """
-
-        """
         B, N, C = x.shape  # Here N = #patches + #class-tokens
         qkv = self.qkv(x).reshape(B, N, 3, self.n_heads, C // self.n_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]
@@ -98,7 +98,7 @@ class Attention(nn.Module):
         attn_pat = attn_pat.softmax(dim=-1)
         attn_cls = attn_cls.softmax(dim=-1)
         attn = torch.cat((attn_cls, attn_pat), dim=-1)
-        # attn = attn.softmax(dim=-1)
+        # attn = attn.softmax(dim=-1) # change to vanilla Softmax
         #======================================================================#
         weights = attn
         attn = self.attn_drop(attn)
@@ -110,30 +110,6 @@ class Attention(nn.Module):
 
 
 class Block(nn.Module):
-    """
-    Transformer Block requires both patch tokens and class tokens
-    """
-    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
-                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, num_classes=20):
-        super().__init__()
-        self.norm1 = norm_layer(dim)
-        self.attn = Attention(
-            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale,
-            attn_drop=attn_drop, proj_drop=drop, num_classes=num_classes)
-
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        self.norm2 = norm_layer(dim)
-        mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
-
-    def forward(self, x):
-        o, weights = self.attn(self.norm1(x))
-        x = x + self.drop_path(o)
-        x = x + self.drop_path(self.mlp(self.norm2(x)))
-        return x, weights
-
-
-class MCTBlock(nn.Module):
     """
     Transformer Block requires both patch tokens and class tokens
     """
@@ -169,15 +145,19 @@ class PatchEmbed(nn.Module):
         self.num_patches = num_patches
         self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
 
-    def forward(self, x):
-        # B, C, H, W = x.shape
-        x = self.proj(x).flatten(2).transpose(1, 2)
-        return x
+    def forward(self, x, output_type='1d'):
+        x = self.proj(x) # B, C, H, W
+        if output_type == '2d':
+            return x
+        return x.flatten(2).transpose(1, 2)
 
 
 class MCTViT(nn.Module):
+    """
+    DeiT with Multi-class Tokens
+    """
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=384, depth=12,
-                 num_heads=6, mlp_ratio=4., qkv_bias=True, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
+                 num_heads=6, mlp_ratio=4, qkv_bias=True, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., norm_layer=partial(nn.LayerNorm, eps=1e-6), mask_type=None):
         super().__init__()
         self.num_classes = num_classes
@@ -195,7 +175,7 @@ class MCTViT(nn.Module):
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
-        
+
         blocks = [Block(
                 dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, 
                 qkv_bias=qkv_bias, qk_scale=qk_scale,
@@ -212,17 +192,17 @@ class MCTViT(nn.Module):
         trunc_normal_(self.pos_embed, std=.02)
         trunc_normal_(self.cls_token, std=.02)
         self.apply(self._init_weights)
-        
+
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=.02)
             if isinstance(m, nn.Linear) and m.bias is not None:
                 nn.init.constant_(m.bias, 0)
-                
+
         elif isinstance(m, nn.LayerNorm):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
-        
+
     # def interpolate_pos_encoding(self, x, w, h):
     #     npatch = x.shape[1] - 1
     #     N = self.pos_embed.shape[1] - 1
@@ -282,13 +262,3 @@ class MCTViT(nn.Module):
     #         return x
     #     else:
     #         return x, attn_weights
-
-
-# def _conv_filter(state_dict, patch_size=16):
-#     """ convert patch embedding weight from manual patchify + linear proj to conv"""
-#     out_dict = {}
-#     for k, v in state_dict.items():
-#         if 'patch_embed.proj.weight' in k:
-#             v = v.reshape((v.shape[0], 3, patch_size, patch_size))
-#         out_dict[k] = v
-#     return out_dict

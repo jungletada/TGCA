@@ -223,15 +223,26 @@ class VisionTransformer(nn.Module):
         self.num_classes = num_classes
         self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
-    def forward_features(self, x, n):
+    def forward_features(self, x, n=12, multi_outputs=False):
         B, nc, w, h = x.shape
         x = self.patch_embed(x)
         cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
         x = torch.cat((cls_tokens, x), dim=1)
         x = x + self.interpolate_pos_encoding(x, w, h)
         x = self.pos_drop(x)
+        
+        if multi_outputs:
+            multi_outs = []
+            attn_weights = []
+            for i, blk in enumerate(self.blocks):
+                x, weights = blk(x)
+                if i % 3 == 0:
+                    multi_outs.append(x)
+                if len(self.blocks) - i <= n:
+                    attn_weights.append(weights)
+            return {'multi_outputs':multi_outs, 'attn_weights':attn_weights}
+        
         attn_weights = []
-
         for i, blk in enumerate(self.blocks):
             x, weights = blk(x)
             if len(self.blocks) - i <= n:

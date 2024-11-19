@@ -14,7 +14,7 @@ from engine import calc_semantic_segmentation_confusion
 def run_eval_seg(args):
     dataset = VOCSegmentationLabelDataset(
         data_dir=args.voc12_root,
-        id_list_file='configs/voc12/train_id.txt')
+        id_list_file=args.infer_list)
     
     preds = []
     labels = []
@@ -52,6 +52,8 @@ if __name__ == '__main__':
     parser.add_argument("--chainer_eval_set", default="train", type=str)
     parser.add_argument('--voc12_root', default='datasets/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
     parser.add_argument('--seg_out_dir', default='pseudo_mask', help='pseudo_mask directory')
+    parser.add_argument('--infer_list', default='configs/voc12/train_id.txt', help='specify the train set for  evaluation')
+    
     args = parser.parse_args()
     
     args.seg_out_dir = osp.join(args.work_space, args.seg_out_dir)

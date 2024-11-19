@@ -1,54 +1,60 @@
 import os
+import cv2
+
 import torch
 import argparse
 import datetime
 import numpy as np
 import os.path as osp
 from tqdm import tqdm
+import PIL.Image as Image
+from torch import multiprocessing, cuda
 
+from misc import torchutils
 from data.coco.dataloader_psa import COCOSegmentationLabelDataset
 from data.voc12.dataloader_psa import VOCSegmentationLabelDataset
 from engine import calc_semantic_segmentation_confusion
+from data.crf_utils import crf_inference
 
 
 def logfile(args, msg):
-    with open(args.log_file, "a") as f:
+    with open(args.log_file, "a", encoding="utf-8") as f:
         f.write(msg + '\n')
     print(msg)
     
     
-def run(args, dataset):
+def run(dataset, args):
     num_images = len(dataset)
     chunk_size = 12000   # for memory efficient
-    split_indices = [(i, min(i + chunk_size, num_images)) 
+    split_indices = [(i, min(i + chunk_size, num_images))
                      for i in range(0, num_images, chunk_size)]
     
-    def eval_curve(threshold, begin_idx, end_idx):
+    def eval(threshold, begin_idx, end_idx):
         preds = []
         labels = []
         miou = 0.
         for i in tqdm(range(begin_idx, end_idx)):
             pack = dataset[i]
+            image = pack['image'] # H, W, 3
             filename = pack['name_id']
-            try:
-                cam_dict = np.load(osp.join(args.eval_cam_dir, filename + '.npy'), 
-                                allow_pickle=True).item()
-            except EOFError as e:
-                print(f'{e}, {filename}')
-                
+            cam_dict = np.load(osp.join(args.eval_cam_dir, filename + '.npy'), 
+                            allow_pickle=True).item()
             if len(tuple(cam_dict.keys())) == 0:
-                continue       
+                continue
             cams = np.stack(list(cam_dict.values()), axis=0) # (#val_cls, H, W)
-            cams = np.pad(cams, ((1, 0), (0, 0), (0, 0)), mode='constant', constant_values=threshold)
+            prob = np.pad(cams, ((1, 0), (0, 0), (0, 0)), mode='constant', constant_values=threshold)
+            # bg_score = np.power(1 - np.max(cams, axis=0, keepdims=True), 1.4)
+            # cams = np.concatenate((bg_score, cams), axis=0)
+            # prob = crf_inference(image, cams, t=10, scale_factor=1, labels=cams.shape[0])
             
+            cls_labels = np.argmax(prob, axis=0)
             keys = (torch.stack(tuple(cam_dict.keys())) + 1).numpy()
             keys = np.pad(keys, (1, 0), mode='constant')
-            
-            cls_labels = np.argmax(cams, axis=0)
             cls_labels = keys[cls_labels].astype(np.uint8)
 
             preds.append(cls_labels.copy())
             labels.append(pack['label'])
+
         confusion = calc_semantic_segmentation_confusion(preds, labels)
 
         gtj = confusion.sum(axis=1)
@@ -57,8 +63,7 @@ def run(args, dataset):
         denominator = gtj + resj - gtjresj
         iou = gtjresj / denominator
         miou = np.nanmean(iou)
-        # time = datetime.datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
-        # print("{} Chunk for threshold: {:.2f} mIoU: {:.4f}".format(time, threshold, miou))
+        # print("Chunk for threshold: {:.2f} mIoU: {:.4f}".format(threshold, miou))
         # print('among_pred_fg_bg', float((resj[1:].sum()-confusion[1:,1:].sum())/(resj[1:].sum())))
         return miou
     
@@ -68,34 +73,71 @@ def run(args, dataset):
         for t in range(args.low_thres, args.high_thres):
             all_slices = []
             for idx_pair in split_indices:
-                miou = eval_curve(
+                miou = eval(
                     t / 100., 
                     begin_idx=idx_pair[0], 
                     end_idx=idx_pair[1])
                 all_slices.append(miou)
             mean_value = np.mean(all_slices)
-            logfile(args, "threshold={:.2f}; mean IoU for all images: {:.2f}%".format(
-                t / 100., mean_value * 100.))
+            logfile(args, f"threshold={t / 100:.2f}; mIoU for all images: {mean_value * 100:.2f}%")
             if mean_value > best_res: 
                 best_res = mean_value
                 best_threshold = t / 100.
             else:
                 break    
-        logfile(args, "Best threshold: {}, best miou: {:.2f}%, num_imgs: {}".format(
-            best_threshold, best_res * 100., num_images))
+        logfile(args, 
+                f"Best threshold: {best_threshold}, best mIoU: {best_res * 100:.2f}%, num_imgs: {num_images}")
         
     else:
         all_slices = []
         for idx_pair in split_indices:
-            miou = eval_curve(
-                args.threshold, 
-                begin_idx=idx_pair[0], 
+            miou = eval(
+                args.threshold,
+                begin_idx=idx_pair[0],
                 end_idx=idx_pair[1])
             all_slices.append(miou)
         mean_value = np.mean(all_slices)
-        logfile(args, "mean IoU for all images: {:.2f}%".format(mean_value * 100))
+        logfile(args, "mIoU for all images: {:.2f}%".format(mean_value * 100))
 
 
+def make_cam_crf(process_id, dataset, args):
+    databin = dataset[process_id]
+    num_images = len(databin)
+    for i in tqdm(range(num_images)):
+        pack = databin[i]
+        image = pack['image'] # H, W, 3
+        filename = pack['name_id']
+
+        try:
+            cam_dict = np.load(osp.join(args.eval_cam_dir, filename + '.npy'), 
+                            allow_pickle=True).item()
+        except EOFError as e:
+            print(f'{e}, {filename}')
+            
+        if len(tuple(cam_dict.keys())) == 0:
+            cam = np.zeros(image.shape[:2], np.uint8)
+            mask = Image.fromarray(cam, mode='L')
+            mask.save(osp.join(args.crf_cam_dir, filename + '.png'))
+            continue
+            
+        cams = np.stack(list(cam_dict.values()), axis=0) # (#val_cls, H, W)
+        prob = np.pad(
+            cams, 
+            ((1, 0), (0, 0), (0, 0)), 
+            mode='constant', 
+            constant_values=args.threshold)
+        # bg_score = np.power(1 - np.max(cams, axis=0, keepdims=True), args.alpha)
+        # cams = np.concatenate((bg_score, cams), axis=0)
+        # prob = crf_inference(image, cams, labels=cams.shape[0])
+        
+        cls_labels = np.argmax(prob, axis=0)
+        keys = (torch.stack(tuple(cam_dict.keys())) + 1).numpy()
+        keys = np.pad(keys, (1, 0), mode='constant')
+        cls_labels = keys[cls_labels].astype(np.uint8)
+        mask = Image.fromarray(cls_labels, mode='L')
+        mask.save(osp.join(args.crf_cam_dir, filename + '.png'))
+
+     
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Evaluate CAMs', add_help=False)
     parser.add_argument('--dataset', default='', type=str, help='name of dataset')
@@ -111,17 +153,21 @@ if __name__ == '__main__':
                         help='log dir to save the results')
     parser.add_argument('--curve_threshold', action='store_true', help='whether to use a range of thresholds')
     parser.add_argument('--threshold', default=0.45, type=float, help='threshold for evaluation as background')
+    parser.add_argument('--alpha', default=1.4, type=float, help='use alpha to set background')
+    parser.add_argument("--crf_cam_dir", default="crf_mask", type=str, help="crf mask path")
     args = parser.parse_args()
     #----------------------------------------------------------------------------------#
     args.eval_cam_dir = osp.join(args.work_space, args.eval_cam_dir)
+    args.crf_cam_dir = osp.join(args.work_space, args.crf_cam_dir)
     args.log_dir = osp.join(args.work_space, args.log_dir)
     os.makedirs(args.log_dir, exist_ok=True)
-
+    os.makedirs(args.crf_cam_dir, exist_ok=True)
+    
     if args.dataset == 'VOC12':
-        dataset = VOCSegmentationLabelDataset( 
+        dataset = VOCSegmentationLabelDataset(
             data_dir=args.voc12_root,
             id_list_file=args.train_list)
-        args.low_thres, args.high_thres = 40, 55
+        args.low_thres, args.high_thres = 43, 55
 
     elif args.dataset == 'COCO':
         dataset = COCOSegmentationLabelDataset(
@@ -129,10 +175,27 @@ if __name__ == '__main__':
             id_list_file=args.train_list,
             annotation_dir='MaskSets')
         args.low_thres, args.high_thres = 43, 50
-
+    else:
+        raise NotImplementedError
+    
     time = datetime.datetime.now().strftime("%Y%m%d-%H%M") 
     args.log_file = osp.join(args.log_dir, f"eval_cam_{time}.log")
     with open(args.log_file, "w", encoding="utf-8") as f:
         f.write(f"{time}: Evaluation class activation map for {args.dataset}\n")
         
     run(args=args, dataset=dataset)
+    
+    # nprocs = 8
+    # dataset = torchutils.split_dataset(dataset, nprocs)
+    
+    # print('[ ', end='')
+
+    # multiprocessing.spawn(
+    #     make_cam_crf,
+    #     nprocs=nprocs,
+    #     args=(dataset, args),
+    #     join=True)
+        
+    # print(']')
+
+    # torch.cuda.empty_cache()

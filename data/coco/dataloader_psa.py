@@ -9,6 +9,7 @@ from torch.utils.data import Dataset
 sys.path.append(os.path.dirname(__file__) + os.sep + '../')
 from data.crf_utils import refine_crf_cam
 
+
 TRAIN_FOLDER_NAME = "train2014"
 VAL_FOLDER_NAME = "val2014"
 ANNOT_FOLDER_NAME = "Annotations"

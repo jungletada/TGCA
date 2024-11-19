@@ -21,17 +21,17 @@ from torch.utils.data.distributed import DistributedSampler
 import utils
 from engine import evaluate
 from engine import train_one_epoch_mctformerplus, \
-    train_one_epoch_proposed, train_one_epoch_basic
+    train_one_epoch_proposed, train_one_epoch_basic, train_one_epoch_next
 from datasets_cam import build_dataset
-from utils import str2bool
 
-import net.msgformer
 import net.srmct
-import net.simplevit
+import net.mctnext
+import net.msgformer
+import net.mctformer_plus
 import warnings
 warnings.filterwarnings("ignore")
-        
-        
+
+
 def get_args_parser():
     parser = argparse.ArgumentParser('DeiT training and evaluation script', add_help=False)
     parser.add_argument('--batch_per_gpu', default=16, type=int)
@@ -53,7 +53,7 @@ def get_args_parser():
                         help='Dropout rate (default: 0.)')
     parser.add_argument('--drop-path', type=float, default=0.1, metavar='PCT',
                         help='Drop path rate (default: 0.1)')
-    parser.add_argument('--cls_weight', type=float, default=3.0,
+    parser.add_argument('--cls_weight', type=float, default=1.0,
                         help='weight for class output loss')
 
     # Optimizer parameters
@@ -171,17 +171,18 @@ def init_distributed_mode(args):
     args.dist_url = 'env://'
     
     args.dist_backend = 'nccl'
-    print('| distributed init (rank {}): {}'.format(
-        args.rank, args.dist_url), flush=True)
+    print(f'| distributed init (rank {args.rank}): {args.dist_url}', flush=True)
     dist.init_process_group(
         backend=args.dist_backend,
         init_method=args.dist_url,
         world_size=args.world_size,
         rank=args.rank)
     dist.barrier()
-    
-    
+
+   
 def load_model_weight(args, model):
+    
+    nc = args.nb_classes
     model_npatches = model.patch_embed.num_patches
     if args.finetune.startswith('https'):
         checkpoint = torch.hub.load_state_dict_from_url(
@@ -191,8 +192,10 @@ def load_model_weight(args, model):
         checkpoint = torch.load(args.finetune, map_location='cpu')
         num_extra_tokens = model.pos_embed.shape[-2] - model_npatches
         
-    try: checkpoint_model = checkpoint['model']
-    except: checkpoint_model = checkpoint
+    try: 
+        checkpoint_model = checkpoint['model']
+    except KeyError:  # Specify the exception type
+        checkpoint_model = checkpoint
         
     state_dict = model.state_dict()
     for k in ['head.weight', 'head.bias', 'head_dist.weight', 'head_dist.bias']:
@@ -206,7 +209,7 @@ def load_model_weight(args, model):
 
     original_size = int((ckpt_pos_embed.shape[-2] - num_extra_tokens) ** 0.5)
     if args.finetune.startswith('https'):
-        extra_tokens = ckpt_pos_embed[:, :num_extra_tokens].repeat(1, args.nb_classes, 1)
+        extra_tokens = ckpt_pos_embed[:, :num_extra_tokens].repeat(1, nc, 1)
     else:
         extra_tokens = ckpt_pos_embed[:, :num_extra_tokens]
     pos_tokens = ckpt_pos_embed[:, num_extra_tokens:]
@@ -224,7 +227,7 @@ def load_model_weight(args, model):
 
     if args.finetune.startswith('https'):
         cls_token_checkpoint = checkpoint_model['cls_token']
-        new_cls_token = cls_token_checkpoint.repeat(1, args.nb_classes, 1)
+        new_cls_token = cls_token_checkpoint.repeat(1, nc, 1)
         checkpoint_model['cls_token'] = new_cls_token
     
     return checkpoint_model
@@ -236,9 +239,9 @@ def ddp_print(logger, log_msg, rank=0):
 
      
 def main(args):
-    session_name = 'Train-CAM'
+    session_name = 'Training for Classification'
     args = parser.parse_args()
-    init_distributed_mode(args)   
+    init_distributed_mode(args)
     device = torch.device(args.device)
     torch.cuda.set_device(args.local_rank)
     same_seeds(args.seed)
@@ -256,9 +259,9 @@ def main(args):
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=True)
-    
+
     sampler_val = DistributedSampler(dataset_val)
-    
+
     data_loader_val = torch.utils.data.DataLoader(
         dataset_val, 
         sampler=sampler_val,
@@ -310,33 +313,36 @@ def main(args):
     
     if "mctformerplus" in args.model:
         train_one_epoch = train_one_epoch_mctformerplus
-    elif "msgformer" in args.model:
+    elif "msgformer"  in args.model:
         train_one_epoch = train_one_epoch_proposed
+    elif "mctnext" in args.model:
+        train_one_epoch = train_one_epoch_next
     else:
         train_one_epoch = train_one_epoch_basic
-        
+    
+    torch.autograd.set_detect_anomaly(True)
+    
     for epoch in range(args.start_epoch, args.epochs):
         data_loader_train.sampler.set_epoch(epoch)
 
         train_stats = train_one_epoch(
             args=args,
-            model=model, 
+            model=model,
             data_loader=data_loader_train,
-            optimizer=optimizer, 
-            device=device, 
-            epoch=epoch, 
+            optimizer=optimizer,
+            device=device,
+            epoch=epoch,
             loss_scaler=loss_scaler,
-            max_norm=args.clip_grad,
-            rank=dist.get_rank())
+            max_norm=args.clip_grad)
 
         lr_scheduler.step(epoch)
 
         test_stats = evaluate(
-            model=model, 
-            data_loader=data_loader_val, 
+            model=model,
+            data_loader=data_loader_val,
             device=device)
     
-        ddp_print(logger, f"mAP of the network on the {len(dataset_val)} test images: {test_stats['mAP']*100:.1f}%", 
+        ddp_print(logger, f"mAP of the network on the {len(dataset_val)} test images: {test_stats['mAP']*100:.1f}%",
                   dist.get_rank())
         if test_stats["mAP"] > max_accuracy:
             torch.save({'model': model.module.state_dict()}, 
@@ -355,7 +361,7 @@ def main(args):
     torch.save({'model': model.module.state_dict()}, os.path.join(args.work_space, f'{args.model}_last.pth'))
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    ddp_print(logger, 'Training time {}'.format(total_time_str), dist.get_rank())
+    ddp_print(logger, f'Training time {total_time_str}', dist.get_rank())
 
 
 if __name__ == '__main__':

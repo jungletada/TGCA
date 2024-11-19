@@ -352,7 +352,7 @@ class VOCSegmentationLabelDataset(Dataset):
         label_path = osp.join(self.data_dir, "SegmentationClass", name_id + '.png')
         
         image = cv2.imread(image_path, cv2.IMREAD_COLOR).astype(np.float32)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.uint8)
         label = np.asarray(Image.open(label_path), dtype=np.int32)
         label[label==255] = -1
         return {"name_id": name_id, "image": image, "label": label}

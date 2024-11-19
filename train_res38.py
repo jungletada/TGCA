@@ -22,7 +22,6 @@ import utils
 from engine import compute_mAP
 from utils import str2bool
 from datasets_cam import build_dataset
-import net.simplevit
 
 import warnings
 warnings.filterwarnings("ignore")
