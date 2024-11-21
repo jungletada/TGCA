@@ -162,19 +162,19 @@ if __name__ == '__main__':
     args.log_dir = osp.join(args.work_space, args.log_dir)
     os.makedirs(args.log_dir, exist_ok=True)
     os.makedirs(args.crf_cam_dir, exist_ok=True)
-    
+
     if args.dataset == 'VOC12':
         dataset = VOCSegmentationLabelDataset(
             data_dir=args.voc12_root,
             id_list_file=args.train_list)
-        args.low_thres, args.high_thres = 43, 55
+        args.low_thres, args.high_thres = 40, 55
 
     elif args.dataset == 'COCO':
         dataset = COCOSegmentationLabelDataset(
             data_dir=args.mscoco_root,
             id_list_file=args.train_list,
             annotation_dir='MaskSets')
-        args.low_thres, args.high_thres = 43, 50
+        args.low_thres, args.high_thres = 40, 55
     else:
         raise NotImplementedError
     

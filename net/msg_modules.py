@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from timm.models.layers import DropPath
 from net.gcn_lib import Grapher
-from net.wt_modules import DSWTConv2d
+from net.modules_plug.cbam import ChannelAttention, SpatialAttention
 
 
 def nlc2nchw(x, d_size):
@@ -146,7 +146,7 @@ class SpatialPriorModule(nn.Module):
     This module applies a series of convolutional layers to downsample the input image.
     """
     def __init__(self, 
-                 inplanes=64, 
+                 inplanes=96, 
                  spt_strides=[4, 2, 2, 1],
                  embed_dims=[384, 384, 384, 384],
                  norm_layer=nn.BatchNorm2d,
@@ -233,13 +233,15 @@ class SpatialPriorGNNTest(nn.Module):
             num_heads=6,
             knn=[18, 15, 12, 9],
             dilation=[4, 3, 2, 1],
-            spt_strides=[4, 2, 2, 1],
+            spt_strides=[4, 1, 2, 2],
             norm_layer=nn.BatchNorm2d,
             act_layer=nn.GELU):
+        
         super().__init__()
         assert inplanes % num_heads == 0, f"{inplanes} should be divided by {num_heads}"
+        conv_type = 'mr'
         self.stem = nn.Sequential(*[ # downsample by 4
-            nn.Conv2d(3, inplanes, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.Conv2d(3, inplanes, kernel_size=3, stride=2, padding=1),
             norm_layer(inplanes),
             act_layer(),
             nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
@@ -247,19 +249,15 @@ class SpatialPriorGNNTest(nn.Module):
                        
         if spt_strides[0] == 4:
             self.conv2 = nn.Sequential(*[
-                # nn.Conv2d(inplanes, 2 * inplanes, kernel_size=3,
-                #           stride=2, padding=1, bias=False),
-                DSWTConv2d(inplanes, 2 * inplanes, kernel_size=3),
+                nn.Conv2d(inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1),
                 norm_layer(2 * inplanes),
                 act_layer(),
-                nn.MaxPool2d(kernel_size=4, stride=4, padding=0)
+                nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
             ])
             
         elif spt_strides[0] == 2:
             self.conv2 = nn.Sequential(*[
-                # nn.Conv2d(inplanes, 2 * inplanes, kernel_size=3,
-                #           stride=2, padding=1, bias=False),
-                DSWTConv2d(inplanes, 2 * inplanes, kernel_size=3),
+                nn.Conv2d(inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1),
                 norm_layer(2 * inplanes),
                 act_layer(),
             ])
@@ -267,69 +265,49 @@ class SpatialPriorGNNTest(nn.Module):
         else: raise NotImplementedError
 
         self.gnn_2 = Grapher(
-            in_channels=2 * inplanes, 
-            kernel_size=knn[0], 
+            in_channels=2 * inplanes,
+            kernel_size=knn[0],
             dilation=dilation[0],
-            conv='mr', 
-            act='gelu', 
-            groups=num_heads,
-            norm='instance', 
-            bias=True, 
-            stochastic=False,
-            epsilon=0.2, 
-            r=1, 
-            drop_path=0.)
+            conv=conv_type,
+            groups=num_heads)
         
         self.conv3 = nn.Sequential(*[
-            # nn.Conv2d(2 * inplanes, 4 * inplanes, kernel_size=3, 
-            #           stride=spt_strides[1], padding=1, bias=False),
-            DSWTConv2d(2 * inplanes, 4 * inplanes, kernel_size=3),
+            nn.Conv2d(2 * inplanes, 4 * inplanes, kernel_size=3, stride=spt_strides[1], padding=1),
             norm_layer(4 * inplanes),
             act_layer()])
 
         self.gnn_3 = Grapher(
-            in_channels=4 * inplanes, kernel_size=knn[1], dilation=dilation[1], 
-            conv='mr', act='gelu', groups=num_heads,
-            norm='instance', bias=True, stochastic=False,
-            epsilon=0.2, r=1, drop_path=0.)
+            in_channels=4 * inplanes,
+            kernel_size=knn[1],
+            dilation=dilation[1],
+            conv=conv_type,
+            groups=num_heads)
         
         self.conv4 = nn.Sequential(*[
-            # nn.Conv2d(4 * inplanes, 4 * inplanes, kernel_size=3, 
-            #           stride=spt_strides[2], padding=1, bias=False),
-            DSWTConv2d(4 * inplanes, 4 * inplanes, kernel_size=3),
+            nn.Conv2d(4 * inplanes, 4 * inplanes, kernel_size=3, stride=spt_strides[2], padding=1),
             norm_layer(4 * inplanes),
             act_layer(),
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         ])
 
         self.gnn_4 = Grapher(
-            in_channels=4 * inplanes, kernel_size=knn[2], dilation=dilation[2], 
-            conv='mr', act='gelu', groups=num_heads,
-            norm='instance', bias=True, stochastic=False, 
-            epsilon=0.2, r=1, drop_path=0.)
+            in_channels=4 * inplanes,
+            kernel_size=knn[2],
+            dilation=dilation[2],
+            conv=conv_type,
+            groups=num_heads)
         
         self.conv5 = nn.Sequential(*[
-            # nn.Conv2d(4 * inplanes, 8 * inplanes, kernel_size=3, 
-            #           stride=spt_strides[3], padding=1, bias=False),
-            DSWTConv2d(4 * inplanes, 8 * inplanes, kernel_size=3),
+            nn.Conv2d(4 * inplanes, 8 * inplanes, kernel_size=3, stride=spt_strides[3], padding=1),
             norm_layer(8 * inplanes),
             act_layer(),
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         ])
         
         self.gnn_5 = Grapher(
-            in_channels=8 * inplanes, 
-            kernel_size=knn[3], 
-            dilation=dilation[3], 
-            conv='mr', 
-            act='gelu', 
-            groups=num_heads,
-            norm='instance', 
-            bias=True, 
-            stochastic=False, 
-            epsilon=0.2, 
-            r=1, 
-            drop_path=0.)
+            in_channels=8 * inplanes,
+            kernel_size=knn[3],
+            dilation=dilation[3],
+            conv=conv_type,
+            groups=num_heads)
         
         self.fc2 = nn.Conv2d(2 * inplanes, embed_dim, kernel_size=1, stride=1, padding=0, bias=True)
         self.fc3 = nn.Conv2d(4 * inplanes, embed_dim, kernel_size=1, stride=1, padding=0, bias=True)
@@ -356,6 +334,8 @@ class SpatialPriorGNNTest(nn.Module):
         c4 = self.fc4(c4) # 32s
         c5 = self.fc5(c5) # 64s
 
+        # for i, t in enumerate([c2, c3, c4, c5]):
+        #     print(i, t.shape)
         return [c2, c3, c4, c5]
     
 
@@ -370,6 +350,7 @@ class SpatialPriorGNN(nn.Module):
                  norm_layer=nn.BatchNorm2d,
                  act_layer=nn.GELU):
         super().__init__()
+        conv_type = 'mr'
         assert inplanes % num_heads == 0, f"{inplanes} should be divided by {num_heads}"
         self.stem = nn.Sequential(*[ # downsample by 4
             nn.Conv2d(3, inplanes, kernel_size=3, stride=2, padding=1, bias=False),
@@ -394,8 +375,11 @@ class SpatialPriorGNN(nn.Module):
         else: raise NotImplementedError
 
         self.gnn_2 = Grapher(
-            in_channels=2 * inplanes, kernel_size=knn[0], dilation=dilation[0], conv='mr', act='gelu', groups=num_heads,
-            norm='instance', bias=True, stochastic=False, epsilon=0.2, r=1, drop_path=0.)
+            in_channels=2 * inplanes, 
+            kernel_size=knn[0], 
+            dilation=dilation[0], 
+            conv=conv_type,
+            groups=num_heads)
         
         self.conv3 = nn.Sequential(*[
             nn.Conv2d(2 * inplanes, 4 * inplanes, kernel_size=3, stride=spt_strides[1], padding=1, bias=False),
@@ -403,8 +387,11 @@ class SpatialPriorGNN(nn.Module):
             act_layer()])
 
         self.gnn_3 = Grapher(
-            in_channels=4 * inplanes, kernel_size=knn[1], dilation=dilation[1], conv='mr', act='gelu', groups=num_heads,
-            norm='instance', bias=True, stochastic=False, epsilon=0.2, r=1, drop_path=0.)
+            in_channels=4 * inplanes, 
+            kernel_size=knn[1], 
+            dilation=dilation[1], 
+            conv=conv_type, 
+            groups=num_heads)
         
         self.conv4 = nn.Sequential(*[
             nn.Conv2d(4 * inplanes, 4 * inplanes, kernel_size=3, stride=spt_strides[2], padding=1, bias=False),
@@ -413,8 +400,11 @@ class SpatialPriorGNN(nn.Module):
         ])
 
         self.gnn_4 = Grapher(
-            in_channels=4 * inplanes, kernel_size=knn[2], dilation=dilation[2], conv='mr', act='gelu', groups=num_heads,
-            norm='instance', bias=True, stochastic=False, epsilon=0.2, r=1, drop_path=0.)
+            in_channels=4 * inplanes, 
+            kernel_size=knn[2], 
+            dilation=dilation[2], 
+            conv=conv_type, 
+            groups=num_heads)
         
         self.conv5 = nn.Sequential(*[
             nn.Conv2d(4 * inplanes, 8 * inplanes, kernel_size=3, stride=spt_strides[3], padding=1, bias=False),
@@ -423,8 +413,11 @@ class SpatialPriorGNN(nn.Module):
         ])
         
         self.gnn_5 = Grapher(
-            in_channels=8 * inplanes, kernel_size=knn[3], dilation=dilation[3], conv='mr', act='gelu', groups=num_heads,
-            norm='instance', bias=True, stochastic=False, epsilon=0.2, r=1, drop_path=0.)
+            in_channels=8 * inplanes, 
+            kernel_size=knn[3], 
+            dilation=dilation[3], 
+            conv=conv_type,
+            groups=num_heads)
         
         # self.fc1 = nn.Conv2d(inplanes, embed_dims[0], kernel_size=1, stride=1, padding=0, bias=True)
         self.fc2 = nn.Conv2d(2 * inplanes, embed_dim, kernel_size=1, stride=1, padding=0, bias=True)
@@ -527,22 +520,28 @@ class MLP(nn.Module):
         return x
 
 
-class SimpleMLP(nn.Module):
-    def __init__(self, in_features, act_layer=nn.GELU, out_features=None, drop=0.):
+class FeatureFusion(nn.Module):
+    def __init__(self, in_features, out_features):
         super().__init__()
-        out_features = out_features or in_features
-        self.fc1 = nn.Linear(in_features, out_features)
-        self.act = act_layer()
-        self.drop = nn.Dropout(drop)
+        self.conv_module = nn.Sequential(
+            nn.Conv2d(in_features, out_features, 1),
+            nn.BatchNorm2d(out_features),
+            nn.GELU())
+        self.ca = ChannelAttention(out_features)
+        self.sa = SpatialAttention()
+        
 
     def forward(self, x):
-        x = self.fc1(x)
-        x = self.act(x)
-        x = self.drop(x)
-        return x
+        x = self.conv_module(x)
+        z = x.clone()
+        channel = self.ca(x)  # (3, 64, 1, 1)
+        x = channel * x       # (3, 64, 56, 56)
+        spatial = self.sa(x)  # (3, 1, 56, 56)
+        x = spatial * x       # (3, 64, 56, 56)
+        return x + z
 
 
-class SemanticAttnGNNModule(nn.Module):
+class SemanticAttnModule(nn.Module):
     """
     Semantic Cross-Attention for Feature fusion
     """
@@ -558,8 +557,6 @@ class SemanticAttnGNNModule(nn.Module):
             mask_ratio=0.,
             qkv_bias=True,
             qk_scale=None,
-            kernel_dict={'backbone':9, 'spatial':9}, 
-            dilation_dict={'backbone':1, 'spatial':1},
             norm_layer=nn.LayerNorm,):
         super().__init__()
         self.norm1 = norm_layer(query_dim)

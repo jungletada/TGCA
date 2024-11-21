@@ -144,16 +144,18 @@ class MCTformerPlusCam(MCTformerPlus):
             n, c, h, w])
         return cls2pat
         
-    def forward(self, x, return_attn=False):
+    def forward(self, x, return_attn=False, return_token=False):
         w, h = x.shape[2:]
-        _, x_patch, attn_weights, _ = self.forward_features(x)
+        x_cls_last, x_patch, attn_weights, class_embeddings = self.forward_features(x)
         
         # 12 * B * H * N * N -> 12 * B * N * N
         attn_weights = torch.mean(torch.stack(attn_weights), dim=2)
         
         if return_attn:
             return attn_weights
-        
+        if return_token:
+            return class_embeddings
+
         n, p, c = x_patch.shape
         if w != h:
             w0 = w // self.patch_embed.patch_size[0]

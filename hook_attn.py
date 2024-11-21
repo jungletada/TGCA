@@ -108,13 +108,21 @@ def draw_heat_map(attn_maps, args, img_name, n_dim=2):
     
     else:
         raise NotImplementedError
-    
+
 
 def calculate_cosine_similarity(outputs_block):
+    """Calculate the cosine similarity for the outputs of each layer.
+
+    Args:
+        outputs_block (list): A list of outputs from the model layers.
+
+    Returns:
+        list: A list of mean cosine similarities for each layer.
+    """
     cosine_similarities = []
     for layer_output in outputs_block:
         # pair-wise comparison: (N, C)
-        patch_tokens = layer_output[0]
+        patch_tokens = layer_output[0] 
         # Normalize the vectors to unit vectors to calculate cosine similarity
         patch_tokens = F.normalize(patch_tokens, p=2, dim=1, eps=1e-8)  # (N, C)
         # Compute cosine similarity for all pairs by matrix multiplication
@@ -123,11 +131,32 @@ def calculate_cosine_similarity(outputs_block):
         # Append to the list for this layer
         all_pairs = cosine_sim.triu(diagonal=0)
         cosine_similarities.append(all_pairs.mean())
-        
+
     return cosine_similarities
 
 
-def _work(model, dataset, args):
+def calculate_loss_class_tokens(outputs_block, label):
+    """Calculate the loss for class tokens based on the model outputs and labels.
+
+    Args:
+        outputs_block (list): A list of outputs from the model layers.
+        label (Tensor): The ground truth labels for the inputs.
+    """
+    # loss = []
+    # for layer, layer_output in enumerate(outputs_block):
+    #     x_cls = layer_output[0] # B, K, C
+    #     cls_logits = x_cls.mean(dim=-1)
+    #     loss_per_layer = F.multilabel_soft_margin_loss(
+    #         cls_logits, label)
+    #     loss.append(loss_per_layer)
+    # return loss
+    final_out = outputs_block[-1][0]
+    cls_logits = final_out.mean(dim=-1)
+    print(cls_logits)
+    print(label)
+
+
+def _work_tokens(model, dataset, args):
     data_loader = DataLoader(
         dataset,
         shuffle=False,
@@ -140,14 +169,18 @@ def _work(model, dataset, args):
         # Capture the output `x` (which is the `output` argument in the hook function)
         outputs_block.append(output[0])  # Assuming `output[0]` is `x` and `output[1]` is `weights_j`
 
-    # Register hooks to each block in self.blocks
-    for i in range(model.stages):
-        for j in range(model.stage_indices[i], model.stage_indices[i+1]):
-            model.blocks[j].register_forward_hook(hook_fn)
-            
-    column_names = list(range(1, 12 + 1))
+    # # Register hooks to each block in self.blocks for msgformer
+    # for i in range(model.stages):
+    #     for j in range(model.stage_indices[i], model.stage_indices[i+1]):
+    #         model.blocks[j].register_forward_hook(hook_fn)
     
-    with open("output.csv", mode="w", newline="", encoding="utf-8") as file:
+    # Register hooks to each block in self.blocks for msgformer
+    for i in range(model.n_layers):
+        model.blocks[i].register_forward_hook(hook_fn)
+    
+    column_names = list(range(1, model.n_layers + 1))
+
+    with open("output_token.csv", mode="w", newline="", encoding="utf-8") as file:
         
         writer = csv.writer(file)
         writer.writerow(column_names)
@@ -162,13 +195,14 @@ def _work(model, dataset, args):
                 
                 valid_cat = torch.nonzero(label)[:, 0] # get validate class->[#val_cls]
                 outputs = [model(img[0].cuda(non_blocking=True),
-                                    return_attn=True) # img[0]->[(2, 3, H', W')]
+                                    return_attn=False,
+                                    return_token=True) # img[0]->[(2, 3, H', W')]
                         for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
-                
-                cosine_similarities = calculate_cosine_similarity(outputs_block)
-                row_values = [item.item() for item in cosine_similarities]  # 将每个 tensor 转换为数值
-                writer.writerow(row_values)
-                # attn_maps = outputs[0][:, 0, :, :].cpu().numpy()    
+                label = label.to(outputs[0][0].device)
+                loss = calculate_loss_class_tokens(outputs[0], label)
+                # rounded_values = [round(item.item(), 3) for item in loss]
+                # writer.writerow(rounded_values)
+                # attn_maps = outputs[0][:, 0, :, :].cpu().numpy()
                 # attn_maps = np.sum(attn_maps, axis=0) # sum over all layer
                 # draw_heat_map(attn_maps, args, img_name, n_dim=3)
                 # print(attn_maps.shape, size)
@@ -200,7 +234,7 @@ def _work_attn(model, dataset, args):
                 img_name = pack['name'][0] # Img_id->str
                 label = pack['label'][0]   # image-level label->Torch.Tensor [1]
                 size = pack['size']        # image size->Torch.tensor [2]
-        
+
                 outputs = [model(img[0].cuda(non_blocking=True), return_attn=True) # img[0]->[(2, 3, H', W')]
                                 for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
                 attn_maps = outputs[0][:, 0, :, :] # L x (Cls+Np) x (Cls+Np)
@@ -211,11 +245,7 @@ def _work_attn(model, dataset, args):
                 sum_pat = x2pat.sum(dim=-1).mean(dim=-1).cpu().numpy()
                 all_cls_attn.append(sum_cls)
                 all_pat_attn.append(sum_pat)
-                # writer.writerow(sum_cls)
-                # attn_maps = np.sum(attn_maps, axis=0) # sum over all layer
-                # draw_heat_map(attn_maps, args, img_name, n_dim=3)
-                # print(attn_maps.shape, size)
-                # Generate heatmaps for each layer's attention map
+
                 if iter_ % (len(dataset) // 20) == 0:
                     print("%d" % ((5*iter_+1) // (len(dataset) // 20)), end='')
 
@@ -252,10 +282,14 @@ if __name__ == '__main__':
     model.load_state_dict(model_dict)
     model.eval()
     
-    print(f'Using {args.checkpoint} for making cams.')
+    print(f'Using {args.checkpoint} for analysis.')
     
+    # print('[ ', end='')
+    # _work_attn(model, dataset, args)
+    # print(']')
+
     print('[ ', end='')
-    _work_attn(model, dataset, args)
+    _work_tokens(model, dataset, args)
     print(']')
 
     torch.cuda.empty_cache()

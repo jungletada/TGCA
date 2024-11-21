@@ -148,8 +148,8 @@ class Grapher(nn.Module):
     """
     Grapher module with graph convolution and fc layers
     """
-    def __init__(self, in_channels, kernel_size=9, dilation=1, conv='edge', act='relu', 
-                 groups=6, norm=None,bias=True, stochastic=False, epsilon=0.0, r=1, n=784, 
+    def __init__(self, in_channels, kernel_size=9, dilation=1, conv='mr', act='gelu', 
+                 groups=6, norm='instance', bias=True, stochastic=False, epsilon=0.2, r=1, n=784, 
                  drop_path=0.0, relative_pos=False):
         super(Grapher, self).__init__()
         self.channels = in_channels

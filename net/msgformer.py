@@ -7,10 +7,9 @@ import torch.nn.functional as F
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
 
-from net.msg_modules import DownConv, SemanticAttnGNNModule
-from net.msg_modules import SpatialPriorGNNTest
+from net.msg_modules import DownConv, SemanticAttnModule
+from net.msg_modules import SpatialPriorGNN
 from net.mct_vit import MCTViT, _cfg
-
 
 __all__ = ['msgformer']
 
@@ -21,7 +20,7 @@ class MSGFormer(MCTViT):
         """
         Args:
             *args: Variable length argument list.
-            decay_parameter (float): Decay parameter for the model.
+            decay_parameter (float): Decay parameter for the GWRP.
             input_size (int): Size of the input image.
             **kwargs: Arbitrary keyword arguments.
         """
@@ -32,32 +31,21 @@ class MSGFormer(MCTViT):
         self.input_size = input_size
         img_size = to_2tuple(input_size)
         patch_size = to_2tuple(self.patch_embed.patch_size)
-        self.Hp, self.Wp = math.ceil(img_size[0] / patch_size[0]), math.ceil(img_size[1] / patch_size[1])
+        self.Hp = math.ceil(img_size[0] / patch_size[0])
+        self.Wp = math.ceil(img_size[1] / patch_size[1])
         self.num_patches = self.Hp * self.Wp
         self.spatial_dims = [self.embed_dim] * self.stages
-   
+
         self.dilations = [1, 2, 3, 4]
         self.num_knn = [18, 15, 12, 9]
-       
-        assert input_size >= 224, f"Input size {input_size} is too small."
-        # if input_size < 448:
-        #     self.num_knn_spatial = [10, 8, 6, 4]
-        #     self.spatial_scales = [8, 16, 32, 64]
-        # else:
-        self.num_knn_spatial = [8, 6, 4, 2]
         self.spatial_scales = [16, 16, 32, 64]
-        self.dilations_spatial = [2, 2, 1, 1]
 
         self.spatial_strides = [
             self.spatial_scales[i+1] // self.spatial_scales[i]
             for i in range(len(self.spatial_scales)-1)]
         
-        # self.spatial_prior = SpatialPriorModule(
-        #     inplanes=64,
-        #     embed_dims=self.spatial_dims,
-        #     spt_strides=[self.spatial_scales[0]//4] + self.spatial_strides)
         spt_strides=[self.spatial_scales[0]//4] + self.spatial_strides
-        self.spatial_prior = SpatialPriorGNNTest(
+        self.spatial_prior = SpatialPriorGNN(
             inplanes=96,
             embed_dim=self.embed_dim,
             num_heads=self.num_heads,
@@ -85,7 +73,7 @@ class MSGFormer(MCTViT):
             self.stages, self.num_classes)
 
         self.spatial_fuse = nn.ModuleList([
-            SemanticAttnGNNModule(
+            SemanticAttnModule(
                 query_dim=self.spatial_dims[i],
                 key_dim=self.embed_dim,
                 num_classes=self.num_classes,
@@ -94,14 +82,7 @@ class MSGFormer(MCTViT):
                 proj_drop=0.,
                 drop_path=0.,
                 qkv_bias=True,
-                norm_layer=partial(nn.LayerNorm, eps=1e-6),
-                kernel_dict={
-                    'backbone':self.num_knn[i],
-                    'spatial':self.num_knn_spatial[i]}, 
-                dilation_dict={
-                    'backbone':self.dilations[i],
-                    'spatial':self.dilations_spatial[i]}
-                )
+                norm_layer=partial(nn.LayerNorm, eps=1e-6))
             for i in range(self.stages)])
 
         self.down_convs = nn.ModuleList([
@@ -116,6 +97,7 @@ class MSGFormer(MCTViT):
             nn.BatchNorm2d(self.embed_dim),
             nn.GELU())
         
+
         self.weights = nn.ParameterList([
             nn.Parameter(torch.zeros(1, self.num_classes, 1))
             for _ in range(self.stages)])
@@ -160,7 +142,7 @@ class MSGFormer(MCTViT):
         Input: x -> list[B x C x H^ x W^]
         Return: cls-tokens -> B x Cls x C
         """
-        x_cls = [self.globalweightedpooling(f).unsqueeze(-1) for f in x]  # list [B x C x 1]
+        x_cls = [self.gwr_pooling(f).unsqueeze(-1) for f in x]  # list [B x C x 1]
         x_cls = torch.cat(x_cls, dim=-1)        # B x C x 4
         x_cls = self.proj_cls_embed(x_cls)      # B x C x Cls
         x_cls = x_cls.permute(0, 2, 1).contiguous()  # B x Cls x C
@@ -171,7 +153,7 @@ class MSGFormer(MCTViT):
         Input:
             x: B x 3 x H x W
         Return:
-            x_cls: [B x Cls x C] 
+            x_cls: [B x K x C] 
             x_vit: [B x Np x C]
             attn_weights: list[B x Hd x N' x N']
             x_spatial: list[B x C x H^ x W^]
@@ -236,7 +218,7 @@ class MSGFormer(MCTViT):
         patch_tokens = patch_tokens.permute([0, 3, 1, 2]).contiguous() # B x C x Hp x Wp
         return patch_tokens
     
-    def globalweightedpooling(self, x):
+    def gwr_pooling(self, x):
         """
         Input:
             x->B x C x Hp x Wp
@@ -247,15 +229,22 @@ class MSGFormer(MCTViT):
         N = Hp * Wp
         flatten_x = x.view(B, C, -1).permute(0, 2, 1) # B x (Hp x Wp) x C
         sorted_x, _ = torch.sort(flatten_x, -2, descending=True)
-        weights = torch.logspace(start=0, end=N-1, steps=N, base=self.decay_parameter).cuda()
+        weights = torch.logspace(start=0, end=N-1, steps=N, base=self.decay_parameter).to(x.device)
         out = torch.sum(sorted_x * weights.unsqueeze(0).unsqueeze(-1), dim=-2) / weights.sum()
         return out
-        
-    def foward_tokens(self, patch_tokens):
-        """ MCTformer Plus: Weighted Patch Tokens """
-        patch_tokens = self.head(patch_tokens) # B x Cls x Hp x Wp
-        patch_logits = self.globalweightedpooling(patch_tokens)
-        return patch_logits
+
+    def gwr_pooling_channel(self, x_cls):
+        """
+        Input:
+            x_cls ->B x K x C
+        Return
+            out -> B x K
+        """
+        sorted_x_cls, _ = torch.sort(x_cls, -1, descending=True)
+        weights = torch.logspace(start=0, end=self.num_classes-1, steps=self.num_classes,
+                                 base=self.decay_parameter).to(x_cls.device)
+        out = torch.sum(sorted_x_cls * weights.unsqueeze(0).unsqueeze(-1), dim=-1) / weights.sum()
+        return out
     
     def forward(self, x):
         """
@@ -266,21 +255,25 @@ class MSGFormer(MCTViT):
         feat_dict = self.forward_features(x)
         # class tokens
         last_cls_tokens = feat_dict['x_cls_last'] # [B, K, C]
-        cls_logits = last_cls_tokens.mean(-1) # [B, K]
+        # cls_logits = last_cls_tokens.mean(-1) # [B, K]
+        cls_logits = self.gwr_pooling_channel(last_cls_tokens)
         
         x_vit = self.reshape_patch_tokens(feat_dict['x_vit'], h, w) # [B, C, Hp, Wp]
         x_out = [x_vit]
-        
         out_size = x_vit.shape[2:]
         for feat in feat_dict['x_branch']:
-            feat = F.interpolate(feat, size=out_size, mode="bilinear", align_corners=False)
+            feat = F.interpolate(
+                feat,
+                size=out_size,
+                mode="bilinear",
+                align_corners=False)
             x_out.append(feat)
        
         x_out = torch.cat(x_out, dim=1)
         x_out = self.channel_reduction(x_out) # [B, C, Hp, Wp]
         # ------------------------------------------------------#
         x_out = self.head(x_out) # [B, K, Hp, Wp]
-        x_logits = self.globalweightedpooling(x_out)
+        x_logits = self.gwr_pooling(x_out)
         return cls_logits, x_logits
 
 
@@ -296,33 +289,33 @@ class MSGFormerCam(MSGFormer):
         """
         Input: 
             tokens: patch tokens from the last backbone layer
-            attn_weights: attention weights from L layers -> L x B x d x (Cls+Np) x (Cls+Np)
+            attn_weights: attention weights from L layers -> L x B x d x (K+Np) x (K+Np)
         Output: 
-            Refined class activation maps -> B x Cls x Hp x Wp
+            Refined class activation maps -> B x K x Hp x Wp
         """
         b, nc, hp, wp = tokens.shape
 
         if self.cls_ind == 0:
-            cams = tokens.detach().clone()   # B x Cls x Hp x Wp
+            cams = tokens.detach().clone()   # B x K x Hp x Wp
             cams = F.relu(cams)         # With ReLU Activation
 
         else:
-            attn_maps = attn_weights[-self.cls_ind:].mean(0)         # B x (Cls+Np) x (Cls+Np)
-            cls2pat = attn_maps[:, :nc, nc:].reshape([b, nc, hp, wp]) # B x Cls x Hp x Wp
-            patch_cam = tokens.detach().clone()   # B x Cls x Hp x Wp
+            attn_maps = attn_weights[-self.cls_ind:].mean(0)         # B x (K+Np) x (K+Np)
+            cls2pat = attn_maps[:, :nc, nc:].reshape([b, nc, hp, wp]) # B x K x Hp x Wp
+            patch_cam = tokens.detach().clone()   # B x K x Hp x Wp
             patch_cam = F.relu(patch_cam)         # With ReLU Activation
             cams = torch.pow(cls2pat * patch_cam, 1/2)
 
         # Apply pat2pat affinity refinement
-        pat2pat = attn_weights[-6:, :, nc:, nc:] #  L x B x Np x Np
+        pat2pat = attn_weights[:, :, nc:, nc:] #  L x B x Np x Np
         pat2pat = torch.sum(pat2pat, dim=0)      # B x Np x Np
         cams = torch.matmul(
                 pat2pat.unsqueeze(1),    # B x 1 x Np x Np
-                cams.view(b, nc, -1, 1) # B x Cls x Np x 1
+                cams.view(b, nc, -1, 1) # B x K x Np x 1
             ).reshape(b, nc, hp, wp)
-        
+
         return cams
-    
+
     @torch.no_grad()
     def get_cls2pat(self, tokens, attn_weights):
         """
@@ -338,30 +331,44 @@ class MSGFormerCam(MSGFormer):
         attn_maps = attn_weights[-self.cls_ind:].mean(0)         # B x (Cls+Np) x (Cls+Np)
         cls2pat = attn_maps[:, :nc, nc:].reshape([B, nc, Hp, Wp]) # B x Cls x Hp x Wp
         return cls2pat
-    
+
     @torch.no_grad()
-    def forward(self, x, return_attn=False):
-        h, w = x.shape[2:]
+    def forward(self, x, return_attn=False, return_token=False):
+        b, _, h, w = x.shape
         feat_dict = self.forward_features(x)
 
         attn_weights = torch.mean(torch.stack(feat_dict['attn']), dim=2).detach()
-        if return_attn: # L x B x (Cls+Np) x (Cls+Np)
+        
+        if return_attn: # L x B x (K+Np) x (K+Np)
             return attn_weights
+        
+        if return_token: # L x B x (K+Np) x (K+Np)
+            return feat_dict['x_cls_last']
         
         patch_tokens = self.reshape_patch_tokens(feat_dict['x_vit'], h, w) # B x C x Hp x Wp
         # ----------------------------------------------- #
-        out_spatial = [patch_tokens]
+        x_out = [patch_tokens]
         out_size = patch_tokens.shape[2:]
         for feat in feat_dict['x_branch']:
             feat = F.interpolate(
                 feat, size=out_size, mode="bilinear", align_corners=False)
-            out_spatial.append(feat)
+            x_out.append(feat)
         # concat spatial and patch tokens
-        out_spatial = torch.cat(out_spatial, dim=1)
-        out_spatial = self.channel_reduction(out_spatial)
-        out_spatial = self.head(out_spatial)  # B x Cls x Hp x Wp
+        x_out = torch.cat(x_out, dim=1)
+        x_out = self.channel_reduction(x_out)
+        x_out = self.head(x_out)  # B x K x Hp x Wp
+        
+        last_cls_tokens = feat_dict['x_cls_last'] # [B, K, C]
+        cls_logits = last_cls_tokens.mean(-1) # [B, K]
+        
+        cls_guidance = torch.ones(b, self.num_classes).to(x.device)
+        cls_guidance[cls_logits < 0] = 0.1
+        cls_guidance = cls_guidance.unsqueeze(-1).unsqueeze(-1) # [B, K, 1, 1]
+        x_out = cls_guidance * x_out
+        
         outputs = self.get_cam(
-            out_spatial, attn_weights)
+            x_out, attn_weights)
+
         return outputs
 
 
@@ -475,24 +482,3 @@ def msgformer_base_cam(**kwargs):
     return model
      
      
-# if __name__ == "__main__":
-#     x = torch.ones(2, 3, 527, 481).cuda()
-    
-#     from timm.models import create_model
-#     model = create_model(
-#         "deit_small_mctgformer",
-#         pretrained=False,
-#         num_classes=20,
-#         drop_block_rate=None,
-#         input_size=448).cuda()
-    
-#     model.eval()
-    
-#     output_logits = model(x)
-#     for i in range(len(output_logits)):
-#         if isinstance(output_logits[i], list):
-#             print(f"{i}-th logits shape:")
-#             for logit in output_logits[i]:
-#                 print(f"--  {logit.shape}")
-#         else:
-#             print(f"{i}-th logits shape: {output_logits[i].shape}")

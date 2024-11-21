@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
 
-from net.msg_modules import DownConv, SemanticAttnGNNModule
+from net.msg_modules import DownConv, SemanticAttnModule
 from net.msg_modules import SpatialPriorGNN
 from net.mct_vit import MCTViT, _cfg
 
@@ -77,7 +77,7 @@ class MCTNext(MCTViT):
             self.stages, self.num_classes)
 
         self.spatial_fuse = nn.ModuleList([
-            SemanticAttnGNNModule(
+            SemanticAttnModule(
                 query_dim=self.spatial_dims[i],
                 key_dim=self.embed_dim,
                 num_classes=self.num_classes,

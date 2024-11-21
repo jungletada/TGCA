@@ -244,6 +244,8 @@ def main(args):
     init_distributed_mode(args)
     device = torch.device(args.device)
     torch.cuda.set_device(args.local_rank)
+    if args.seed is None:
+        args.seed = random.randint(0, 3410)
     same_seeds(args.seed)
     # Train and Validation for image classification
     dataset_train, args.nb_classes = build_dataset(

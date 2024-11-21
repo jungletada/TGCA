@@ -38,7 +38,7 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --train_list ${TRAINAUGID} \
     --work_space ${WORKDIR} \
     --input_size ${INPUTSIZE} \
-    --seed 3 \
+    --seed 8 \
     --epoch 27 \
     --batch_per_gpu 19 \
     --cls_weight 3.0 \
@@ -53,6 +53,7 @@ python make_cam.py \
     --input_size ${INPUTSIZE} \
     --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
     # --checkpoint results_voc/msgformer_448/msgformer_7388.pth \
+    
 
 # ============= Evaluate Class Activation Maps =============#
 python eval_cam.py \

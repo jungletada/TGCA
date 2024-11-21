@@ -103,11 +103,11 @@ def _work(process_id, model, dataset, args):
             
             # if osp.exists(osp.join(args.cam_out_dir, img_name + '.npy')):
             #     continue
-            
+
             if valid_cat.shape[0] == 0: # No validate category
                 np.save(osp.join(args.cam_out_dir, img_name + '.npy'), dict())
                 continue
-            
+
             try:
                 outputs = [model(resize_input_minbound(
                         x=img[0].cuda(non_blocking=True),

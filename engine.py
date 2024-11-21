@@ -28,7 +28,7 @@ def train_one_epoch_proposed(
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = f'Epoch: [{epoch}]'
-        
+    
     for samples, targets in metric_logger.log_every(data_loader, print_freq, header, rank=rank):
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
