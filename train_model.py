@@ -21,7 +21,7 @@ from torch.utils.data.distributed import DistributedSampler
 import utils
 from engine import evaluate
 from engine import train_one_epoch_mctformerplus, \
-    train_one_epoch_proposed, train_one_epoch_basic, train_one_epoch_next
+    train_one_epoch_multioutputs, train_one_epoch_basic, train_one_epoch_next
 from datasets_cam import build_dataset
 
 import net.srmct
@@ -316,7 +316,7 @@ def main(args):
     if "mctformerplus" in args.model:
         train_one_epoch = train_one_epoch_mctformerplus
     elif "msgformer"  in args.model:
-        train_one_epoch = train_one_epoch_proposed
+        train_one_epoch = train_one_epoch_multioutputs
     elif "mctnext" in args.model:
         train_one_epoch = train_one_epoch_next
     else:

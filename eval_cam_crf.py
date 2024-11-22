@@ -23,12 +23,12 @@ def logfile(args, msg):
     print(msg)
     
     
-def run(dataset, args):
+def run_eval(dataset, args):
     num_images = len(dataset)
     chunk_size = 12000   # for memory efficient
     split_indices = [(i, min(i + chunk_size, num_images))
                      for i in range(0, num_images, chunk_size)]
-    
+
     def eval(threshold, begin_idx, end_idx):
         preds = []
         labels = []
@@ -37,7 +37,7 @@ def run(dataset, args):
             pack = dataset[i]
             image = pack['image'] # H, W, 3
             filename = pack['name_id']
-            cam_dict = np.load(osp.join(args.eval_cam_dir, filename + '.npy'), 
+            cam_dict = np.load(osp.join(args.eval_cam_dir, filename + '.npy'),
                             allow_pickle=True).item()
             if len(tuple(cam_dict.keys())) == 0:
                 continue
@@ -121,14 +121,14 @@ def make_cam_crf(process_id, dataset, args):
             continue
             
         cams = np.stack(list(cam_dict.values()), axis=0) # (#val_cls, H, W)
-        prob = np.pad(
-            cams, 
-            ((1, 0), (0, 0), (0, 0)), 
-            mode='constant', 
-            constant_values=args.threshold)
-        # bg_score = np.power(1 - np.max(cams, axis=0, keepdims=True), args.alpha)
-        # cams = np.concatenate((bg_score, cams), axis=0)
-        # prob = crf_inference(image, cams, labels=cams.shape[0])
+        # prob = np.pad(
+        #     cams, 
+        #     ((1, 0), (0, 0), (0, 0)), 
+        #     mode='constant', 
+        #     constant_values=args.threshold)
+        bg_score = np.power(1 - np.max(cams, axis=0, keepdims=True), args.alpha)
+        cams = np.concatenate((bg_score, cams), axis=0)
+        prob = crf_inference(image, cams, labels=cams.shape[0])
         
         cls_labels = np.argmax(prob, axis=0)
         keys = (torch.stack(tuple(cam_dict.keys())) + 1).numpy()
@@ -140,6 +140,7 @@ def make_cam_crf(process_id, dataset, args):
      
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Evaluate CAMs', add_help=False)
+    parser.add_argument('--use_crf', action='store_true', help='use crf to make CAM.')
     parser.add_argument('--dataset', default='', type=str, help='name of dataset')
     parser.add_argument('--mscoco_root', default='datasets/MSCOCO', type=str, help='COCO dataset path')
     parser.add_argument('--voc12_root', default='datasets/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
@@ -153,13 +154,14 @@ if __name__ == '__main__':
                         help='log dir to save the results')
     parser.add_argument('--curve_threshold', action='store_true', help='whether to use a range of thresholds')
     parser.add_argument('--threshold', default=0.45, type=float, help='threshold for evaluation as background')
-    parser.add_argument('--alpha', default=1.4, type=float, help='use alpha to set background')
+    parser.add_argument('--alpha', default=1.35, type=float, help='use alpha to set background')
     parser.add_argument("--crf_cam_dir", default="crf_mask", type=str, help="crf mask path")
     args = parser.parse_args()
     #----------------------------------------------------------------------------------#
     args.eval_cam_dir = osp.join(args.work_space, args.eval_cam_dir)
     args.crf_cam_dir = osp.join(args.work_space, args.crf_cam_dir)
     args.log_dir = osp.join(args.work_space, args.log_dir)
+
     os.makedirs(args.log_dir, exist_ok=True)
     os.makedirs(args.crf_cam_dir, exist_ok=True)
 
@@ -177,25 +179,23 @@ if __name__ == '__main__':
         args.low_thres, args.high_thres = 40, 55
     else:
         raise NotImplementedError
-    
+
     time = datetime.datetime.now().strftime("%Y%m%d-%H%M") 
     args.log_file = osp.join(args.log_dir, f"eval_cam_{time}.log")
-    with open(args.log_file, "w", encoding="utf-8") as f:
-        f.write(f"{time}: Evaluation class activation map for {args.dataset}\n")
-        
-    run(args=args, dataset=dataset)
     
-    # nprocs = 8
-    # dataset = torchutils.split_dataset(dataset, nprocs)
-    
-    # print('[ ', end='')
 
-    # multiprocessing.spawn(
-    #     make_cam_crf,
-    #     nprocs=nprocs,
-    #     args=(dataset, args),
-    #     join=True)
+    if not args.use_crf:
+        with open(args.log_file, "w", encoding="utf-8") as f:
+            f.write(f"{time}: Evaluating CAMs for {args.dataset}\n")
+        run_eval(args=args, dataset=dataset)
+        torch.cuda.empty_cache()
         
-    # print(']')
-
-    # torch.cuda.empty_cache()
+    else:
+        nprocs = 8
+        split_dataset = torchutils.split_dataset(dataset, nprocs)
+        multiprocessing.spawn(
+            make_cam_crf,
+            nprocs=nprocs,
+            args=(split_dataset, args),
+            join=True)
+        torch.cuda.empty_cache()

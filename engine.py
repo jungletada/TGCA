@@ -17,10 +17,41 @@ from sklearn.metrics import average_precision_score
 # import seaborn as sns
 
 
-def train_one_epoch_proposed(
-    args,model, data_loader, optimizer, device, epoch,
-    loss_scaler, max_norm, set_training_mode=True, rank=0):
+def focal_binary_cross_entropy(inputs, targets, gamma=0.9):
+    """
+        Borrowed from https://www.kaggle.com/code/thedrcat/focal-multilabel-loss-in-pytorch-explained
+        Reference: https://pytorch.org/docs/stable/_modules/torch/nn/functional.html#multilabel_soft_margin_loss
+        Input: 
+            inputs: (B,K) where B is the batch size and K is the number of classes.
+            targets: (B,K), label targets must have the same shape as the input.
+        Output: 
+            Loss: scalar. (B).
+    """
+    p = torch.sigmoid(inputs)
+    p = torch.where(targets >= 0.5, p, 1 - p)
+    loss = -((1 - p) ** gamma) * \
+        (targets * F.logsigmoid(inputs) + (1 - targets) * F.logsigmoid(-inputs))
+    ret = loss.mean()
+    return ret
 
+
+def train_one_epoch_multioutputs(args, model, data_loader, optimizer, device, 
+    epoch, loss_scaler, max_norm, set_training_mode=True, rank=0):
+    """
+    Train the model for one epoch with multiple outputs.
+
+    Args:
+        args: Command line arguments and configuration.
+        model: The model to be trained.
+        data_loader: DataLoader for the training data.
+        optimizer: Optimizer for updating model weights.
+        device: Device to perform training on (CPU or GPU).
+        epoch: Current epoch number.
+        loss_scaler: Scaler for mixed precision training.
+        max_norm: Maximum norm for gradient clipping.
+        set_training_mode: Boolean to set training mode.
+        rank: Rank of the current process (for distributed training).
+    """
     print_freq = 10
     model.train(set_training_mode)
     criterion = nn.MultiLabelSoftMarginLoss()

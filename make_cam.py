@@ -79,41 +79,32 @@ def flip_cam(cam_list):
     return cam_list
 
 
-def _work(process_id, model, dataset, args):
+def _work_trainset(process_id, model, dataset, args):
     databin = dataset[process_id]
     n_gpus = torch.cuda.device_count()
-    
     data_loader = DataLoader(
-        databin, 
-        shuffle=False, 
-        num_workers=args.num_workers // n_gpus, 
+        databin,
+        shuffle=False,
+        num_workers=args.num_workers // n_gpus,
         pin_memory=True)
 
     with torch.no_grad(), cuda.device(process_id):
-        
         model.cuda()
         model.eval()
-        
         for iter_, pack in enumerate(tqdm(data_loader, position=process_id, desc=f'[PID{process_id}]')):
             img_name = pack['name'][0] # Img_id->str
             label = pack['label'][0]   # image-level label->Torch.Tensor [1]
             size = pack['size']        # image size->Torch.tensor [2]
-            
             valid_cat = torch.nonzero(label)[:, 0] # get validate class->[#val_cls]
             
-            # if osp.exists(osp.join(args.cam_out_dir, img_name + '.npy')):
-            #     continue
-
             if valid_cat.shape[0] == 0: # No validate category
                 np.save(osp.join(args.cam_out_dir, img_name + '.npy'), dict())
                 continue
-
             try:
                 outputs = [model(resize_input_minbound(
                         x=img[0].cuda(non_blocking=True),
                         min_size=args.min_size)) # img[0]->[(2, 3, H', W')]
                             for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
-                
             except RuntimeError as e:
                 if "out of memory" in str(e):
                     # If we run out of memory, clear cache and try with smaller size
@@ -125,7 +116,6 @@ def _work(process_id, model, dataset, args):
                 else:
                     raise e
             #=================== high resolution cam list ===================#
-            
             upsample_cam_list = [# upsample all multi-scale CAMs
                     F.interpolate(cam, size, mode='bilinear', align_corners=False)
                     for cam in outputs] # ->[(2, Cls, H, W)
@@ -140,12 +130,79 @@ def _work(process_id, model, dataset, args):
             for i, cls in enumerate(valid_cat):
                 cam_dict[cls] = upsample_cam[i]
                 
-            np.save(osp.join(args.cam_out_dir, img_name + '.npy'), cam_dict)  
+            np.save(osp.join(args.cam_out_dir, img_name + '.npy'), cam_dict)
         
             if process_id == n_gpus - 1 and iter_ % (len(databin) // 20) == 0:
                 print(f"{(5*iter_+1) // (len(databin) // 20)} ", end='')
 
 
+def _work_testset(process_id, model, dataset, args):
+    databin = dataset[process_id]
+    n_gpus = torch.cuda.device_count()
+    data_loader = DataLoader(
+        databin,
+        shuffle=False,
+        num_workers=args.num_workers // n_gpus,
+        pin_memory=True)
+
+    with torch.no_grad(), cuda.device(process_id):
+        model.cuda()
+        model.eval()
+        for iter_, pack in enumerate(tqdm(data_loader, position=process_id, desc=f'[PID{process_id}]')):
+            img_name = pack['name'][0] # Img_id->str
+            size = pack['size']        # image size->Torch.tensor [2]
+            # label = pack['label'][0]   # image-level label->Torch.Tensor [1]
+            # valid_cat = torch.nonzero(label)[:, 0] # get validate class->[#val_cls]
+            
+            pseudo_label, outputs = [], []
+            try:
+                for img in pack['img']:
+                    pseudo_cls, output_cam = model(
+                        resize_input_minbound(x=img[0].cuda(non_blocking=True), min_size=args.min_size),
+                        return_cls=True) # img[0]->[(2, 3, H', W')]
+                    pseudo_label.append(pseudo_cls)
+                    outputs.append(output_cam) # outputs->list[(2, n_cls, H/16, W/16)]
+                       
+            except RuntimeError as e:
+                if "out of memory" in str(e):
+                    # If we run out of memory, clear cache and try with smaller size
+                    # print(f'{str(e)}, with image size={size}')
+                    outputs = [model(resize_input_minbound(
+                        x=img[0].cuda(non_blocking=True),
+                        min_size=int(args.min_size * 0.5))) # img[0]->[(2, 3, H', W')]
+                            for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
+                else:
+                    raise e
+                
+            pseudo_label = pseudo_label[0]
+            pseudo_label = pseudo_label[0] * pseudo_label[1] # combine flip results
+            valid_cat = torch.nonzero(pseudo_label)[:, 0]
+           
+            if valid_cat.shape[0] == 0: # No validate category
+                np.save(osp.join(args.cam_out_dir, img_name + '.npy'), dict())
+                continue
+            #=================== high resolution cam list ===================#
+            valid_cat = valid_cat.cpu() # because we use cuda before.
+            upsample_cam_list = [# upsample all multi-scale CAMs
+                    F.interpolate(cam, size, mode='bilinear', align_corners=False)
+                    for cam in outputs] # ->[(2, Cls, H, W)
+            upsample_cam_list = flip_cam(upsample_cam_list)
+            upsample_cam = torch.sum(torch.stack(upsample_cam_list, 0), 0) # (Cls, H, W)
+            
+            upsample_cam = upsample_cam[valid_cat]
+            upsample_cam = normalize_cam(upsample_cam)
+            
+            cam_dict = {}
+            upsample_cam = upsample_cam.cpu().numpy()
+            for i, cls in enumerate(valid_cat):
+                cam_dict[cls] = upsample_cam[i]
+                
+            np.save(osp.join(args.cam_out_dir, img_name + '.npy'), cam_dict)
+        
+            if process_id == n_gpus - 1 and iter_ % (len(databin) // 20) == 0:
+                print(f"{(5*iter_+1) // (len(databin) // 20)} ", end='')
+                
+                
 if __name__ == '__main__':
     args = get_args_parser()
     args.cam_out_dir = os.path.join(args.work_space, args.cam_out_dir) 
@@ -163,7 +220,10 @@ if __name__ == '__main__':
         raise NotImplementedError
     
     dataset, num_classes = build_dataset(
-        is_train=False, make_cam=True, args=args)
+        is_train=False,
+        make_cam=True,
+        args=args)
+    
     args.num_classes = num_classes
     
     model = create_cam_model(args)
@@ -175,12 +235,14 @@ if __name__ == '__main__':
     n_gpus = torch.cuda.device_count()
     dataset = torchutils.split_dataset(dataset, n_gpus)
     
+    function = _work_trainset if 'train' in args.train_list else _work_testset
+    print(f'Using function {function}')
     print('[ ', end='')
 
     multiprocessing.spawn(
-        _work, 
-        nprocs=n_gpus, 
-        args=(model, dataset, args), 
+        function,
+        nprocs=n_gpus,
+        args=(model, dataset, args),
         join=True)
     
     print(']')

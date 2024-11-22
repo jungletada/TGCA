@@ -233,18 +233,6 @@ class MSGFormer(MCTViT):
         out = torch.sum(sorted_x * weights.unsqueeze(0).unsqueeze(-1), dim=-2) / weights.sum()
         return out
 
-    def gwr_pooling_channel(self, x_cls):
-        """
-        Input:
-            x_cls ->B x K x C
-        Return
-            out -> B x K
-        """
-        sorted_x_cls, _ = torch.sort(x_cls, -1, descending=True)
-        weights = torch.logspace(start=0, end=self.num_classes-1, steps=self.num_classes,
-                                 base=self.decay_parameter).to(x_cls.device)
-        out = torch.sum(sorted_x_cls * weights.unsqueeze(0).unsqueeze(-1), dim=-1) / weights.sum()
-        return out
     
     def forward(self, x):
         """
@@ -255,8 +243,7 @@ class MSGFormer(MCTViT):
         feat_dict = self.forward_features(x)
         # class tokens
         last_cls_tokens = feat_dict['x_cls_last'] # [B, K, C]
-        # cls_logits = last_cls_tokens.mean(-1) # [B, K]
-        cls_logits = self.gwr_pooling_channel(last_cls_tokens)
+        cls_logits = last_cls_tokens.mean(-1) # [B, K]
         
         x_vit = self.reshape_patch_tokens(feat_dict['x_vit'], h, w) # [B, C, Hp, Wp]
         x_out = [x_vit]
@@ -279,11 +266,13 @@ class MSGFormer(MCTViT):
 
 class MSGFormerCam(MSGFormer):
     """Class Activation Map variant of MSGFormer for visualization purposes."""
-    def __init__(self, *args, cls_ind=4, **kwargs):
+    def __init__(self, *args, cls_ind=4, pat_ind=8, bg_=0.2, **kwargs):
         """fuse_layers: The attention of the last L layers to fuse"""
         super().__init__(*args, **kwargs)
         self.cls_ind = cls_ind # fusion layer for mixing class-to-patch
-
+        self.pat_ind = pat_ind
+        self.bg_ = bg_
+        
     @torch.no_grad()
     def get_cam(self, tokens, attn_weights):
         """
@@ -307,7 +296,7 @@ class MSGFormerCam(MSGFormer):
             cams = torch.pow(cls2pat * patch_cam, 1/2)
 
         # Apply pat2pat affinity refinement
-        pat2pat = attn_weights[:, :, nc:, nc:] #  L x B x Np x Np
+        pat2pat = attn_weights[-self.pat_ind:, :, nc:, nc:] #  L x B x Np x Np
         pat2pat = torch.sum(pat2pat, dim=0)      # B x Np x Np
         cams = torch.matmul(
                 pat2pat.unsqueeze(1),    # B x 1 x Np x Np
@@ -333,17 +322,17 @@ class MSGFormerCam(MSGFormer):
         return cls2pat
 
     @torch.no_grad()
-    def forward(self, x, return_attn=False, return_token=False):
+    def forward(self, x, return_attn=False, return_token=False, return_cls=False):
         b, _, h, w = x.shape
         feat_dict = self.forward_features(x)
 
         attn_weights = torch.mean(torch.stack(feat_dict['attn']), dim=2).detach()
         
-        if return_attn: # L x B x (K+Np) x (K+Np)
-            return attn_weights
+        # if return_attn: # L x B x (K+Np) x (K+Np)
+        #     return attn_weights
         
-        if return_token: # L x B x (K+Np) x (K+Np)
-            return feat_dict['x_cls_last']
+        # if return_token: # L x B x (K+Np) x (K+Np)
+        #     return feat_dict['x_cls_last']
         
         patch_tokens = self.reshape_patch_tokens(feat_dict['x_vit'], h, w) # B x C x Hp x Wp
         # ----------------------------------------------- #
@@ -362,13 +351,14 @@ class MSGFormerCam(MSGFormer):
         cls_logits = last_cls_tokens.mean(-1) # [B, K]
         
         cls_guidance = torch.ones(b, self.num_classes).to(x.device)
-        cls_guidance[cls_logits < 0] = 0.1
-        cls_guidance = cls_guidance.unsqueeze(-1).unsqueeze(-1) # [B, K, 1, 1]
-        x_out = cls_guidance * x_out
-        
+        cls_guidance[cls_logits < 0] = self.bg_
+        x_out = cls_guidance.unsqueeze(-1).unsqueeze(-1) * x_out
         outputs = self.get_cam(
             x_out, attn_weights)
-
+        
+        if return_cls:
+            return cls_guidance, outputs
+        
         return outputs
 
 

@@ -6,44 +6,45 @@ echo "  |-- COCO dataset path: datasets/MSCOCO";
 # NEED TO SET
 GPU=0,1
 NODES=2
-MODEL=MCTG
+
+DATASET=VOC12
+DATACONFIG=configs/voc12
+
+TRAINAUGID=${DATACONFIG}/train_aug_id.txt
+TRAINID=${DATACONFIG}/train_id.txt
+VALID=${DATACONFIG}/val_id.txt
+
+INPUTSIZE=448
+SEG_DIR=pseudo_mask
+CRF_DIR=crf_mask
+
+MODELNAME=msgformer
+WORKDIR=results_voc/msgformer_${INPUTSIZE}
+
+
 CUDA_VISIBLE_DEVICES=${GPU}
-OMP_NUM_THREADS=${NODES} 
-WORKDIR=results_voc/${MODEL}
 
-# # ============= Train Model ===============#
-# torchrun --nproc_per_node=${NODES} --nnodes=1 \
-#     train_res38.py \
-#     --model ResNet38d_patch_224 \
-#     --work_space results_voc/resnet38 \
-#     --seed 2 \
-#     --epoch 45 \
-#     --batch_per_gpu 16 \
-#     --data_set VOC12 \
+# ============= Train Model ============= #
+OMP_NUM_THREADS=${NODES} \
+torchrun --nproc_per_node=${NODES} --nnodes=1 \
+    train_model.py \
+    --dataset ${DATASET} \
+    --model ${MODELNAME} \
+    --train_list ${TRAINAUGID} \
+    --work_space ${WORKDIR} \
+    --input_size ${INPUTSIZE} \
+    --seed 8 \
+    --epoch 27 \
+    --batch_per_gpu 19 \
+    --cls_weight 3.0 \
+    
 
-# # ============= Train Model ===============#
-# torchrun --nproc_per_node=${NODES} --nnodes=1 \
-#     train_v2.py \
-#     --model deit_small_MCTG \
-#     --seed 2 \
-#     --epoch 45 \
-#     --batch_per_gpu 16 \
-#     --work_space ${WORKDIR} \
-#     --data_set VOC12 \
-
-
-# # ============= Make Class Activation Maps of Model=============#
-# python steps_voc/make_cam.py \
-#     --model deit_small_${MODEL} \
-#     --checkpoint ${WORKDIR}/deit_small_${MODEL}_best.pth \
-#     --infer_list configs/voc12/train_id.txt \
-
-
-# #============= Evaluate Class Activation Maps =============#
-# python evaluation.py \
-#     --work_space ${WORKDIR} \
-#     --infer_list configs/voc12/train_id.txt \
-#     --log_file eval_seeds.log \
-#     --predict_dir ${WORKDIR}/cam_mask \
-#     --type npy \
-#     --curve True \
+# ============= Make Class Activation Maps of Model ============= #
+python make_cam.py \
+    --dataset ${DATASET} \
+    --model ${MODELNAME} \
+    --work_space ${WORKDIR} \
+    --train_list ${TRAINID} \
+    --input_size ${INPUTSIZE} \
+    --checkpoint results_voc/msgformer_448/msgformer_deit_small_s448.pth \
+    # --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \

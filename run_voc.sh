@@ -29,70 +29,77 @@ WORKDIR=results_voc/msgformer_${INPUTSIZE}
 
 CUDA_VISIBLE_DEVICES=${GPU}
 
-#============= Train Model ============= #
-OMP_NUM_THREADS=${NODES} \
-torchrun --nproc_per_node=${NODES} --nnodes=1 \
-    train_model.py \
-    --dataset ${DATASET} \
-    --model ${MODELNAME} \
-    --train_list ${TRAINAUGID} \
-    --work_space ${WORKDIR} \
-    --input_size ${INPUTSIZE} \
-    --seed 8 \
-    --epoch 27 \
-    --batch_per_gpu 19 \
-    --cls_weight 3.0 \
+# #============= Train Model ============= #
+# OMP_NUM_THREADS=${NODES} \
+# torchrun --nproc_per_node=${NODES} --nnodes=1 \
+#     train_model.py \
+#     --dataset ${DATASET} \
+#     --model ${MODELNAME} \
+#     --train_list ${TRAINAUGID} \
+#     --work_space ${WORKDIR} \
+#     --input_size ${INPUTSIZE} \
+#     --seed 8 \
+#     --epoch 27 \
+#     --batch_per_gpu 19 \
+#     --cls_weight 3.0 \
     
-
 # ============= Make Class Activation Maps of Model ============= #
 python make_cam.py \
     --dataset ${DATASET} \
     --model ${MODELNAME} \
     --work_space ${WORKDIR} \
-    --train_list ${TRAINID} \
+    --train_list ${TRAINAUGID} \
     --input_size ${INPUTSIZE} \
-    --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
-    # --checkpoint results_voc/msgformer_448/msgformer_7388.pth \
-    
+    --checkpoint results_voc/msgformer_448/msgformer_deit_small_s448.pth \
+    # --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
 
-# ============= Evaluate Class Activation Maps =============#
-python eval_cam.py \
-    --dataset ${DATASET} \
-    --work_space ${WORKDIR} \
-    --train_list ${TRAINID} \
-    --alpha 1.35 \
-    --curve_threshold \
-
-
-# #============= Train and Infer Pixel Semantic Affnity =============
-# OMP_NUM_THREADS=${NODES} \
-# torchrun --nproc_per_node=${NODES} --nnodes=1 \
-#     train_infer_psa.py \
-#     --train True \
+# # ============= Evaluate Class Activation Maps No CRF =============#
+# python eval_cam_crf.py \
 #     --dataset ${DATASET} \
 #     --work_space ${WORKDIR} \
-#     --train_list ${TRAINAUGID} \
-#     --weights checkpoints/res38_cls.pth \
-#     --seed 3 \
-#     --low_alpha 1 \
-#     --high_alpha 1.45 \
+#     --train_list ${TRAINID} \
+#     --curve_threshold \
 
-
-
-# #============= Infer with Pixel Semantic Affnity =============#
-# python train_infer_psa.py --inference True \
+# # ============= Evaluate Class Activation Maps =============#
+# python eval_cam_crf.py \
+#     --use_crf \
 #     --dataset ${DATASET} \
 #     --work_space ${WORKDIR} \
-#     --infer_list ${TRAINID} \
-#     --seg_out_dir ${SEG_DIR} \
-#     --threshold 0.47 \
+#     --train_list ${TRAINID} \
+#     --alpha 1.1 \
 
-
-# #============= Evaluate =============#
+# # ============= Evaluate =============#
 # python steps_voc/eval_sem_seg.py \
 #     --work_space ${WORKDIR} \
-#     --seg_out_dir ${SEG_DIR} \
+#     --seg_out_dir ${CRF_DIR} \
 #     --infer_list ${TRAINID} \
+
+#============= Train and Infer Pixel Semantic Affnity =============
+OMP_NUM_THREADS=${NODES} \
+torchrun --nproc_per_node=${NODES} --nnodes=1 \
+    train_infer_psa.py \
+    --train True \
+    --dataset ${DATASET} \
+    --work_space ${WORKDIR} \
+    --train_list ${TRAINAUGID} \
+    --weights checkpoints/res38_cls.pth \
+    --seed 3 \
+    --low_alpha 1 \
+    --high_alpha 1.2 \
+
+#============= Infer with Pixel Semantic Affnity =============#
+python train_infer_psa.py --inference True \
+    --dataset ${DATASET} \
+    --work_space ${WORKDIR} \
+    --infer_list ${TRAINID} \
+    --seg_out_dir ${SEG_DIR} \
+    --threshold 0.51 \
+
+#============= Evaluate =============#
+python steps_voc/eval_sem_seg.py \
+    --work_space ${WORKDIR} \
+    --seg_out_dir ${SEG_DIR} \
+    --infer_list ${TRAINID} \
     #--seg_out_dir pseudo_mask_448 \
 
 # # Save the generated mask to zip
