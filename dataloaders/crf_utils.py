@@ -2,6 +2,19 @@ import numpy as np
 
 
 def crf_inference(img, probs, t=5, scale_factor=1, labels=21):
+    """
+    Perform CRF inference on the given image and probabilities.
+
+    Parameters:
+    img (numpy.ndarray): The input image.
+    probs (numpy.ndarray): The probabilities for each label.
+    t (int): Number of iterations for inference (default is 5).
+    scale_factor (float): Factor to scale the spatial parameters (default is 1).
+    labels (int): Number of labels (default is 21).
+
+    Returns:
+        numpy.ndarray: The CRF refined probabilities reshaped to (labels, height, width).
+    """
     import pydensecrf.densecrf as dcrf
     from pydensecrf.utils import unary_from_softmax
 
@@ -27,7 +40,7 @@ def _crf_with_alpha(cam_dict, alpha, original_img):
     # bgcam_score = np.pad(v, ((1, 0), (0, 0), (0, 0)), mode='constant', constant_values=alpha)
     crf_score = crf_inference(
         original_img, bgcam_score, labels=bgcam_score.shape[0])
-    
+
     n_crf_al = dict()
     n_crf_al[0] = crf_score[0]
     for i, key in enumerate(cam_dict.keys()):
@@ -37,6 +50,18 @@ def _crf_with_alpha(cam_dict, alpha, original_img):
 
 
 def refine_crf_cam(cam_dict, original_image, low_alpha=1, high_alpha=3):
+    """
+    Refine class activation maps (CAM) using CRF.
+
+    Parameters:
+    cam_dict (dict): Dictionary of class activation maps.
+    original_image (numpy.ndarray): The original image to refine the CAMs on.
+    low_alpha (float): Alpha value for low refinement (default is 1).
+    high_alpha (float): Alpha value for high refinement (default is 3).
+
+    Returns:
+    tuple: Refined CAMs for low and high alpha values.
+    """
     label = {}
     crf_dict = {'low': low_alpha, 'high': high_alpha}
     for alpha, value in crf_dict.items():

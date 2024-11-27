@@ -3,14 +3,14 @@ This is an instruction for setting up `PASCAL VOC` and `MSCOCO` dataset. This "R
 /
 deeplab-pytorch](https://github.com/kazuto1011/deeplab-pytorch/tree/master/data/datasets).
 ## PASCAL VOC 2012
-1. Download PASCAL VOC 2012. Put `VOC2012` into the `datasets` folder.
+1. Download PASCAL VOC 2012. Put `VOC2012` into the `data` folder.
 
 ```sh
 $ bash scripts/setup_voc12.sh [PATH TO DOWNLOAD]
 ```
 
 ```
-datasets
+data
 └── VOCdevkit
     └── VOC2012
         ├── Annotations
@@ -32,7 +32,7 @@ datasets
 * Or https://github.com/kazuto1011/deeplab-pytorch/files/2945588/list.zip
 
 ```sh
-datasets
+data
 └── VOCdevkit
     └── VOC2012
         ├── Annotations
@@ -60,7 +60,7 @@ $ bash ./scripts/setup_cocostuff10k.sh [PATH TO DOWNLOAD]
 ### Dataset structure
 
 ```sh
-datasets
+data
 └──MSCOCO
     ├── images
     │   ├── COCO_train2014_000000000077.jpg

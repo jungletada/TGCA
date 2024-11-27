@@ -21,12 +21,11 @@ from torch.utils.data.distributed import DistributedSampler
 import utils
 from engine import evaluate
 from engine import train_one_epoch_mctformerplus, \
-    train_one_epoch_multioutputs, train_one_epoch_basic, train_one_epoch_next
+    train_one_epoch_multioutputs
 from datasets_cam import build_dataset
 
 import net.srmct
-import net.mctnext
-import net.msgformer
+import net.mct_adapter
 import net.mctformer_plus
 import warnings
 warnings.filterwarnings("ignore")
@@ -36,8 +35,8 @@ def get_args_parser():
     parser = argparse.ArgumentParser('DeiT training and evaluation script', add_help=False)
     parser.add_argument('--batch_per_gpu', default=16, type=int)
     parser.add_argument('--epochs', default=30, type=int)
-    parser.add_argument('--seed', default=0, type=int)
-    parser.add_argument("--work_space", default="results/MCTG", type=str)
+    parser.add_argument('--seed', default=8, type=int)
+    parser.add_argument("--work_space", default="results/", type=str)
     
     # ddp settings
     parser.add_argument('--rank', default=0, type=int, help='rank of current process')  
@@ -53,7 +52,7 @@ def get_args_parser():
                         help='Dropout rate (default: 0.)')
     parser.add_argument('--drop-path', type=float, default=0.1, metavar='PCT',
                         help='Drop path rate (default: 0.1)')
-    parser.add_argument('--cls_weight', type=float, default=1.0,
+    parser.add_argument('--cls_weight', type=float, default=3.0,
                         help='weight for class output loss')
 
     # Optimizer parameters
@@ -124,13 +123,18 @@ def get_args_parser():
     parser.add_argument('--finetune', 
                         default='https://dl.fbaipublicfiles.com/deit/deit_small_patch16_224-cd65a155.pth', 
                         help='finetune from checkpoint')
+    parser.add_argument('--resume',
+                        default=None, 
+                        help='resume from checkpoint')
 
     # Dataset parameters
     parser.add_argument('--dataset', default='', type=str, help='name of dataset')
-    parser.add_argument('--voc12_root', default='datasets/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
-    parser.add_argument("--coco_root", default='datasets/MSCOCO', type=str, help="Path to MSCOCO")
-    parser.add_argument("--train_list", default="configs/voc12/train_aug_id.txt", type=str, 
-                        help='configs/coco/train_id.txt or configs/voc12/train_aug_id.txt')
+    parser.add_argument('--voc12_root', default='data/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
+    parser.add_argument("--coco_root", default='data/MSCOCO', type=str, help="Path to MSCOCO")
+    parser.add_argument("--train_list", default="train_aug_id.txt", type=str, 
+                        help='train_id.txt or train_aug_id.txt')
+    parser.add_argument('--log_dir', default='log_dir', type=str, 
+                        help='log dir to save the results')
     parser.add_argument('--checkpoint', default='', help='checkpoint for generating maps')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
@@ -181,7 +185,15 @@ def init_distributed_mode(args):
 
    
 def load_model_weight(args, model):
-    
+    """Load model weights from a checkpoint or URL.
+
+    Args:
+        args: Command line arguments containing model configuration.
+        model: The model instance to load weights into.
+
+    Returns:
+        A state dictionary of the model with loaded weights.
+    """
     nc = args.nb_classes
     model_npatches = model.patch_embed.num_patches
     if args.finetune.startswith('https'):
@@ -233,14 +245,14 @@ def load_model_weight(args, model):
     return checkpoint_model
 
 
-def ddp_print(logger, log_msg, rank=0):
-    if rank == 0:
-        logger.info(log_msg)
-
-     
 def main(args):
+    """
+    Main function to train and evaluate the model.
+
+    Args:
+        args: Command line arguments containing model configuration and training parameters.
+    """
     session_name = 'Training for Classification'
-    args = parser.parse_args()
     init_distributed_mode(args)
     device = torch.device(args.device)
     torch.cuda.set_device(args.local_rank)
@@ -255,7 +267,7 @@ def main(args):
     sampler_train = DistributedSampler(dataset_train)
     
     data_loader_train = torch.utils.data.DataLoader(
-        dataset_train, 
+        dataset_train,
         sampler=sampler_train,
         batch_size=args.batch_per_gpu,
         num_workers=args.num_workers,
@@ -282,45 +294,53 @@ def main(args):
 
     best_ckpt_name = f'{args.model}_best.pth'
     utils.data_mkdir(args.work_space)
-    
+    args.log_dir = os.path.join(args.work_space, args.log_dir)
+    utils.data_mkdir(args.log_dir)
+    time = datetime.datetime.now().strftime("%Y%m%d-%H%M")
     utils.logger_info(logger_name=session_name, log_path=os.path.join(
-                      args.work_space, f'train_cam_{args.dataset}.log'))
+                      args.log_dir, f'train-{time}-{args.dataset}.log'))
     logger = logging.getLogger(session_name)
-    ddp_print(logger, f"Use seed: {args.seed}", dist.get_rank())
-    
+
     if args.finetune:
         checkpoint_model = load_model_weight(args, model)
         model.load_state_dict(checkpoint_model, strict=False)
-    
+
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    ddp_print(logger, f'Number of parameters: {n_parameters}', dist.get_rank())
-    ddp_print(logger, best_ckpt_name, dist.get_rank())
 
     linear_scaled_lr = args.lr * args.batch_per_gpu * dist.get_world_size() / 512.0
     args.lr = linear_scaled_lr
-    
+
     optimizer = create_optimizer(args, model)
     loss_scaler = NativeScaler()
 
+    if args.resume is not None:
+        checkpoint = torch.load(args.resume, map_location='cpu')
+        model.load_state_dict(checkpoint['model'], strict=True)
+        cur_epoch = checkpoint['epoch']
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        
     lr_scheduler, _ = create_scheduler(args, optimizer)
-    ddp_print(logger, f"|-- Total epochs: {args.epochs}", dist.get_rank())
-    start_time = time.time()
+
     max_accuracy = 0.0
+    if dist.get_rank() == 0:
+        logger.info(
+            "Use seed: %s\n"
+            "Number of parameters: %d\n"
+            "Checkpoint saved as %s\n"
+            "|-- Total epochs: %d",
+            args.seed, n_parameters, best_ckpt_name, args.epochs
+        )
 
     model.to(device)
     if args.world_size > 1:
-        model = nn.SyncBatchNorm.convert_sync_batchnorm(model) 
+        model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = nn.parallel.DistributedDataParallel(
         model, find_unused_parameters=True, device_ids=[args.local_rank])
     
     if "mctformerplus" in args.model:
         train_one_epoch = train_one_epoch_mctformerplus
-    elif "msgformer"  in args.model:
-        train_one_epoch = train_one_epoch_multioutputs
-    elif "mctnext" in args.model:
-        train_one_epoch = train_one_epoch_next
     else:
-        train_one_epoch = train_one_epoch_basic
+        train_one_epoch = train_one_epoch_multioutputs
     
     torch.autograd.set_detect_anomaly(True)
     
@@ -343,33 +363,31 @@ def main(args):
             model=model,
             data_loader=data_loader_val,
             device=device)
-    
-        ddp_print(logger, f"mAP of the network on the {len(dataset_val)} test images: {test_stats['mAP']*100:.1f}%",
-                  dist.get_rank())
+
         if test_stats["mAP"] > max_accuracy:
-            torch.save({'model': model.module.state_dict()}, 
+            torch.save({'model': model.module.state_dict()},
                        os.path.join(args.work_space, f'{args.model}_best.pth'))
 
         max_accuracy = max(max_accuracy, test_stats["mAP"])
-        ddp_print(logger, f'Max mAP: {max_accuracy * 100:.2f}%', dist.get_rank())
-
-        log_stats = {'epoch': epoch,
-                     **{f'train_{k}': v for k, v in train_stats.items()},
-                     **{f'test_{k}': v for k, v in test_stats.items()}}
 
         if utils.is_main_process():
-            ddp_print(logger, json.dumps(log_stats), dist.get_rank())
-
-    torch.save({'model': model.module.state_dict()}, os.path.join(args.work_space, f'{args.model}_last.pth'))
-    total_time = time.time() - start_time
-    total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    ddp_print(logger, f'Training time {total_time_str}', dist.get_rank())
+            log_stats = {'epoch': epoch,
+                     **{f'train_{k}': v for k, v in train_stats.items()},
+                     **{f'test_{k}': v for k, v in test_stats.items()}}
+            logger.info(
+                f'mAP on the {len(dataset_val)} test images: {test_stats["mAP"] * 100:.1f}%\n' +
+                f'Max mAP: {max_accuracy * 100:.2f}%\n' + json.dumps(log_stats)
+            )
+    torch.save({'model': model.module.state_dict(), 'epoch': epoch, 'optimizer': optimizer.state_dict()},
+               os.path.join(args.work_space, f'{args.model}_last_ckpt.pth'))
+    # total_time = time.time() - start_time
+    # total_time_str = str(datetime.timedelta(seconds=int(total_time)))
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         'DeiT training and evaluation script', 
         parents=[get_args_parser()])
-    
+
     args = parser.parse_args()
     main(args)

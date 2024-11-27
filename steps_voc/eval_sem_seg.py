@@ -7,7 +7,7 @@ import os.path as osp
 import imageio.v2 as imageio
 
 sys.path.append(osp.dirname(__file__) + os.sep + '../')
-from data.voc12.dataloader_psa import VOCSegmentationLabelDataset
+from dataloaders.voc12.dataloader_psa import VOCSegmentationLabelDataset
 from engine import calc_semantic_segmentation_confusion
 
 
@@ -50,9 +50,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser('Evaluate Pseudo Masks', add_help=False)
     parser.add_argument("--work_space", default="results/MCTG", type=str)
     parser.add_argument("--chainer_eval_set", default="train", type=str)
-    parser.add_argument('--voc12_root', default='datasets/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
+    parser.add_argument('--voc12_root', default='data/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
     parser.add_argument('--seg_out_dir', default='pseudo_mask', help='pseudo_mask directory')
-    parser.add_argument('--infer_list', default='configs/voc12/train_id.txt', help='specify the train set for  evaluation')
+    parser.add_argument('--infer_list', default='train_id.txt', help='specify the train set for  evaluation')
     
     args = parser.parse_args()
     

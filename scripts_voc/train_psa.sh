@@ -1,41 +1,50 @@
 #!/bin/bash
-echo "  Available Dataset: VOC, COCO";
-echo "  |-- VOC2012 dataset path: datasets/VOCdevkit/VOC2012";
-echo "  |-- COCO dataset path: datasets/MSCOCO";
-
-# NEED TO SET
 GPU=0,1
 NODES=2
-MODEL=MCTG
-SEG_DIR=pseudo_mask
+
+DATASET=VOC12
+DATACONFIG=configs/voc12
+
+TRAINAUGID=${DATACONFIG}/train_aug_id.txt
+TRAINID=${DATACONFIG}/train_id.txt
+VALID=${DATACONFIG}/val_id.txt
+
+INPUTSIZE=448
+SEGDIR=pseudo_mask
+
+MODELNAME=msgformer
+WORKDIR=results_voc/msgformer_${INPUTSIZE}
+
+
 CUDA_VISIBLE_DEVICES=${GPU}
-OMP_NUM_THREADS=${NODES}
-WORKDIR=results_voc/${MODEL}
 
-# #============= Train Pixel Semantic Affnity =============#
-# torchrun --nproc_per_node=${NODES} --nnodes=1 \
-#     steps_voc/train_aff.py \
-#     --work_space ${WORKDIR} \
-#     --batch_per_gpu 4 \
-#     --seed 2 \
-#     --low_alpha 1 \
-#     --high_alpha 3 \
-#     --model_weights checkpoints/res38_cls.pth \
+#============= Train and Infer Pixel Semantic Affnity =============
+OMP_NUM_THREADS=${NODES} \
+torchrun --nproc_per_node=${NODES} --nnodes=1 \
+    train_infer_psa.py \
+    --train True \
+    --dataset ${DATASET} \
+    --work_space ${WORKDIR} \
+    --train_list ${TRAINAUGID} \
+    --weights checkpoints/res38_cls.pth \
+    --seed 3 \
+    --low_alpha 1 \
+    --high_alpha 1.2 \
 
-
-# #============= Infer with Pixel Semantic Affnity =============#
-# python steps_voc/infer_aff.py \
-#     --work_space ${WORKDIR} \
-#     --checkpoint ${WORKDIR}/res38_aff_last.pth \
-#     --infer_list configs/voc12/train_aug.txt \
-#     --cam_out_dir cam_mask \
-#     --seg_out_dir ${SEG_DIR} \
-
+#============= Infer with Pixel Semantic Affnity =============#
+python train_infer_psa.py \
+    --inference True \
+    --dataset ${DATASET} \
+    --work_space ${WORKDIR} \
+    --infer_list ${TRAINID} \
+    --seg_out_dir ${SEGDIR} \
+    --threshold 0.51 \
 
 #============= Evaluate =============#
 python steps_voc/eval_sem_seg.py \
     --work_space ${WORKDIR} \
-    --seg_out_dir ${SEG_DIR} \
+    --seg_out_dir ${SEGDIR} \
+    --infer_list ${TRAINID} \
 
 # # Save the generated mask to zip
-# cd ${WORKDIR} && zip -r ${SEG_DIR}.zip ${SEG_DIR} && cd -
+# cd ${WORKDIR} && zip -r ${SEGDIR}.zip ${SEGDIR} && cd -

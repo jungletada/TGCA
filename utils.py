@@ -12,15 +12,14 @@ from collections import defaultdict, deque
 
 from net.mctformer import MCTformerV2Cam
 from net.mctformer_plus import MCTformerPlusCam
-from net.msgformer import msgformer_cam
-from net.mctnext import mctnext_cam
+from net.mct_adapter import mcta_cam
 from net.srmct import SRMCTformerCam
 
 
 def data_mkdir(directory_path):
     if not os.path.exists(directory_path):
         os.makedirs(directory_path, exist_ok=True)
-        
+  
 
 def get_dataset_dir(data_set):
     if data_set.lower().__contains__('voc'):
@@ -32,18 +31,19 @@ def get_dataset_dir(data_set):
     return dataset_dir
 
 
-def get_dataset_imglist(data_set):
-    if data_set.lower().__contains__('voc'):
-        imglist = 'configs/voc12/val_id.txt'
-    elif data_set.lower().__contains__('coco'):
-        imglist = 'configs/coco/val_id.txt'
-    else:
-        raise NotImplementedError
-    return imglist
+# def get_dataset_imglist(data_set):
+#     if data_set.lower().__contains__('voc'):
+#         imglist = 'configs/voc12/val_id.txt'
+#     elif data_set.lower().__contains__('coco'):
+#         imglist = 'configs/coco/val_id.txt'
+#     else:
+#         raise NotImplementedError
+#     return imglist
 
 
 def log(*args, **kwargs):
-    print(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S:"), *args, **kwargs)
+    print(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S:"),
+           *args, **kwargs)
 
 
 def logger_info(logger_name, log_path='default_logger.log'):
@@ -175,8 +175,8 @@ def create_cam_model(args):
             num_classes=args.num_classes,
             input_size=args.input_size)
         
-    elif 'msgformer' in args.model.lower():
-        model = msgformer_cam(
+    elif 'mcta' in args.model.lower():
+        model = mcta_cam(
             num_classes=args.num_classes,
             input_size=args.input_size)
         
@@ -187,11 +187,6 @@ def create_cam_model(args):
         
     elif 'srmctformer' in args.model.lower():
         model = SRMCTformerCam(
-            num_classes=args.num_classes,
-            input_size=args.input_size)
-        
-    elif 'mctnext' in args.model.lower():
-        model = mctnext_cam(
             num_classes=args.num_classes,
             input_size=args.input_size)
     else:

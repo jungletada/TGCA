@@ -14,7 +14,7 @@ OMP_NUM_THREADS=2  \
     --batch_per_gpu 8 \
     --network resnet38_seg \
     --save_path ${WORKDIR} \
-    --init_weights results_voc/resnet38/ResNet38d_patch_224_best.pth \
+    --init_weights checkpoints/res38_cls.pth \
     --list_path configs/voc12/train_aug_id.txt \
     --seg_pgt_path datasets/VOCdevkit/VOC2012/SegmentationClassAug \
     --img_path datasets/VOCdevkit/VOC2012/JPEGImages \

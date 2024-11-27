@@ -15,10 +15,11 @@ from data.base_seg_dataset import _BaseDataset
 
 IMG_FOLDER_NAME = "JPEGImages"
 ANNOT_FOLDER_NAME = "Annotations"
+LABEL_FOLDER_NAME = "ImageLabel"
 IGNORE = 255
 
 
-CAT_LIST = ['aeroplane', 'bicycle', 'bird', 'boat',
+CAT_LIST = ['background','aeroplane', 'bicycle', 'bird', 'boat',
         'bottle', 'bus', 'car', 'cat', 'chair',
         'cow', 'diningtable', 'dog', 'horse',
         'motorbike', 'person', 'pottedplant',
@@ -35,9 +36,6 @@ palette = [0,0,0,  128,0,0,  0,128,0,  128,128,0,  0,0,128,  128,0,128,  0,128,1
 CAT_NAME_TO_NUM = dict(zip(CAT_LIST,range(len(CAT_LIST))))
 
 
-cls_labels_dict = np.load('configs/voc12/cls_labels.npy', allow_pickle=True).item()
-
-
 def decode_int_filename(int_filename):
     s = str(int(int_filename))
     return s[:4] + '_' + s[4:]
@@ -46,7 +44,10 @@ def decode_int_filename(int_filename):
 def load_image_label_from_xml(img_name, voc12_root):
     from xml.dom import minidom
 
-    elem_list = minidom.parse(os.path.join(voc12_root, ANNOT_FOLDER_NAME, decode_int_filename(img_name) + '.xml')).getElementsByTagName('name')
+    elem_list = minidom.parse(os.path.join(
+        voc12_root, 
+        ANNOT_FOLDER_NAME, 
+        decode_int_filename(img_name) + '.xml')).getElementsByTagName('name')
 
     multi_cls_lab = np.zeros((N_CAT), np.float32)
 
@@ -63,7 +64,9 @@ def load_image_label_list_from_xml(img_name_list, voc12_root):
     return [load_image_label_from_xml(img_name, voc12_root) for img_name in img_name_list]
 
 
-def load_image_label_list_from_npy(img_name_list):
+def load_image_label_list_from_npy(img_name_list, voc12_root):
+    cls_labels_path = os.path.join(voc12_root, LABEL_FOLDER_NAME, 'cls_labels.npy')
+    cls_labels_dict = np.load(cls_labels_path, allow_pickle=True).item()
     return np.array([cls_labels_dict[img_name] for img_name in img_name_list])
 
 
@@ -161,7 +164,7 @@ class VOC12ClassificationDataset(VOC12ImageDataset):
         super().__init__(img_name_list_path, voc12_root,
                  resize_long, rescale, img_normal, hor_flip,
                  crop_size, crop_method)
-        self.label_list = load_image_label_list_from_npy(self.img_name_list)
+        self.label_list = load_image_label_list_from_npy(voc12_root, self.img_name_list)
 
     def __getitem__(self, idx):
         out = super().__getitem__(idx)
@@ -178,7 +181,7 @@ class VOC12ClassificationDataset_Single(VOC12ImageDataset):
                  resize_long, rescale, img_normal, hor_flip,
                  crop_size, crop_method)
         
-        self.label_list = load_image_label_list_from_npy(self.img_name_list)
+        self.label_list = load_image_label_list_from_npy(voc12_root, self.img_name_list)
         self.len = np.sum(self.label_list).astype(np.int)
         self.idx_map = np.zeros(self.len,dtype=np.int)
         self.bias = np.zeros(self.len,dtype=np.int)

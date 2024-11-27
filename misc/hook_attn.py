@@ -1,18 +1,25 @@
 import os
+import csv
 import torch
+
 import argparse
 import numpy as np
+import seaborn as sns
 from tqdm import tqdm
 import os.path as osp
+import matplotlib.pyplot as plt
+
 import torch.nn.functional as F
 from torch import multiprocessing, cuda
 from torch.utils.data import DataLoader
 from torch.backends import cudnn
+
+
 cudnn.enabled = True
 
-import torchutils
-from .utils import create_cam_model
-from net.msg_modules import resize_input_minbound
+from misc import torchutils
+from utils import create_cam_model
+from net.adapter_modules import resize_input_minbound
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -53,7 +60,7 @@ def get_args_parser():
     parser.add_argument('--layer-index', type=int, default=3, help='extract attention maps from the last layers')
     parser.add_argument("--scales", default=(1.0,), help="Multi-scale inferences")
     parser.add_argument("--attn_dir", default="attns_dir", type=str)
-    
+    parser.add_argument("--log_dir", default="log_dir", type=str)
     args = parser.parse_args()
     return args
                                                                                                                         
@@ -79,69 +86,167 @@ def flip_cam(cam_list):
     return cam_list
 
 
-def _work(process_id, model, dataset, args):
-    databin = dataset[process_id]
-    n_gpus = torch.cuda.device_count()
-    
-    data_loader = DataLoader(
-        databin, 
-        shuffle=False, 
-        num_workers=args.num_workers // n_gpus, 
-        pin_memory=True)
+def draw_heat_map(attn_maps, args, img_name, n_dim=2):
+    """Draw heat maps from attention maps.
 
-    with torch.no_grad(), cuda.device(process_id):
+    Args:
+        attn_maps (Tensor): The attention maps to visualize.
+        args (Namespace): The arguments containing output directory and other settings.
+        img_name (str): The name of the image for saving the heat map.
+        n_dim (int): The number of dimensions of the attention maps (2D or 3D).
+    """
+    
+    cmap = "mako"
+    if n_dim == 3:
+        for layer in range(attn_maps.shape[0]):
+            plt.figure(figsize=(20, 20))
+            sns.heatmap(attn_maps[layer], cmap=cmap, cbar=False, square=True)
+            plt.axis("off")
+            output_path = os.path.join(args.attn_dir, f"{img_name}_L{layer + 1}.png")
+            plt.savefig(output_path, bbox_inches='tight', pad_inches=0.)
+            plt.close()
+
+    elif n_dim == 2:
+        plt.figure(figsize=(20, 20))
+        sns.heatmap(attn_maps, cmap=cmap, cbar=False, square=True)
+        plt.axis("off")
+        output_path = os.path.join(args.attn_dir, f"{img_name}_attnsum.png")
+        plt.savefig(output_path, bbox_inches='tight', pad_inches=0.)
+        plt.close()
+    
+    else:
+        raise NotImplementedError
+
+
+def calculate_cosine_similarity(outputs_block):
+    """Calculate the cosine similarity for the outputs of each layer.
+
+    Args:
+        outputs_block (list): A list of outputs from the model layers.
+
+    Returns:
+        list: A list of mean cosine similarities for each layer.
+    """
+    cosine_similarities = []
+    for layer_output in outputs_block:
+        # pair-wise comparison: (N, C)
+        patch_tokens = layer_output[0] 
+        # Normalize the vectors to unit vectors to calculate cosine similarity
+        patch_tokens = F.normalize(patch_tokens, p=2, dim=1, eps=1e-8)  # (N, C)
+        # Compute cosine similarity for all pairs by matrix multiplication
+        # The result will be a (N, N) matrix
+        cosine_sim = torch.matmul(patch_tokens, patch_tokens.T)
+        # Append to the list for this layer
+        all_pairs = cosine_sim.triu(diagonal=0)
+        cosine_similarities.append(all_pairs.mean())
+
+    return cosine_similarities
+
+
+def calculate_loss_class_tokens(outputs_block, label):
+    """Calculate the loss for class tokens based on the model outputs and labels.
+
+    Args:
+        outputs_block (list): A list of outputs from the model layers.
+        label (Tensor): The ground truth labels for the inputs.
+    """
+    # loss = []
+    # for layer, layer_output in enumerate(outputs_block):
+    #     x_cls = layer_output[0] # B, K, C
+    #     cls_logits = x_cls.mean(dim=-1)
+    #     loss_per_layer = F.multilabel_soft_margin_loss(
+    #         cls_logits, label)
+    #     loss.append(loss_per_layer)
+    # return loss
+    final_out = outputs_block[-1][0]
+    cls_logits = final_out.mean(dim=-1)
+    print(cls_logits)
+    print(label)
+
+
+def _work_tokens(model, dataset, args):
+    data_loader = DataLoader(
+        dataset,
+        shuffle=False,
+        num_workers=args.num_workers,
+        pin_memory=True)
+    
+    column_names = list(range(1, model.n_layers + 1))
+
+    with open("output_token.csv", mode="w", newline="", encoding="utf-8") as file:
         
-        model.cuda()
-        model.eval()
+        writer = csv.writer(file)
+        writer.writerow(column_names)
         
-        for iter_, pack in enumerate(tqdm(data_loader, position=process_id, desc=f'[PID{process_id}]')):
-            img_name = pack['name'][0] # Img_id->str
-            label = pack['label'][0]   # image-level label->Torch.Tensor [1]
-            size = pack['size']        # image size->Torch.tensor [2]
-            
-            valid_cat = torch.nonzero(label)[:, 0] # get validate class->[#val_cls]
-            
-            try:
-                outputs = [model(
-                    resize_input_minbound(x=img[0].cuda(non_blocking=True),min_size=args.min_size),
-                    return_attn=True) # img[0]->[(2, 3, H', W')]
-                    for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
+        with torch.no_grad():
+            model.cuda()
+            model.eval()
+            for iter_, pack in enumerate(tqdm(data_loader)):
+                img_name = pack['name'][0] # Img_id->str
+                label = pack['label'][0]   # image-level label->Torch.Tensor [1]
+                size = pack['size']        # image size->Torch.tensor [2]
                 
-            except RuntimeError as e:
-                if "out of memory" in str(e):
-                    # If we run out of memory, clear cache and try with smaller size
-                    # print(f'{str(e)}, with image size={size}')
-                    outputs = [model(
-                        resize_input_minbound(x=img[0].cuda(non_blocking=True),min_size=int(args.min_size * 0.75)),
-                        return_attn=True) # img[0]->[(2, 3, H', W')]
+                valid_cat = torch.nonzero(label)[:, 0] # get validate class->[#val_cls]
+                outputs = [model(img[0].cuda(non_blocking=True)) # img[0]->[(2, 3, H', W')]
                         for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
-                else:
-                    raise e
-                
-            # We only need non flip image for ablation
-            attn_weights = outputs[0][0]
-            print(attn_weights.shape)
-            # #=================== high resolution cam list ===================#
-            
-            # upsample_cam_list = [# upsample all multi-scale CAMs
-            #         F.interpolate(cam, size, mode='bilinear', align_corners=False)
-            #         for cam in outputs] # ->[(2, Cls, H, W)
-            # upsample_cam_list = flip_cam(upsample_cam_list)
-            # upsample_cam = torch.sum(torch.stack(upsample_cam_list, 0), 0) # (Cls, H, W)
-            
-            # upsample_cam = upsample_cam[valid_cat]
-            # upsample_cam = normalize_cam(upsample_cam)
-            
-            # cam_dict = {}
-            # upsample_cam = upsample_cam.cpu().numpy()
-            # for i, cls in enumerate(valid_cat):
-            #     cam_dict[cls] = upsample_cam[i]
-                
-            # np.save(osp.join(args.attn_dir, img_name + '.npy'), cam_dict)  
-        
-            if process_id == n_gpus - 1 and iter_ % (len(databin) // 20) == 0:
-                print("%d " % ((5*iter_+1) // (len(databin) // 20)), end='')
+                # label = label.to(outputs[0][0].device)
+                # loss = calculate_loss_class_tokens(outputs[0], label)
+                # rounded_values = [round(item.item(), 3) for item in loss]
+                # writer.writerow(rounded_values)
+                attn_maps = outputs[0][:, 0, :, :].cpu().numpy()
+                attn_maps = np.sum(attn_maps, axis=0) # sum over all layer
+                draw_heat_map(attn_maps, args, img_name, n_dim=3)
+                print(attn_maps.shape, size)
+                # Generate heatmaps for each layer's attention map
+                if iter_ % (len(dataset) // 20) == 0:
+                    print("%d " % ((5*iter_+1) // (len(dataset) // 20)), end='')
                     
+
+def _work_attn(model, dataset, args):
+    data_loader = DataLoader(
+        dataset,
+        shuffle=False,
+        num_workers=args.num_workers,
+        pin_memory=True)
+            
+    column_names = list(range(1, 12 + 1))
+    nc = args.num_classes
+
+    with open("output.csv", mode="w", newline="", encoding="utf-8") as file:
+        
+        writer = csv.writer(file)
+        writer.writerow(column_names)
+        all_cls_attn = []
+        all_pat_attn = []
+        with torch.no_grad():
+            model.cuda()
+            model.eval()
+            for iter_, pack in enumerate(tqdm(data_loader)):
+                img_name = pack['name'][0] # Img_id->str
+                label = pack['label'][0]   # image-level label->Torch.Tensor [1]
+                size = pack['size']        # image size->Torch.tensor [2]
+
+                outputs = [model(img[0].cuda(non_blocking=True), return_attn=True) # img[0]->[(2, 3, H', W')]
+                                for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
+                attn_maps = outputs[0][:, 0, :, :] # L x (Cls+Np) x (Cls+Np)
+                L, N, _ = attn_maps.shape
+                x2cls, x2pat = attn_maps.split((nc, N-nc), dim=-1)
+
+                sum_cls = x2cls.sum(dim=-1).mean(dim=-1).cpu().numpy()
+                sum_pat = x2pat.sum(dim=-1).mean(dim=-1).cpu().numpy()
+                all_cls_attn.append(sum_cls)
+                all_pat_attn.append(sum_pat)
+
+                if iter_ % (len(dataset) // 20) == 0:
+                    print("%d" % ((5*iter_+1) // (len(dataset) // 20)), end='')
+
+        # Convert list of arrays to 2D numpy array
+        cls_attn = np.array(all_cls_attn).mean(axis=0) # num_imges, L
+        pat_attn = np.array(all_pat_attn).mean(axis=0) # num_imges, L
+
+        writer.writerow(cls_attn)
+        writer.writerow(pat_attn)
+
 
 if __name__ == '__main__':
     args = get_args_parser()
@@ -152,12 +257,12 @@ if __name__ == '__main__':
     # change to multi-scale dataset
     if args.dataset == 'VOC12':
         args.dataset = 'VOC12MS'
+        args.num_classes = 20
     elif args.dataset == 'COCO':
         args.dataset = 'COCOMS'
+        args.num_classes = 80
     else:
         raise NotImplementedError
-    
-    args.min_size = 448 if args.input_size >= 448 else 224
     
     dataset, num_classes = build_dataset(
         is_train=False, make_cam=True, args=args)
@@ -168,12 +273,14 @@ if __name__ == '__main__':
     model.load_state_dict(model_dict)
     model.eval()
     
-    print(f'Using {args.checkpoint} for making cams.')
-    n_gpus = torch.cuda.device_count()
-    dataset = torchutils.split_dataset(dataset, n_gpus)
+    print(f'Using {args.checkpoint} for analysis.')
     
+    # print('[ ', end='')
+    # _work_attn(model, dataset, args)
+    # print(']')
+
     print('[ ', end='')
-    multiprocessing.spawn(_work, nprocs=n_gpus, args=(model, dataset, args), join=True)
+    _work_tokens(model, dataset, args)
     print(']')
 
     torch.cuda.empty_cache()

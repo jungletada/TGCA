@@ -1,0 +1,20 @@
+GPU: "0,1" 
+DATASET: VOC12
+DATACONFIG: configs/voc12
+TRAINAUGID: configs/voc12/train_aug_id.txt
+TRAINID: configs/voc12/train_id.txt
+VALID: configs/voc12/val_id.txt
+INPUTSIZE: 448
+SEG_DIR: pseudo_mask
+CRF_DIR: crf_mask
+MODELNAME: msgformer
+WORKDIR: results_voc/msgformer_448
+TRAIN_PARAMS:
+  train: True
+  dataset: VOC12
+  work_space: results_voc/msgformer_448
+  train_list: configs/voc12/train_aug_id.txt
+  weights: checkpoints/res38_cls.pth
+  seed: 3
+  low_alpha: 1
+  high_alpha: 1.2

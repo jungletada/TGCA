@@ -7,21 +7,20 @@ import torch.nn.functional as F
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
 
-from net.msg_modules import DownConv, SemanticAttnModule
-from net.msg_modules import SpatialPriorGNN
+from net.adapter_modules import DownConv, SemanticAttnModule
+from net.adapter_modules import SpatialPriorGNN
 from net.mct_vit import MCTViT, _cfg
 
+__all__ = ['mcta']
 
-__all__ = ['mctnext']
 
-
-class MCTNext(MCTViT):
+class MCTAdapter(MCTViT):
     """Multi-scale Graph Attention Vision Transformer."""
     def __init__(self, *args, decay_parameter=0.996, input_size=448, **kwargs):
         """
         Args:
             *args: Variable length argument list.
-            decay_parameter (float): Decay parameter for the model.
+            decay_parameter (float): Decay parameter for the GWRP.
             input_size (int): Size of the input image.
             **kwargs: Arbitrary keyword arguments.
         """
@@ -32,28 +31,25 @@ class MCTNext(MCTViT):
         self.input_size = input_size
         img_size = to_2tuple(input_size)
         patch_size = to_2tuple(self.patch_embed.patch_size)
-        self.Hp, self.Wp = math.ceil(img_size[0] / patch_size[0]), math.ceil(img_size[1] / patch_size[1])
+        self.Hp = math.ceil(img_size[0] / patch_size[0])
+        self.Wp = math.ceil(img_size[1] / patch_size[1])
         self.num_patches = self.Hp * self.Wp
         self.spatial_dims = [self.embed_dim] * self.stages
-   
+
         self.dilations = [1, 2, 3, 4]
         self.num_knn = [18, 15, 12, 9]
-       
-        assert input_size >= 224, f"Input size {input_size} is too small."
-
-        self.num_knn_spatial = [8, 6, 4, 2]
         self.spatial_scales = [16, 16, 32, 64]
-        self.dilations_spatial = [2, 2, 1, 1]
 
         self.spatial_strides = [
             self.spatial_scales[i+1] // self.spatial_scales[i]
             for i in range(len(self.spatial_scales)-1)]
-
+        
+        spt_strides=[self.spatial_scales[0]//4] + self.spatial_strides
         self.spatial_prior = SpatialPriorGNN(
             inplanes=96,
             embed_dim=self.embed_dim,
             num_heads=self.num_heads,
-            spt_strides=[self.spatial_scales[0]//4] + self.spatial_strides)
+            spt_strides=spt_strides)
                 
         self.decay_parameter = decay_parameter
         self.spatial_sizes = [(math.ceil(img_size[0] / scale), math.ceil(img_size[1] / scale)) 
@@ -86,14 +82,7 @@ class MCTNext(MCTViT):
                 proj_drop=0.,
                 drop_path=0.,
                 qkv_bias=True,
-                norm_layer=partial(nn.LayerNorm, eps=1e-6),
-                kernel_dict={
-                    'backbone':self.num_knn[i],
-                    'spatial':self.num_knn_spatial[i]}, 
-                dilation_dict={
-                    'backbone':self.dilations[i],
-                    'spatial':self.dilations_spatial[i]}
-                )
+                norm_layer=partial(nn.LayerNorm, eps=1e-6))
             for i in range(self.stages)])
 
         self.down_convs = nn.ModuleList([
@@ -152,7 +141,7 @@ class MCTNext(MCTViT):
         Input: x -> list[B x C x H^ x W^]
         Return: cls-tokens -> B x Cls x C
         """
-        x_cls = [self.globalweightedpooling(f).unsqueeze(-1) for f in x]  # list [B x C x 1]
+        x_cls = [self.gwr_pooling(f).unsqueeze(-1) for f in x]  # list [B x C x 1]
         x_cls = torch.cat(x_cls, dim=-1)        # B x C x 4
         x_cls = self.proj_cls_embed(x_cls)      # B x C x Cls
         x_cls = x_cls.permute(0, 2, 1).contiguous()  # B x Cls x C
@@ -163,7 +152,7 @@ class MCTNext(MCTViT):
         Input:
             x: B x 3 x H x W
         Return:
-            x_cls: [B x Cls x C] 
+            x_cls: [B x K x C] 
             x_vit: [B x Np x C]
             attn_weights: list[B x Hd x N' x N']
             x_spatial: list[B x C x H^ x W^]
@@ -228,26 +217,46 @@ class MCTNext(MCTViT):
         patch_tokens = patch_tokens.permute([0, 3, 1, 2]).contiguous() # B x C x Hp x Wp
         return patch_tokens
     
-    def globalweightedpooling(self, x):
+    def gwr_pooling(self, x):
         """
         Input:
-            x->B x C x Hp x Wp
+            x->B x K x Hp x Wp
         Return
-            out-> B x C
+            out-> B x K
         """
         B, C, Hp, Wp = x.shape
         N = Hp * Wp
         flatten_x = x.view(B, C, -1).permute(0, 2, 1) # B x (Hp x Wp) x C
         sorted_x, _ = torch.sort(flatten_x, -2, descending=True)
-        weights = torch.logspace(start=0, end=N-1, steps=N, base=self.decay_parameter).cuda()
+        weights = torch.logspace(start=0, end=N-1, steps=N, base=self.decay_parameter).to(x.device)
         out = torch.sum(sorted_x * weights.unsqueeze(0).unsqueeze(-1), dim=-2) / weights.sum()
         return out
-        
-    def foward_tokens(self, patch_tokens):
-        """ MCTformer Plus: Weighted Patch Tokens """
-        patch_tokens = self.head(patch_tokens) # B x Cls x Hp x Wp
-        patch_logits = self.globalweightedpooling(patch_tokens)
-        return patch_logits
+
+    def gwr_pooling_top_k(self, x, K=6):
+        """
+        Input:
+            x -> B x K x Hp x Wp
+            K -> Number of top values to weight as 1
+        Return:
+            out -> B x K
+        """
+        B, C, Hp, Wp = x.shape
+        N = Hp * Wp
+        flatten_x = x.view(B, C, -1).permute(0, 2, 1)  # B x (Hp x Wp) x K
+        sorted_x, _ = torch.sort(flatten_x, dim=-2, descending=True)
+        # Create weights for Top-K values (set to 1)
+        top_k_weights = torch.ones(K, device=x.device)  # Weight of 1 for Top-K values
+        # Create weights for the remaining values
+        remaining_weights = torch.logspace(
+            start=K, end=N-1, steps=N-K, base=self.decay_parameter, device=x.device)
+        # Combine the Top-K and remaining weights
+        all_weights = torch.cat((top_k_weights, remaining_weights), dim=0)
+        # Broadcast weights to match the dimensions of sorted_x
+        weights = all_weights.unsqueeze(0).unsqueeze(-1)  # Shape: 1 x N x 1
+        # Apply the weights to sorted_x and compute the weighted sum
+        out = torch.sum(sorted_x * weights, dim=-2) / weights.sum()
+
+        return out
     
     def forward(self, x):
         """
@@ -260,63 +269,67 @@ class MCTNext(MCTViT):
         last_cls_tokens = feat_dict['x_cls_last'] # [B, K, C]
         cls_logits = last_cls_tokens.mean(-1) # [B, K]
         
-        x_vit = self.reshape_patch_tokens(feat_dict['x_vit'], h, w) # [B, C, Hp, Wp]
+        x_vit = self.reshape_patch_tokens(
+            feat_dict['x_vit'], h, w) # [B, C, Hp, Wp]
         x_out = [x_vit]
-        
         out_size = x_vit.shape[2:]
         for feat in feat_dict['x_branch']:
-            feat = F.interpolate(feat, size=out_size, mode="bilinear", align_corners=False)
+            feat = F.interpolate(
+                feat,
+                size=out_size,
+                mode="bilinear",
+                align_corners=False)
             x_out.append(feat)
        
         x_out = torch.cat(x_out, dim=1)
         x_out = self.channel_reduction(x_out) # [B, C, Hp, Wp]
-        # ------------------------------------------------------#
+        
         x_out = self.head(x_out) # [B, K, Hp, Wp]
-        x_logits = self.globalweightedpooling(x_out)
+        x_logits = self.gwr_pooling_top_k(x_out)
+        
         return cls_logits, x_logits
 
 
-class MCTNextCam(MCTNext):
-    """Class Activation Map variant of MSGFormer for visualization purposes."""
-    def __init__(self, *args, cls_ind=4, **kwargs):
+class MCTAdapterCam(MCTAdapter):
+    """Class Activation Map variant of MCTA for visualization purposes."""
+    def __init__(self, *args, cls_ind=4, pat_ind=8, **kwargs):
         """fuse_layers: The attention of the last L layers to fuse"""
         super().__init__(*args, **kwargs)
         self.cls_ind = cls_ind # fusion layer for mixing class-to-patch
-
+        self.pat_ind = pat_ind
+        
     @torch.no_grad()
     def get_cam(self, tokens, attn_weights):
         """
         Input: 
             tokens: patch tokens from the last backbone layer
-            attn_weights: attention weights from L layers -> L x B x d x (Cls+Np) x (Cls+Np)
+            attn_weights: attention weights from L layers -> L x B x d x (K+Np) x (K+Np)
         Output: 
-            Refined class activation maps -> B x Cls x Hp x Wp
+            Refined class activation maps -> B x K x Hp x Wp
         """
         b, nc, hp, wp = tokens.shape
 
         if self.cls_ind == 0:
-            cams = tokens.detach().clone()   # B x Cls x Hp x Wp
+            cams = tokens.detach().clone()   # B x K x Hp x Wp
             cams = F.relu(cams)         # With ReLU Activation
 
         else:
-            attn_maps = attn_weights[-self.cls_ind:].mean(0)         # B x (Cls+Np) x (Cls+Np)
-            cls2pat = attn_maps[:, :nc, nc:].reshape([b, nc, hp, wp]) # B x Cls x Hp x Wp
-            pat2cls = attn_maps[:, nc:, :nc].reshape([b, hp, wp, nc]).permute(0, 3, 1, 2) # B x Cls x Hp x Wp
-            patch_cam = tokens.detach().clone()   # B x Cls x Hp x Wp
+            attn_maps = attn_weights[-self.cls_ind:].mean(0)         # B x (K+Np) x (K+Np)
+            cls2pat = attn_maps[:, :nc, nc:].reshape([b, nc, hp, wp]) # B x K x Hp x Wp
+            patch_cam = tokens.detach().clone()   # B x K x Hp x Wp
             patch_cam = F.relu(patch_cam)         # With ReLU Activation
-            cls_attn = (cls2pat + pat2cls) / 2
-            cams = torch.pow(cls_attn * patch_cam, 1/2)
+            cams = torch.pow(cls2pat * patch_cam, 1/2)
 
         # Apply pat2pat affinity refinement
         pat2pat = attn_weights[:, :, nc:, nc:] #  L x B x Np x Np
         pat2pat = torch.sum(pat2pat, dim=0)      # B x Np x Np
         cams = torch.matmul(
                 pat2pat.unsqueeze(1),    # B x 1 x Np x Np
-                cams.view(b, nc, -1, 1) # B x Cls x Np x 1
+                cams.view(b, nc, -1, 1) # B x K x Np x 1
             ).reshape(b, nc, hp, wp)
-        
+
         return cams
-    
+
     @torch.no_grad()
     def get_cls2pat(self, tokens, attn_weights):
         """
@@ -332,45 +345,58 @@ class MCTNextCam(MCTNext):
         attn_maps = attn_weights[-self.cls_ind:].mean(0)         # B x (Cls+Np) x (Cls+Np)
         cls2pat = attn_maps[:, :nc, nc:].reshape([B, nc, Hp, Wp]) # B x Cls x Hp x Wp
         return cls2pat
-    
+
     @torch.no_grad()
-    def forward(self, x, return_attn=False):
-        h, w = x.shape[2:]
+    def forward(self, x, bg_score=0.5, bg_scale=1.5, return_cls=False):
+        b, _, h, w = x.shape
         feat_dict = self.forward_features(x)
 
         attn_weights = torch.mean(torch.stack(feat_dict['attn']), dim=2).detach()
-        if return_attn: # L x B x (Cls+Np) x (Cls+Np)
-            return attn_weights
-        
+
         patch_tokens = self.reshape_patch_tokens(feat_dict['x_vit'], h, w) # B x C x Hp x Wp
         # ----------------------------------------------- #
-        out_spatial = [patch_tokens]
+        x_out = [patch_tokens]
         out_size = patch_tokens.shape[2:]
         for feat in feat_dict['x_branch']:
             feat = F.interpolate(
                 feat, size=out_size, mode="bilinear", align_corners=False)
-            out_spatial.append(feat)
+            x_out.append(feat)
         # concat spatial and patch tokens
-        out_spatial = torch.cat(out_spatial, dim=1)
-        out_spatial = self.channel_reduction(out_spatial)
-        out_spatial = self.head(out_spatial)  # B x Cls x Hp x Wp
+        x_out = torch.cat(x_out, dim=1)
+        x_out = self.channel_reduction(x_out)
+        x_out = self.head(x_out)  # B x K x Hp x Wp
+        
+        last_cls_tokens = feat_dict['x_cls_last'] # [B, K, C]
+        cls_logits = last_cls_tokens.mean(-1) # [B, K]
+        
+        pseudo_label = torch.ones(b, self.num_classes).to(x.device)
+        pseudo_label[cls_logits < 0] = 0
+        
+        # cls_guidance = torch.ones(b, self.num_classes).to(x.device) * bg_scale
+        # cls_guidance[cls_logits <= 0] = bg_score
+        # cg = cls_guidance.unsqueeze(-1).unsqueeze(-1)
+        # x_out = cg * x_out
         outputs = self.get_cam(
-            out_spatial, attn_weights)
+            x_out, attn_weights)
+        
+        if return_cls:
+            return pseudo_label, outputs
+        
         return outputs
 
 
 @register_model
-def mctnext(pretrained=False, **kwargs):
-    """Create a MSGFormer model instance.
+def mcta(pretrained=False, **kwargs):
+    """Create a MCTA model instance.
        Base: deit_small_patch16_224.fb_in1k
     Args:
         pretrained (bool): Whether to load pretrained weights
-        **kwargs: Additional arguments passed to the MSGFormer constructor
+        **kwargs: Additional arguments passed to the MCTA constructor
         
     Returns:
-        MSGFormer: The constructed model
+        MCTA: The constructed model
     """
-    model = MCTNext(
+    model = MCTAdapter(
         patch_size=16,
         embed_dim=384,
         depth=12,
@@ -399,16 +425,73 @@ def mctnext(pretrained=False, **kwargs):
     return model
 
 
-def mctnext_cam(**kwargs):
-    """Create a MSGFormerCam small model instance.
+@register_model
+def mcta_base(pretrained=False, **kwargs):
+    """Create a MCTA model instance.
+       Base: deit_base_patch16_224.fb_in1k
+    Args:
+        pretrained (bool): Whether to load pretrained weights
+        **kwargs: Additional arguments passed to the MCTA constructor
+        
+    Returns:
+        MCTA: The constructed model
+    """
+    model = MCTAdapter(
+        patch_size=16,
+        embed_dim=768,
+        depth=12,
+        num_heads=12,
+        **kwargs)
+
+    model.default_cfg = _cfg()
+
+    if pretrained:
+        checkpoint = torch.hub.load_state_dict_from_url(
+            url='https://dl.fbaipublicfiles.com/deit/deit_base_patch16_224-b5f2ef4d.pth',
+            map_location="cpu", check_hash=True)['model']
+        model_dict = model.state_dict()
+
+        for k in ['head.weight', 'head.bias', 'head_dist.weight', 'head_dist.bias']:
+            if k in checkpoint and checkpoint[k].shape != model_dict[k].shape:
+                print(f"Removing key {k} from pretrained checkpoint")
+                del checkpoint[k]
+
+        pretrained_dict = {k: v for k, v in checkpoint.items()
+                           if k in model_dict}
+        pretrained_dict = {k: v for k, v in pretrained_dict.items()
+                           if k not in ['cls_token', 'pos_embed']}
+        model_dict.update(pretrained_dict)
+        model.load_state_dict(model_dict)
+    return model
+
+
+def mcta_cam(**kwargs):
+    """Create a MCTACam small model instance.
     
     Args:
-        **kwargs: Additional arguments passed to the MSGFormerCam constructor.
+        **kwargs: Additional arguments passed to the MCTACam constructor.
     """
-    model = MCTNextCam(
+    model = MCTAdapterCam(
         patch_size=16,
         embed_dim=384,
         depth=12,
         num_heads=6,
         **kwargs)
     return model
+    
+    
+def mcta_base_cam(**kwargs):
+    """Create a MCTACam model instance.
+    
+    Args:
+        **kwargs: Additional arguments passed to the MCTACam constructor.
+    """
+    model = MCTAdapterCam(
+        patch_size=16,
+        embed_dim=768,
+        depth=12,
+        num_heads=12,
+        **kwargs)
+    return model
+     
+     

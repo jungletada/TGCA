@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 
+
 def get_indices_of_pairs(radius, size):
     search_dist = []
     for x in range(1, radius):

@@ -6,24 +6,27 @@ import numpy as np
 from PIL import Image
 import os.path as osp
 from torch.utils.data import Dataset
+
 sys.path.append(os.path.dirname(__file__) + os.sep + '../')
-from data.crf_utils import refine_crf_cam
+from dataloaders.crf_utils import refine_crf_cam
 
 
 TRAIN_FOLDER_NAME = "train2014"
 VAL_FOLDER_NAME = "val2014"
 ANNOT_FOLDER_NAME = "Annotations"
+LABEL_FOLDER_NAME = 'ImageLabel'
 
 
-def load_image_label_list_from_npy_coco(img_name_list):
-    label_file_path = 'configs/coco/COCO_cls_labels.npy'
+def load_image_label_list_from_npy_coco(coco_root, img_name_list):
+    label_file_path = osp.join(coco_root, LABEL_FOLDER_NAME, 'COCO_cls_labels.npy')
     cls_labels_dict = np.load(label_file_path, allow_pickle=True).item()
     label_list = [cls_labels_dict[img_name + '.jpg'] for img_name in img_name_list]   
     return label_list
 
 
-def load_image_label_list_from_npy(img_name_list):
-    cls_labels_dict = np.load('configs/coco/COCO_cls_labels.npy').item()
+def load_image_label_list_from_npy(coco_root, img_name_list):
+    label_file_path = osp.join(coco_root, LABEL_FOLDER_NAME, 'COCO_cls_labels.npy')
+    cls_labels_dict = np.load(label_file_path, allow_pickle=True).item()
     return [cls_labels_dict[img_name] for img_name in img_name_list]
 
 
@@ -66,7 +69,7 @@ class COCOImageDataset(Dataset):
 class COCOClsDataset(COCOImageDataset):
     def __init__(self, img_name_list_path, coco_root, transform=None):
         super().__init__(img_name_list_path, coco_root, transform)
-        self.label_list = load_image_label_list_from_npy(self.img_name_list)
+        self.label_list = load_image_label_list_from_npy(coco_root, self.img_name_list)
 
     def __getitem__(self, idx):
         name, img = super().__getitem__(idx)

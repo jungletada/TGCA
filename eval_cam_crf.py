@@ -8,13 +8,14 @@ import numpy as np
 import os.path as osp
 from tqdm import tqdm
 import PIL.Image as Image
-from torch import multiprocessing, cuda
+from torch import multiprocessing
+import torch.nn.functional as F
 
 from misc import torchutils
-from data.coco.dataloader_psa import COCOSegmentationLabelDataset
-from data.voc12.dataloader_psa import VOCSegmentationLabelDataset
+from dataloaders.coco.dataloader_psa import COCOSegmentationLabelDataset
+from dataloaders.voc12.dataloader_psa import VOCSegmentationLabelDataset
 from engine import calc_semantic_segmentation_confusion
-from data.crf_utils import crf_inference
+from misc.dcrf import DenseCRF
 
 
 def logfile(args, msg):
@@ -101,6 +102,22 @@ def run_eval(dataset, args):
 
 
 def make_cam_crf(process_id, dataset, args):
+    """Generates Class Activation Maps (CAM) using CRF.
+
+    Args:
+        process_id (int): The index of the process.
+        dataset (list): The dataset to evaluate.
+        args (Namespace): The arguments containing configuration settings.
+    """
+    crf_inference = DenseCRF(
+        iter_max=5,
+        pos_xy_std=3,
+        pos_w=3,
+        bi_xy_std=65,
+        bi_rgb_std=3,
+        bi_w=3,
+    )
+    
     databin = dataset[process_id]
     num_images = len(databin)
     for i in tqdm(range(num_images)):
@@ -109,8 +126,9 @@ def make_cam_crf(process_id, dataset, args):
         filename = pack['name_id']
 
         try:
-            cam_dict = np.load(osp.join(args.eval_cam_dir, filename + '.npy'), 
-                            allow_pickle=True).item()
+            cam_dict = np.load(
+                osp.join(args.eval_cam_dir, filename + '.npy'), 
+                allow_pickle=True).item()
         except EOFError as e:
             print(f'{e}, {filename}')
             
@@ -121,32 +139,57 @@ def make_cam_crf(process_id, dataset, args):
             continue
             
         cams = np.stack(list(cam_dict.values()), axis=0) # (#val_cls, H, W)
-        # prob = np.pad(
-        #     cams, 
-        #     ((1, 0), (0, 0), (0, 0)), 
-        #     mode='constant', 
-        #     constant_values=args.threshold)
         bg_score = np.power(1 - np.max(cams, axis=0, keepdims=True), args.alpha)
         cams = np.concatenate((bg_score, cams), axis=0)
-        prob = crf_inference(image, cams, labels=cams.shape[0])
+        prob = crf_inference(image, cams)
         
         cls_labels = np.argmax(prob, axis=0)
         keys = (torch.stack(tuple(cam_dict.keys())) + 1).numpy()
         keys = np.pad(keys, (1, 0), mode='constant')
+        
         cls_labels = keys[cls_labels].astype(np.uint8)
+        
         mask = Image.fromarray(cls_labels, mode='L')
         mask.save(osp.join(args.crf_cam_dir, filename + '.png'))
+        
+        # cams = np.stack(list(cam_dict.values()), axis=0) # (#val_cls, H, W)
+        
+        # bg_score_h = np.power(1 - np.max(cams, axis=0, keepdims=True), 1.1)
+        # cams_h = np.concatenate((bg_score_h, cams), axis=0)
+        
+        # bg_score_l = np.power(1 - np.max(cams, axis=0, keepdims=True), 1)
+        # cams_l = np.concatenate((bg_score_l, cams), axis=0)
+        
+        # prob_h = post_processor(image, cams_h)
+        # prob_l = post_processor(image, cams_l)
+        
+        # keys = np.stack(tuple(cam_dict.keys())) + 1
+        # keys = np.pad(keys, (1, 0), mode='constant')
+
+        # pred_h = np.argmax(prob_h, axis=0)
+        # pred_h = keys[pred_h]
+        
+        # pred_l = np.argmax(prob_l, axis=0)
+        # pred_l = keys[pred_l]
+
+        # pred = pred_h.copy()
+        # pred[pred_h == 0] = 255
+        # pred[(pred_h + pred_l) == 0] = 0
+
+        # _pred = np.squeeze(pred).astype(np.uint8)
+        # mask = Image.fromarray(_pred, mode='L')
+        # mask.save(osp.join(args.crf_cam_dir, filename + '.png'))
 
      
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Evaluate CAMs', add_help=False)
     parser.add_argument('--use_crf', action='store_true', help='use crf to make CAM.')
     parser.add_argument('--dataset', default='', type=str, help='name of dataset')
-    parser.add_argument('--mscoco_root', default='datasets/MSCOCO', type=str, help='COCO dataset path')
-    parser.add_argument('--voc12_root', default='datasets/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
-    parser.add_argument("--train_list", default="configs/voc12/train_aug_id.txt", type=str, 
-                        help='configs/coco/train_id.txt or configs/voc12/train_aug_id.txt')
-    parser.add_argument('--work_space', default='results_coco/msgformer', help='work space directory')
+    parser.add_argument('--mscoco_root', default='data/MSCOCO', type=str, help='COCO dataset path')
+    parser.add_argument('--voc12_root', default='data/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
+    parser.add_argument("--id_list", default="train_aug_id.txt", type=str, 
+                        help='train_id.txt or train_aug_id.txt')
+    parser.add_argument('--work_space', default='results', help='work space directory')
     parser.add_argument('--eval_cam_dir', default='cam_mask', help='cam_mask directory')
     parser.add_argument('--log_file', default='eval_cam.log', type=str, 
                         help='log file to save the results')
@@ -154,7 +197,7 @@ if __name__ == '__main__':
                         help='log dir to save the results')
     parser.add_argument('--curve_threshold', action='store_true', help='whether to use a range of thresholds')
     parser.add_argument('--threshold', default=0.45, type=float, help='threshold for evaluation as background')
-    parser.add_argument('--alpha', default=1.35, type=float, help='use alpha to set background')
+    parser.add_argument('--alpha', default=1.15, type=float, help='use alpha to set background')
     parser.add_argument("--crf_cam_dir", default="crf_mask", type=str, help="crf mask path")
     args = parser.parse_args()
     #----------------------------------------------------------------------------------#
@@ -168,34 +211,37 @@ if __name__ == '__main__':
     if args.dataset == 'VOC12':
         dataset = VOCSegmentationLabelDataset(
             data_dir=args.voc12_root,
-            id_list_file=args.train_list)
-        args.low_thres, args.high_thres = 40, 55
+            id_list_file=args.id_list)
+        args.low_thres, args.high_thres = 44, 55
 
     elif args.dataset == 'COCO':
         dataset = COCOSegmentationLabelDataset(
             data_dir=args.mscoco_root,
-            id_list_file=args.train_list,
+            id_list_file=args.id_list,
             annotation_dir='MaskSets')
-        args.low_thres, args.high_thres = 40, 55
+        args.low_thres, args.high_thres = 44, 55
     else:
         raise NotImplementedError
 
-    time = datetime.datetime.now().strftime("%Y%m%d-%H%M") 
-    args.log_file = osp.join(args.log_dir, f"eval_cam_{time}.log")
-    
+    time = datetime.datetime.now().strftime("%Y%m%d-%H%M")
 
+    current_session = 'train' if 'train' in args.id_list else 'val'
     if not args.use_crf:
+        args.log_file = osp.join(args.log_dir, 
+                                 f"eval-cam-crf-{current_session}-{time}.log")
         with open(args.log_file, "w", encoding="utf-8") as f:
             f.write(f"{time}: Evaluating CAMs for {args.dataset}\n")
         run_eval(args=args, dataset=dataset)
         torch.cuda.empty_cache()
         
     else:
-        nprocs = 8
-        split_dataset = torchutils.split_dataset(dataset, nprocs)
+        args.log_file = osp.join(args.log_dir, 
+                                 f"eval-cam-{current_session}-{time}.log")
+        EVAL_NPROCS = 8
+        split_dataset = torchutils.split_dataset(dataset, EVAL_NPROCS)
         multiprocessing.spawn(
             make_cam_crf,
-            nprocs=nprocs,
+            nprocs=EVAL_NPROCS,
             args=(split_dataset, args),
             join=True)
         torch.cuda.empty_cache()

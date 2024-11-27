@@ -85,9 +85,9 @@ def _work(process_id, model, dataset, args):
     n_gpus = torch.cuda.device_count()
     
     data_loader = DataLoader(
-        databin, 
-        shuffle=False, 
-        num_workers=args.num_workers // n_gpus, 
+        databin,
+        shuffle=False,
+        num_workers=args.num_workers // n_gpus,
         pin_memory=False)
 
     with torch.no_grad(), cuda.device(process_id):
@@ -96,7 +96,6 @@ def _work(process_id, model, dataset, args):
             img_name = pack['name'][0] # Img_id->str
             label = pack['label'][0]   # image-level label->Torch.Tensor [1]
             size = pack['size']        # image size->Torch.tensor [2]
-            original_img = pack['original']
             outputs = [model.forward(img[0].cuda(non_blocking=True)) # img[0]->[(2, 3, H', W')]
                        for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
             
@@ -127,7 +126,7 @@ def _work(process_id, model, dataset, args):
                 # Apply Color Map
                 heatmap = cv2.applyColorMap(cam_normalized, cv2.COLORMAP_JET)
                 alpha = 0.5  # transparentcy
-                base_img = (original_img[0]).cpu().numpy()
+                base_img = cv2.imread(os.path.join(args.voc12_root, 'JPEGImages', img_name + '.jpg'))
                 overlay = cv2.addWeighted(base_img, 1 - alpha, heatmap, alpha, 0)
                 cv2.imwrite(img_cls_name, overlay)
             
@@ -155,7 +154,7 @@ if __name__ == '__main__':
     
     model = create_cam_model(args)
     model_dict = torch.load(
-        args.checkpoint, 
+        args.checkpoint,
         map_location='cpu')['model']
     
     model.load_state_dict(model_dict)

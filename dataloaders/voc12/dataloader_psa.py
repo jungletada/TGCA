@@ -10,45 +10,16 @@ import scipy.misc
 from torch.utils.data import Dataset
 
 sys.path.append(os.path.dirname(__file__) + os.sep + '../')
-from data.crf_utils import refine_crf_cam
+from dataloaders.crf_utils import refine_crf_cam
 
 IMG_FOLDER_NAME = "JPEGImages"
 ANNOT_FOLDER_NAME = "Annotations"
-CAT_LIST = ['aeroplane', 'bicycle', 'bird', 'boat',
-        'bottle', 'bus', 'car', 'cat', 'chair',
-        'cow', 'diningtable', 'dog', 'horse',
-        'motorbike', 'person', 'pottedplant',
-        'sheep', 'sofa', 'train',
-        'tvmonitor']
-CAT_NAME_TO_NUM = dict(zip(CAT_LIST, range(len(CAT_LIST))))
+LABEL_FOLDER_NAME = "ImageLabel"
 
 
-palette = [0, 0, 0, 128, 0, 0, 0, 128, 0, 128, 128, 0, 0, 0, 128, 128, 0, 128, 0, 128, 128, 128, 128, 128,
-           64, 0, 0, 192, 0, 0, 64, 128, 0, 192, 128, 0, 64, 0, 128, 192, 0, 128, 64, 128, 128, 192, 128, 128,
-           0, 64, 0, 128, 64, 0, 0, 192, 0, 128, 192, 0, 0, 64, 128, 128, 64, 128, 0, 192, 128, 128, 192, 128,
-           64, 64, 0, 192, 64, 0, 64, 192, 0, 192, 192, 0]
-
-
-def load_image_label_from_xml(img_name, voc12_root):
-    from xml.dom import minidom
-    el_list = minidom.parse(os.path.join(voc12_root, ANNOT_FOLDER_NAME,img_name + '.xml')).getElementsByTagName('name')
-    multi_cls_lab = np.zeros((20), np.float32)
-
-    for el in el_list:
-        cat_name = el.firstChild.data
-        if cat_name in CAT_LIST:
-            cat_num = CAT_NAME_TO_NUM[cat_name]
-            multi_cls_lab[cat_num] = 1.0
-
-    return multi_cls_lab
-
-
-def load_image_label_list_from_xml(img_name_list, voc12_root):
-    return [load_image_label_from_xml(img_name, voc12_root) for img_name in img_name_list]
-
-
-def load_image_label_list_from_npy(img_name_list):
-    cls_labels_dict = np.load('voc12/cls_labels.npy').item()
+def load_image_label_list_from_npy(voc12_root, img_name_list):
+    cls_labels_path = osp.join(voc12_root, LABEL_FOLDER_NAME,'cls_labels.npy')
+    cls_labels_dict = np.load(cls_labels_path).item()
     return [cls_labels_dict[img_name] for img_name in img_name_list]
 
 
@@ -87,7 +58,7 @@ class VOC12ImageDataset(Dataset):
 class VOC12ClsDataset(VOC12ImageDataset):
     def __init__(self, img_name_list_path, voc12_root, transform=None):
         super().__init__(img_name_list_path, voc12_root, transform)
-        self.label_list = load_image_label_list_from_npy(self.img_name_list)
+        self.label_list = load_image_label_list_from_npy(voc12_root,self.img_name_list)
 
     def __getitem__(self, idx):
         name, img = super().__getitem__(idx)

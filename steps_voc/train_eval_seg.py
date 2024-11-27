@@ -1,4 +1,5 @@
 import cv2
+import datetime
 import sys, os
 import os.path as osp
 import importlib
@@ -53,6 +54,7 @@ def get_args_parser():
     parser.add_argument("--local_rank", type=int, help='rank in current node')  
     parser.add_argument('--device', default='cuda',help='device id (i.e. 0 or 0,1 or cpu)')
     parser.add_argument('--num_workers', default=8, type=int)
+    parser.add_argument('--voc12_root', default='datasets/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
     
     parser.add_argument("--work_space", default="results_voc/MCTG", type=str)
     parser.add_argument("--pred_path", default=None, type=str)
@@ -120,12 +122,13 @@ def train(args):
     torch.cuda.set_device(args.local_rank)
     
     same_seeds(args.seed)
-    pyutils.Logger(os.path.join(args.work_space, 'voc_segmentation.log'))
-    args.ckpt_path = os.path.join(args.work_space, 'seg_ckpt')
-    utils.data_mkdir(args.ckpt_path)
+    time = datetime.datetime.now().strftime("%Y%m%d-%H%M") 
+    pyutils.Logger(os.path.join(args.work_space, f'voc-seg-{time}.log'))
+    
+    utils.data_mkdir(args.ckpt_dir)
     
     dataset = VOCAugSegmentationDataset(
-        root="datasets/VOCdevkit/VOC2012",
+        root=args.voc12_root,
         split="train_aug",
         pseudo_dir=None,
         ignore_label=255,
@@ -139,9 +142,9 @@ def train(args):
     data_loader = DataLoader(
         dataset,
         sampler=sampler,
-        batch_size=args.batch_per_gpu, 
+        batch_size=args.batch_per_gpu,
         num_workers=args.num_workers,
-        pin_memory=True, 
+        pin_memory=True,
         drop_last=True)
 
     train_size = len(dataset)
@@ -156,9 +159,9 @@ def train(args):
     optimizer = torchutils.PolyOptimizer(
         params=[
             {'params': model.get_1x_lr_params(), 'lr': args.lr},
-            {'params': model.get_10x_lr_params(), 'lr': 10 * args.lr}], 
-        lr=args.lr, 
-        weight_decay=args.wt_dec, 
+            {'params': model.get_10x_lr_params(), 'lr': 10 * args.lr}],
+        lr=args.lr,
+        weight_decay=args.wt_dec,
         max_step=args.max_step)
 
     model.to(device)
@@ -181,9 +184,9 @@ def train(args):
             
             pred = model(images)
             pred = F.interpolate(
-                pred, 
-                size=images.shape[2:], 
-                mode='bilinear', 
+                pred,
+                size=images.shape[2:],
+                mode='bilinear',
                 align_corners=False)
             
             loss = criterion(pred, labels)
@@ -202,20 +205,20 @@ def train(args):
                     'lr: %.5f,' % (optimizer.param_groups[0]['lr']), flush=True)
                 
         if dist.get_rank() == 0:
-            torch.save(model.module.state_dict(), 
-                    os.path.join(args.ckpt_path, 'last_checkpoint.pth'))
+            torch.save(model.module.state_dict(),
+                    os.path.join(args.ckpt_dir, 'last_checkpoint.pth'))
             if epoch % 10 == 0:
-                torch.save(model.module.state_dict(), 
-                    os.path.join(args.ckpt_path, args.model_name + f'_{epoch}.pth'))
+                torch.save(model.module.state_dict(),
+                    os.path.join(args.ckpt_dir, f'resnet38_seg_{epoch}.pth'))
             if  epoch == args.num_epochs:
-                torch.save(model.module.state_dict(), 
-                    os.path.join(args.ckpt_path, args.model_name + '_final.pth'))
+                torch.save(model.module.state_dict(),
+                    os.path.join(args.ckpt_dir, 'resnet38_seg_final.pth'))
 
 
 def evaluate(args):
     session_name = "Segmentation Inference"
-    log_path = os.path.join(args.work_space, 'eval_seg.log')
-    args.ckpt_path = os.path.join(args.work_space, 'seg_ckpt')
+    time = datetime.datetime.now().strftime("%Y%m%d-%H%M") 
+    log_path = os.path.join(args.work_space, f'eval-seg-{time}.log')
     
     utils.logger_info(logger_name=session_name, log_path=log_path)
     logger = logging.getLogger(session_name)
@@ -235,7 +238,7 @@ def evaluate(args):
         logger.info("Not to save Multi-scale Evaluation results.")
 
     model = ResNet38d_Seg(num_classes=args.num_classes)
-    ckpt = os.path.join(args.ckpt_path, "resnet38_seg_final.pth")
+    ckpt = os.path.join(args.ckpt_dir, "resnet38_seg_final.pth")
     model.load_state_dict(torch.load(ckpt), strict=True)
     seg_evaluator = Evaluator(num_class=args.num_classes)
     
@@ -243,7 +246,7 @@ def evaluate(args):
     model.cuda()
     
     dataset = VOCAugSegmentationDataset(
-        root="datasets/VOCdevkit/VOC2012",
+        root=args.voc12_root,
         split="val",
         pseudo_dir=None,
         ignore_label=255,
@@ -291,12 +294,12 @@ def evaluate(args):
 
             seg_evaluator.add_batch(labels, pred)
 
-            if save_pred:
-                out = pred.astype(np.uint8)
-                out = Image.fromarray(out, mode='P')
-                out.putpalette(palette)
-                save_name = os.path.join(pred_path, image_id[0] + '.png')
-                out.save(save_name)
+            # if save_pred:
+            #     out = pred.astype(np.uint8)
+            #     out = Image.fromarray(out, mode='P')
+            #     out.putpalette(palette)
+            #     save_name = os.path.join(pred_path, image_id[0] + '.png')
+            #     out.save(save_name)
 
         IoU, mIoU = seg_evaluator.Mean_Intersection_over_Union()
 
@@ -308,7 +311,7 @@ def evaluate(args):
 
 if __name__ == '__main__':
     args = get_args_parser()
-    
+    args.ckpt_dir = os.path.join(args.work_space, 'seg_checkpponts')
     if args.train:
         train(args)
         

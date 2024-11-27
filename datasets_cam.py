@@ -7,7 +7,7 @@ from timm.data import create_transform
 
 import numpy as np
 import PIL.Image
-
+LABEL_FOLDER_NAME = "ImageLabel"
 
 def load_img_name_list(dataset_path):
     img_gt_name_list = open(dataset_path).readlines()
@@ -15,16 +15,16 @@ def load_img_name_list(dataset_path):
     return img_name_list
 
 
-def load_image_label_list_from_npy_voc(img_name_list):
-    label_file_path = 'configs/voc12/cls_labels.npy'
-    cls_labels_dict = np.load(label_file_path, allow_pickle=True).item()
+def load_image_label_list_from_npy_voc(voc12_root, img_name_list):
+    cls_labels_path = os.path.join(voc12_root, LABEL_FOLDER_NAME, 'cls_labels.npy')
+    cls_labels_dict = np.load(cls_labels_path, allow_pickle=True).item()
     label_list = [cls_labels_dict[img_name] for img_name in img_name_list]
     return label_list
 
 
-def load_image_label_list_from_npy_coco(img_name_list):
-    label_file_path = 'configs/coco/COCO_cls_labels.npy'
-    cls_labels_dict = np.load(label_file_path, allow_pickle=True).item()
+def load_image_label_list_from_npy_coco(coco_root, img_name_list):
+    cls_labels_path = os.path.join(coco_root, LABEL_FOLDER_NAME, 'COCO_cls_labels.npy')
+    cls_labels_dict = np.load(cls_labels_path, allow_pickle=True).item()
     label_list = [cls_labels_dict[img_name + '.jpg'] for img_name in img_name_list]   
     return label_list
 
@@ -32,7 +32,8 @@ def load_image_label_list_from_npy_coco(img_name_list):
 class COCOClsDataset(Dataset):
     def __init__(self, coco_root, list_path=True, transform=None):
         self.img_name_list = load_img_name_list(list_path)
-        self.label_list = load_image_label_list_from_npy_coco(self.img_name_list)
+        self.label_list = load_image_label_list_from_npy_coco(
+            coco_root,self.img_name_list)
         self.coco_root = coco_root
         self.transform = transform
         self.train = 'train' in list_path
@@ -57,7 +58,8 @@ class COCOClsDataset(Dataset):
 class COCOClsDatasetMS(Dataset):
     def __init__(self, coco_root, scales, list_path, transform=None, unit=1):
         self.img_name_list = load_img_name_list(list_path)
-        self.label_list = load_image_label_list_from_npy_coco(self.img_name_list)
+        self.label_list = load_image_label_list_from_npy_coco(
+            coco_root, self.img_name_list)
         self.coco_root = coco_root
         self.transform = transform
         self.train = 'train' in list_path
@@ -99,7 +101,8 @@ class COCOClsDatasetMS(Dataset):
 class VOC12Dataset(Dataset):
     def __init__(self, voc12_root, list_path, transform=None):
         self.img_name_list = load_img_name_list(list_path)
-        self.label_list = load_image_label_list_from_npy_voc(self.img_name_list)
+        self.label_list = load_image_label_list_from_npy_voc(
+            voc12_root, self.img_name_list)
         self.voc12_root = voc12_root
         self.transform = transform
 
@@ -119,7 +122,8 @@ class VOC12Dataset(Dataset):
 class VOC12DatasetMS(Dataset):
     def __init__(self, voc12_root, list_path, scales, transform=None, unit=1):
         self.img_name_list = load_img_name_list(list_path)
-        self.label_list = load_image_label_list_from_npy_voc(self.img_name_list)
+        self.label_list = load_image_label_list_from_npy_voc(
+            voc12_root, self.img_name_list)
         self.voc12_root = voc12_root
         self.transform = transform
         self.unit = unit
@@ -145,7 +149,7 @@ class VOC12DatasetMS(Dataset):
             flip_img_pair = torch.stack([s_img, torch.flip(s_img, [-1])], dim=0)
             msf_img_list.append(flip_img_pair)
         
-        out = {"name": name, 
+        out = {"name": name,
                "img": msf_img_list, 
                "size": (img.height, img.width),
                "label": label}
