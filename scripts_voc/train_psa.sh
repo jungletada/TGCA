@@ -3,17 +3,17 @@ GPU=0,1
 NODES=2
 
 DATASET=VOC12
-DATACONFIG=configs/voc12
+DATACONFIG=data/VOCdevkit/VOC2012/ImageLists
 
 TRAINAUGID=${DATACONFIG}/train_aug_id.txt
 TRAINID=${DATACONFIG}/train_id.txt
 VALID=${DATACONFIG}/val_id.txt
 
 INPUTSIZE=448
-SEGDIR=pseudo_mask
+SEGDIR=pseudo_mask_448
 
 MODELNAME=mcta
-WORKDIR=results_voc/mcta_${INPUTSIZE}
+WORKDIR=results_voc/mcta
 
 CUDA_VISIBLE_DEVICES=${GPU}
 

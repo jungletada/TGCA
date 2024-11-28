@@ -18,9 +18,10 @@ def copy_images(images, src_folder, dest_folder):
 
 
 def main():
-    folder1 = 'datasets/VOCdevkit/VOC2012/SegmentationClassAug'
-    folder2 = 'results_voc/msgformer_448/pseudo_mask'
-    folder3 = 'results_voc/msgformer_448/pseudo_mask_448'
+    path = 'results_voc/mcta'
+    folder1 = 'data/VOCdevkit/VOC2012/SegmentationClassAug'
+    folder2 = f'{path}/pseudo_mask'
+    folder3 = f'{path}/pseudo_mask_448'
     
     # Create folder3 if it does not exist
     create_folder(folder3)
@@ -38,7 +39,7 @@ def main():
         return
     
     # Calculate number of images to select
-    alpha = 0.10
+    alpha = 0.25
     num_images_folder1 = int(len(common_images) * alpha)
     num_images_folder2 = len(common_images) - num_images_folder1
     
