@@ -141,7 +141,7 @@ class MCTAdapter(MCTViT):
         Input: x -> list[B x C x H^ x W^]
         Return: cls-tokens -> B x Cls x C
         """
-        x_cls = [self.gwr_pooling(f).unsqueeze(-1) for f in x]  # list [B x C x 1]
+        x_cls = [self.gwr_pooling_top_k(f).unsqueeze(-1) for f in x]  # list [B x C x 1]
         x_cls = torch.cat(x_cls, dim=-1)        # B x C x 4
         x_cls = self.proj_cls_embed(x_cls)      # B x C x Cls
         x_cls = x_cls.permute(0, 2, 1).contiguous()  # B x Cls x C
@@ -217,22 +217,22 @@ class MCTAdapter(MCTViT):
         patch_tokens = patch_tokens.permute([0, 3, 1, 2]).contiguous() # B x C x Hp x Wp
         return patch_tokens
     
-    def gwr_pooling(self, x):
-        """
-        Input:
-            x->B x K x Hp x Wp
-        Return
-            out-> B x K
-        """
-        B, C, Hp, Wp = x.shape
-        N = Hp * Wp
-        flatten_x = x.view(B, C, -1).permute(0, 2, 1) # B x (Hp x Wp) x C
-        sorted_x, _ = torch.sort(flatten_x, -2, descending=True)
-        weights = torch.logspace(start=0, end=N-1, steps=N, base=self.decay_parameter).to(x.device)
-        out = torch.sum(sorted_x * weights.unsqueeze(0).unsqueeze(-1), dim=-2) / weights.sum()
-        return out
+    # def gwr_pooling(self, x):
+    #     """
+    #     Input:
+    #         x->B x K x Hp x Wp
+    #     Return
+    #         out-> B x K
+    #     """
+    #     B, C, Hp, Wp = x.shape
+    #     N = Hp * Wp
+    #     flatten_x = x.view(B, C, -1).permute(0, 2, 1) # B x (Hp x Wp) x C
+    #     sorted_x, _ = torch.sort(flatten_x, -2, descending=True)
+    #     weights = torch.logspace(start=0, end=N-1, steps=N, base=self.decay_parameter).to(x.device)
+    #     out = torch.sum(sorted_x * weights.unsqueeze(0).unsqueeze(-1), dim=-2) / weights.sum()
+    #     return out
 
-    def gwr_pooling_top_k(self, x, K=6):
+    def gwr_pooling_top_k(self, x, K=5):
         """
         Input:
             x -> B x K x Hp x Wp
@@ -292,11 +292,10 @@ class MCTAdapter(MCTViT):
 
 class MCTAdapterCam(MCTAdapter):
     """Class Activation Map variant of MCTA for visualization purposes."""
-    def __init__(self, *args, cls_ind=4, pat_ind=8, **kwargs):
+    def __init__(self, *args, cls_ind=4, **kwargs):
         """fuse_layers: The attention of the last L layers to fuse"""
         super().__init__(*args, **kwargs)
         self.cls_ind = cls_ind # fusion layer for mixing class-to-patch
-        self.pat_ind = pat_ind
         
     @torch.no_grad()
     def get_cam(self, tokens, attn_weights):
@@ -347,7 +346,7 @@ class MCTAdapterCam(MCTAdapter):
         return cls2pat
 
     @torch.no_grad()
-    def forward(self, x, bg_score=0.5, bg_scale=1.5, return_cls=False):
+    def forward(self, x, bg_score=0.2, return_cls=False):
         b, _, h, w = x.shape
         feat_dict = self.forward_features(x)
 
@@ -372,10 +371,11 @@ class MCTAdapterCam(MCTAdapter):
         pseudo_label = torch.ones(b, self.num_classes).to(x.device)
         pseudo_label[cls_logits < 0] = 0
         
-        # cls_guidance = torch.ones(b, self.num_classes).to(x.device) * bg_scale
+        # cls_guidance = torch.ones(b, self.num_classes).to(x.device)
         # cls_guidance[cls_logits <= 0] = bg_score
         # cg = cls_guidance.unsqueeze(-1).unsqueeze(-1)
         # x_out = cg * x_out
+        
         outputs = self.get_cam(
             x_out, attn_weights)
         

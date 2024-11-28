@@ -36,15 +36,16 @@ python make_cam.py \
     --model ${MODELNAME} \
     --work_space ${WORKDIR} \
     --cam_out_dir ${SEGDIR} \
-    --train_list ${TRAINAUGID} \
+    --train_list ${TRAINID} \
     --input_size ${INPUTSIZE} \
-    --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
-    # --checkpoint results_voc/mcta/mcta_deit_small-7458.pth \
+    --checkpoint results_voc/mcta/mcta_deit_small-7458.pth \
+    # --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
+    
     
 # ============= Evaluate Class Activation Maps without CRF =============#
 python eval_cam_crf.py \
     --dataset ${DATASET} \
     --work_space ${WORKDIR} \
-    --train_list ${TRAINID} \
+    --id_list ${TRAINID} \
     --eval_cam_dir ${SEGDIR} \
     --curve_threshold \

@@ -35,7 +35,7 @@ python make_cam.py \
     --dataset ${DATASET} \
     --model ${MODELNAME} \
     --work_space ${WORKDIR} \
-    --id_list ${TRAINID} \
+    --train_list ${TRAINID} \
     --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
     # --checkpoint ${WORKDIR}/msgformer_4550.pth \
     
