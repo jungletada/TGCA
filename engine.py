@@ -64,7 +64,8 @@ def train_one_epoch_multioutputs(args, model, data_loader, optimizer, device,
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
 
-        with torch.cuda.amp.autocast():
+        # with torch.cuda.amp.autocast():
+        with torch.autocast(device_type="cuda"):
             outputs = model(samples)
 
             cls_loss = criterion(outputs[0], targets)

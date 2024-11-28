@@ -12,9 +12,8 @@ VALID=${DATACONFIG}/val_id.txt
 INPUTSIZE=448
 SEGDIR=pseudo_mask
 
-MODELNAME=msgformer
-WORKDIR=results_voc/msgformer_${INPUTSIZE}
-
+MODELNAME=mcta
+WORKDIR=results_voc/mcta_${INPUTSIZE}
 
 CUDA_VISIBLE_DEVICES=${GPU}
 
@@ -38,7 +37,7 @@ python train_infer_psa.py \
     --work_space ${WORKDIR} \
     --infer_list ${TRAINID} \
     --seg_out_dir ${SEGDIR} \
-    --threshold 0.51 \
+    --threshold 0.48 \
 
 #============= Evaluate =============#
 python steps_voc/eval_sem_seg.py \
