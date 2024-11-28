@@ -316,7 +316,7 @@ def main(args):
     if args.resume is not None:
         checkpoint = torch.load(args.resume, map_location='cpu')
         model.load_state_dict(checkpoint['model'], strict=True)
-        # args.start_epoch = checkpoint['epoch']
+        args.start_epoch = checkpoint['epoch']
         # optimizer.load_state_dict(checkpoint['optimizer'])
 
     lr_scheduler, _ = create_scheduler(args, optimizer)
@@ -344,7 +344,7 @@ def main(args):
     
     torch.autograd.set_detect_anomaly(True)
     
-    for epoch in range(args.start_epoch, args.epochs):
+    for epoch in range(11, args.epochs):
         data_loader_train.sampler.set_epoch(epoch)
 
         train_stats = train_one_epoch(
