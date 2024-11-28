@@ -310,14 +310,21 @@ def main(args):
     linear_scaled_lr = args.lr * args.batch_per_gpu * dist.get_world_size() / 512.0
     args.lr = linear_scaled_lr
 
-    optimizer = create_optimizer(args, model)
+    # optimizer = create_optimizer(args, model)
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=args.lr,
+        betas=(0.9, 0.999),
+        eps=1e-08,
+        weight_decay=0.01)
+    
     loss_scaler = NativeScaler()
 
-    if args.resume is not None:
-        checkpoint = torch.load(args.resume, map_location='cpu')
-        model.load_state_dict(checkpoint['model'], strict=True)
-        args.start_epoch = checkpoint['epoch']
-        # optimizer.load_state_dict(checkpoint['optimizer'])
+    # if args.resume is not None:
+    #     checkpoint = torch.load(args.resume, map_location='cpu')
+    #     model.load_state_dict(checkpoint['model'], strict=True)
+    #     args.start_epoch = checkpoint['epoch']
+    #     # optimizer.load_state_dict(checkpoint['optimizer'])
 
     lr_scheduler, _ = create_scheduler(args, optimizer)
 
@@ -344,7 +351,7 @@ def main(args):
     
     torch.autograd.set_detect_anomaly(True)
     
-    for epoch in range(11, args.epochs):
+    for epoch in range(args.start_epoch, args.epochs):
         data_loader_train.sampler.set_epoch(epoch)
 
         train_stats = train_one_epoch(
