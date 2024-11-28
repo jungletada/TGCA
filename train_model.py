@@ -124,7 +124,7 @@ def get_args_parser():
                         default='https://dl.fbaipublicfiles.com/deit/deit_small_patch16_224-cd65a155.pth', 
                         help='finetune from checkpoint')
     parser.add_argument('--resume',
-                        default=None, 
+                        default='results_coco/mcta/msgformer_last_ckpt.pth',
                         help='resume from checkpoint')
 
     # Dataset parameters
@@ -316,9 +316,9 @@ def main(args):
     if args.resume is not None:
         checkpoint = torch.load(args.resume, map_location='cpu')
         model.load_state_dict(checkpoint['model'], strict=True)
-        cur_epoch = checkpoint['epoch']
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        
+        # args.start_epoch = checkpoint['epoch']
+        # optimizer.load_state_dict(checkpoint['optimizer'])
+
     lr_scheduler, _ = create_scheduler(args, optimizer)
 
     max_accuracy = 0.0
