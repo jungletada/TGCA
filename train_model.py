@@ -311,9 +311,12 @@ def main(args):
     args.lr = linear_scaled_lr
 
     # optimizer = create_optimizer(args, model)
+    param_groups = model.get_parameters_group()
     optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=args.lr,
+        [
+            {'params': param_groups[0], 'lr': args.lr * 10},
+            {'params': param_groups[1], 'lr': args.lr},
+        ],
         betas=(0.9, 0.999),
         eps=1e-08,
         weight_decay=0.01)
