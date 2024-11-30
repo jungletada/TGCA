@@ -35,6 +35,7 @@ python make_cam.py \
     --dataset ${DATASET} \
     --model ${MODELNAME} \
     --work_space ${WORKDIR} \
+    --cam_out_dir ${SEGDIR} \
     --train_list ${TRAINID} \
     --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
     # --checkpoint ${WORKDIR}/msgformer_4550.pth \
@@ -44,5 +45,6 @@ python make_cam.py \
 python eval_cam_crf.py \
     --dataset ${DATASET} \
     --work_space ${WORKDIR} \
+    --eval_cam_dir ${SEGDIR} \
     --id_list ${TRAINID} \
     --curve_threshold \

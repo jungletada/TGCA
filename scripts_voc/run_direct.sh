@@ -26,7 +26,6 @@ CUDA_VISIBLE_DEVICES=${GPU}
 #     --input_size ${INPUTSIZE} \
 #     --cam_out_dir ${SEGDIR} \
 #     --checkpoint results_voc/mcta/mcta_deit_small-7458.pth \
-      # --checkpoint ${WORKDIR}/msgformer_4550.pth \
       
 # # ============= Evaluate Class Activation Maps No CRF =============#
 # python eval_cam_crf.py \
@@ -37,19 +36,19 @@ CUDA_VISIBLE_DEVICES=${GPU}
 #     --id_list ${VALID} \
 #     --curve_threshold \
 
-# ============= Evaluate Class Activation Maps =============#
-python eval_cam_crf.py \
-    --use_crf \
-    --dataset ${DATASET} \
-    --work_space ${WORKDIR} \
-    --eval_cam_dir ${SEGDIR} \
-    --crf_cam_dir ${CRFDIR} \
-    --id_list ${VALID} \
+# # ============= Evaluate Class Activation Maps =============#
+# python eval_cam_crf.py \
+#     --use_crf \
+#     --dataset ${DATASET} \
+#     --work_space ${WORKDIR} \
+#     --eval_cam_dir ${SEGDIR} \
+#     --crf_cam_dir ${CRFDIR} \
+#     --id_list ${VALID} \
 
 #============= Evaluate =============#
 python steps_voc/eval_sem_seg.py \
     --work_space ${WORKDIR} \
-    --seg_out_dir ${CRFDIR} \
+    --seg_out_dir crf_pred_multi \
     --infer_list ${VALID} \
 
 # # Save the generated mask to zip

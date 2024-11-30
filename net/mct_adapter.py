@@ -216,21 +216,6 @@ class MCTAdapter(MCTViT):
         patch_tokens = torch.reshape(patch_tokens, [B, Hp, Wp, C])
         patch_tokens = patch_tokens.permute([0, 3, 1, 2]).contiguous() # B x C x Hp x Wp
         return patch_tokens
-    
-    # def gwr_pooling(self, x):
-    #     """
-    #     Input:
-    #         x->B x K x Hp x Wp
-    #     Return
-    #         out-> B x K
-    #     """
-    #     B, C, Hp, Wp = x.shape
-    #     N = Hp * Wp
-    #     flatten_x = x.view(B, C, -1).permute(0, 2, 1) # B x (Hp x Wp) x C
-    #     sorted_x, _ = torch.sort(flatten_x, -2, descending=True)
-    #     weights = torch.logspace(start=0, end=N-1, steps=N, base=self.decay_parameter).to(x.device)
-    #     out = torch.sum(sorted_x * weights.unsqueeze(0).unsqueeze(-1), dim=-2) / weights.sum()
-    #     return out
 
     def gwr_pooling_top_k(self, x, K=5):
         """
@@ -288,6 +273,26 @@ class MCTAdapter(MCTViT):
         x_logits = self.gwr_pooling_top_k(x_out)
         
         return cls_logits, x_logits
+
+    def get_parameters_group(self):
+        """
+        Groups model parameters into two categories: 
+        1. Parameters related to adapters (spatial prior, spatial fuse, etc.)
+        2. All other parameters.
+        
+        Returns:
+            list: A list containing two lists of parameters.
+        """
+        groups = [[], []]
+        adapters = ['spatial_prior', 'spatial_fuse', 'proj_cls_embed', 'down_convs', 
+                    'channel_reduction', 'weights', 'head']
+        for name, params in self.named_parameters():
+            if any(adapter in name for adapter in adapters):
+                groups[0].append(params) 
+            else:
+                groups[1].append(params)  
+
+        return groups
 
 
 class MCTAdapterCam(MCTAdapter):
