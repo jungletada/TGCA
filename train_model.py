@@ -13,6 +13,7 @@ import torch.nn.functional as F
 
 from timm.models import create_model
 from timm.scheduler import create_scheduler
+from timm.scheduler.cosine_lr import CosineLRScheduler
 from timm.optim import create_optimizer
 from timm.utils import NativeScaler
 import torch.distributed as dist
@@ -62,7 +63,7 @@ def get_args_parser():
                         help='Optimizer Epsilon (default: 1e-8)')
     parser.add_argument('--opt-betas', default=None, type=float, nargs='+', metavar='BETA',
                         help='Optimizer Betas (default: None, use opt default)')
-    parser.add_argument('--clip-grad', type=float, default=None, metavar='NORM',
+    parser.add_argument('--clip-grad', type=float, default=1.0, metavar='NORM',
                         help='Clip gradient norm (default: None, no clipping)')
     parser.add_argument('--momentum', type=float, default=0.9, metavar='M',
                         help='SGD momentum (default: 0.9)')
@@ -72,7 +73,7 @@ def get_args_parser():
     # Learning rate schedule parameters
     parser.add_argument('--sched', default='cosine', type=str, metavar='SCHEDULER',
                         help='LR scheduler (default: "cosine"')
-    parser.add_argument('--lr', type=float, default=1e-3, metavar='LR',
+    parser.add_argument('--lr', type=float, default=1e-4, metavar='LR',
                         help='learning rate (default: 5e-4)')
     parser.add_argument('--lr-noise', type=float, nargs='+', default=None, metavar='pct, pct',
                         help='learning rate noise on/off epoch percentages')
@@ -82,10 +83,10 @@ def get_args_parser():
                         help='learning rate noise std-dev (default: 1.0)')
     parser.add_argument('--warmup-lr', type=float, default=1e-6, metavar='LR',
                         help='warmup learning rate (default: 1e-6)')
-    parser.add_argument('--min-lr', type=float, default=1e-5, metavar='LR',
+    parser.add_argument('--min-lr', type=float, default=1e-6, metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0 (1e-5)')
 
-    parser.add_argument('--decay-epochs', type=int, default=30, metavar='N',
+    parser.add_argument('--decay-epochs', type=int, default=10, metavar='N',
                         help='epoch interval to decay LR')
     parser.add_argument('--warmup-epochs', type=int, default=5, metavar='N',
                         help='epochs to warmup LR, if scheduler supports')
@@ -311,9 +312,9 @@ def main(args):
     args.lr = linear_scaled_lr
 
     # optimizer = create_optimizer(args, model)
+    
     optimizer = torch.optim.AdamW(
         model.parameters(),
-        lr=args.lr,
         betas=(0.9, 0.999),
         eps=1e-08,
         weight_decay=0.01)
@@ -327,7 +328,6 @@ def main(args):
     #     # optimizer.load_state_dict(checkpoint['optimizer'])
 
     lr_scheduler, _ = create_scheduler(args, optimizer)
-
     max_accuracy = 0.0
     if dist.get_rank() == 0:
         logger.info(
@@ -354,41 +354,40 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
         data_loader_train.sampler.set_epoch(epoch)
 
-        train_stats = train_one_epoch(
-            args=args,
-            model=model,
-            data_loader=data_loader_train,
-            optimizer=optimizer,
-            device=device,
-            epoch=epoch,
-            loss_scaler=loss_scaler,
-            max_norm=args.clip_grad)
+        # train_stats = train_one_epoch(
+        #     args=args,
+        #     model=model,
+        #     data_loader=data_loader_train,
+        #     optimizer=optimizer,
+        #     device=device,
+        #     epoch=epoch,
+        #     loss_scaler=loss_scaler,
+        #     max_norm=args.clip_grad)
 
         lr_scheduler.step(epoch)
+        lr = optimizer.param_groups[0]["lr"]
+        print(lr)
+    #     test_stats = evaluate(
+    #         model=model,
+    #         data_loader=data_loader_val,
+    #         device=device)
 
-        test_stats = evaluate(
-            model=model,
-            data_loader=data_loader_val,
-            device=device)
+    #     if test_stats["mAP"] > max_accuracy:
+    #         torch.save({'model': model.module.state_dict()},
+    #                    os.path.join(args.work_space, f'{args.model}_best.pth'))
 
-        if test_stats["mAP"] > max_accuracy:
-            torch.save({'model': model.module.state_dict()},
-                       os.path.join(args.work_space, f'{args.model}_best.pth'))
+    #     max_accuracy = max(max_accuracy, test_stats["mAP"])
 
-        max_accuracy = max(max_accuracy, test_stats["mAP"])
-
-        if utils.is_main_process():
-            log_stats = {'epoch': epoch,
-                     **{f'train_{k}': v for k, v in train_stats.items()},
-                     **{f'test_{k}': v for k, v in test_stats.items()}}
-            logger.info(
-                f'mAP on the {len(dataset_val)} test images: {test_stats["mAP"] * 100:.1f}%\n' +
-                f'Max mAP: {max_accuracy * 100:.2f}%\n' + json.dumps(log_stats)
-            )
-    torch.save({'model': model.module.state_dict(), 'epoch': epoch, 'optimizer': optimizer.state_dict()},
-               os.path.join(args.work_space, f'{args.model}_last_ckpt.pth'))
-    # total_time = time.time() - start_time
-    # total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+    #     if utils.is_main_process():
+    #         log_stats = {'epoch': epoch,
+    #                  **{f'train_{k}': v for k, v in train_stats.items()},
+    #                  **{f'test_{k}': v for k, v in test_stats.items()}}
+    #         logger.info(
+    #             f'mAP on the {len(dataset_val)} test images: {test_stats["mAP"] * 100:.1f}%\n' +
+    #             f'Max mAP: {max_accuracy * 100:.2f}%\n' + json.dumps(log_stats)
+    #         )
+    # torch.save({'model': model.module.state_dict(), 'epoch': epoch, 'optimizer': optimizer.state_dict()},
+    #            os.path.join(args.work_space, f'{args.model}_last_ckpt.pth'))
 
 
 if __name__ == '__main__':

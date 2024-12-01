@@ -60,44 +60,43 @@ def train_one_epoch_multioutputs(args, model, data_loader, optimizer, device,
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = f'Epoch: [{epoch}]'
     
-    for samples, targets in metric_logger.log_every(data_loader, print_freq, header, rank=rank):
-        samples = samples.to(device, non_blocking=True)
-        targets = targets.to(device, non_blocking=True)
+    # for samples, targets in metric_logger.log_every(data_loader, print_freq, header, rank=rank):
+    #     samples = samples.to(device, non_blocking=True)
+    #     targets = targets.to(device, non_blocking=True)
 
-        with torch.autocast(device_type="cuda"):
-            outputs = model(samples)
+    #     with torch.autocast(device_type="cuda"):
+    #         outputs = model(samples)
 
-            cls_loss = criterion(outputs[0], targets)
-            metric_logger.update(cls_loss=cls_loss.item())
+    #         cls_loss = criterion(outputs[0], targets)
+    #         metric_logger.update(cls_loss=cls_loss.item())
             
-            patch_loss = criterion(outputs[1], targets)
-            metric_logger.update(pat_loss=patch_loss.item())
+    #         patch_loss = criterion(outputs[1], targets)
+    #         metric_logger.update(pat_loss=patch_loss.item())
             
-            total_loss = 3 * cls_loss + patch_loss
+    #         total_loss = 3 * cls_loss + patch_loss
             
-        loss_value = total_loss.item()
-        if not math.isfinite(loss_value):
-            print(f"Loss is {loss_value}, stopping training")
-            sys.exit(1)
+    #     loss_value = total_loss.item()
+    #     if not math.isfinite(loss_value):
+    #         print(f"Loss is {loss_value}, stopping training")
+    #         sys.exit(1)
 
-        optimizer.zero_grad()
-        is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
-        loss_scaler(total_loss,
-                    optimizer,
-                    clip_grad=max_norm,
-                    parameters=model.parameters(),
-                    create_graph=is_second_order)
+    #     optimizer.zero_grad()
+    #     is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
+    #     loss_scaler(total_loss,
+    #                 optimizer,
+    #                 clip_grad=max_norm,
+    #                 parameters=model.parameters(),
+    #                 create_graph=is_second_order)
         
-        torch.cuda.synchronize()
-        metric_logger.update(loss=loss_value)
-        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+    #     torch.cuda.synchronize()
+    #     metric_logger.update(loss=loss_value)
+        # metric_logger.update(lr=optimizer.param_groups[0]["lr"])
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     
     if dist.get_rank() == 0:
         print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}  
-
 
 
 def train_one_epoch_basic(
