@@ -73,7 +73,7 @@ def get_args_parser():
     # Learning rate schedule parameters
     parser.add_argument('--sched', default='cosine', type=str, metavar='SCHEDULER',
                         help='LR scheduler (default: "cosine"')
-    parser.add_argument('--lr', type=float, default=1e-4, metavar='LR',
+    parser.add_argument('--lr', type=float, default=5e-4, metavar='LR',
                         help='learning rate (default: 5e-4)')
     parser.add_argument('--lr-noise', type=float, nargs='+', default=None, metavar='pct, pct',
                         help='learning rate noise on/off epoch percentages')
@@ -315,6 +315,7 @@ def main(args):
     
     optimizer = torch.optim.AdamW(
         model.parameters(),
+        lr=args.lr,
         betas=(0.9, 0.999),
         eps=1e-08,
         weight_decay=0.01)
@@ -350,45 +351,43 @@ def main(args):
         train_one_epoch = train_one_epoch_multioutputs
     
     torch.autograd.set_detect_anomaly(True)
-    
+
     for epoch in range(args.start_epoch, args.epochs):
         data_loader_train.sampler.set_epoch(epoch)
 
-        # train_stats = train_one_epoch(
-        #     args=args,
-        #     model=model,
-        #     data_loader=data_loader_train,
-        #     optimizer=optimizer,
-        #     device=device,
-        #     epoch=epoch,
-        #     loss_scaler=loss_scaler,
-        #     max_norm=args.clip_grad)
+        train_stats = train_one_epoch(
+            args=args,
+            model=model,
+            data_loader=data_loader_train,
+            optimizer=optimizer,
+            device=device,
+            epoch=epoch,
+            loss_scaler=loss_scaler,
+            max_norm=args.clip_grad)
 
         lr_scheduler.step(epoch)
-        lr = optimizer.param_groups[0]["lr"]
-        print(lr)
-    #     test_stats = evaluate(
-    #         model=model,
-    #         data_loader=data_loader_val,
-    #         device=device)
 
-    #     if test_stats["mAP"] > max_accuracy:
-    #         torch.save({'model': model.module.state_dict()},
-    #                    os.path.join(args.work_space, f'{args.model}_best.pth'))
+        test_stats = evaluate(
+            model=model,
+            data_loader=data_loader_val,
+            device=device)
 
-    #     max_accuracy = max(max_accuracy, test_stats["mAP"])
+        if test_stats["mAP"] > max_accuracy:
+            torch.save({'model': model.module.state_dict()},
+                       os.path.join(args.work_space, f'{args.model}_best.pth'))
 
-    #     if utils.is_main_process():
-    #         log_stats = {'epoch': epoch,
-    #                  **{f'train_{k}': v for k, v in train_stats.items()},
-    #                  **{f'test_{k}': v for k, v in test_stats.items()}}
-    #         logger.info(
-    #             f'mAP on the {len(dataset_val)} test images: {test_stats["mAP"] * 100:.1f}%\n' +
-    #             f'Max mAP: {max_accuracy * 100:.2f}%\n' + json.dumps(log_stats)
-    #         )
-    # torch.save({'model': model.module.state_dict(), 'epoch': epoch, 'optimizer': optimizer.state_dict()},
-    #            os.path.join(args.work_space, f'{args.model}_last_ckpt.pth'))
+        max_accuracy = max(max_accuracy, test_stats["mAP"])
 
+        if utils.is_main_process():
+            log_stats = {'epoch': epoch,
+                     **{f'train_{k}': v for k, v in train_stats.items()},
+                     **{f'test_{k}': v for k, v in test_stats.items()}}
+            logger.info(
+                f'mAP on the {len(dataset_val)} test images: {test_stats["mAP"] * 100:.1f}%\n' +
+                f'Max mAP: {max_accuracy * 100:.2f}%\n' + json.dumps(log_stats)
+            )
+    torch.save({'model': model.module.state_dict(), 'epoch': epoch, 'optimizer': optimizer.state_dict()},
+               os.path.join(args.work_space, f'{args.model}_last_ckpt.pth'))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
