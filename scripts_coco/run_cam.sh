@@ -25,7 +25,7 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --model ${MODELNAME} \
     --train_list ${TRAINID} \
     --work_space ${WORKDIR} \
-    --seed 11 \
+    --seed 8 \
     --epoch 30 \
     --batch_per_gpu 40 \
     

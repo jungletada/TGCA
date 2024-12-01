@@ -73,7 +73,7 @@ def get_args_parser():
     # Learning rate schedule parameters
     parser.add_argument('--sched', default='cosine', type=str, metavar='SCHEDULER',
                         help='LR scheduler (default: "cosine"')
-    parser.add_argument('--lr', type=float, default=5e-4, metavar='LR',
+    parser.add_argument('--lr', type=float, default=6e-5, metavar='LR',
                         help='learning rate (default: 5e-4)')
     parser.add_argument('--lr-noise', type=float, nargs='+', default=None, metavar='pct, pct',
                         help='learning rate noise on/off epoch percentages')
@@ -311,17 +311,13 @@ def main(args):
     linear_scaled_lr = args.lr * args.batch_per_gpu * dist.get_world_size() / 512.0
     args.lr = linear_scaled_lr
 
-    # optimizer = create_optimizer(args, model)
-    groups = model.get_parameters_group()
-    optimizer = torch.optim.AdamW(
-        [
-            {'params': groups[0], 'lr': args.lr},  
-            {'params': groups[1], 'lr': args.lr * 10.}, 
-        ],
-        lr=args.lr,
-        betas=(0.9, 0.999),
-        eps=1e-08,
-        weight_decay=0.01)
+    optimizer = create_optimizer(args, model)
+    # optimizer = torch.optim.AdamW(
+    #     model.parameters(),
+    #     lr=args.lr,
+    #     betas=(0.9, 0.999),
+    #     eps=1e-08,
+    #     weight_decay=0.05)
     
     loss_scaler = NativeScaler()
 
@@ -329,7 +325,7 @@ def main(args):
     #     checkpoint = torch.load(args.resume, map_location='cpu')
     #     model.load_state_dict(checkpoint['model'], strict=True)
     #     args.start_epoch = checkpoint['epoch']
-    #     # optimizer.load_state_dict(checkpoint['optimizer'])
+    #     optimizer.load_state_dict(checkpoint['optimizer'])
 
     lr_scheduler, _ = create_scheduler(args, optimizer)
     max_accuracy = 0.0
@@ -366,7 +362,7 @@ def main(args):
             device=device,
             epoch=epoch,
             loss_scaler=loss_scaler,
-            max_norm=args.clip_grad)
+            max_norm=0.1)
 
         lr_scheduler.step(epoch)
 
@@ -389,8 +385,8 @@ def main(args):
                 f'mAP on the {len(dataset_val)} test images: {test_stats["mAP"] * 100:.1f}%\n' +
                 f'Max mAP: {max_accuracy * 100:.2f}%\n' + json.dumps(log_stats)
             )
-    torch.save({'model': model.module.state_dict(), 'epoch': epoch, 'optimizer': optimizer.state_dict()},
-               os.path.join(args.work_space, f'{args.model}_last_ckpt.pth'))
+        torch.save({'model': model.module.state_dict(), 'epoch': epoch, 'optimizer': optimizer.state_dict()},
+                   os.path.join(args.work_space, f'{args.model}_last_ckpt.pth'))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
