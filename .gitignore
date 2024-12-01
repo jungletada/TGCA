@@ -12,7 +12,7 @@ results_coco/
 data/coco/COCO_cls_labels.npy
 data/coco/train_labels.npy
 data/coco/val_labels.npy
-
+.ipynb_checkpoints
 data/voc12/cls_labels.npy
-
+data/
 test_demo.ipynb
