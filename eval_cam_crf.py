@@ -197,6 +197,8 @@ if __name__ == '__main__':
                         help='log dir to save the results')
     parser.add_argument('--curve_threshold', action='store_true', help='whether to use a range of thresholds')
     parser.add_argument('--threshold', default=0.45, type=float, help='threshold for evaluation as background')
+    parser.add_argument('--low_thres', default=40, type=int, help='low threshold for evaluation as background')
+    parser.add_argument('--high_thres', default=45, type=int, help='high threshold for evaluation as background')
     parser.add_argument('--alpha', default=1.15, type=float, help='use alpha to set background')
     parser.add_argument("--crf_cam_dir", default="crf_mask", type=str, help="crf mask path")
     args = parser.parse_args()
@@ -219,7 +221,7 @@ if __name__ == '__main__':
             data_dir=args.mscoco_root,
             id_list_file=args.id_list,
             annotation_dir='MaskSets')
-        args.low_thres, args.high_thres = 44, 55
+        # args.low_thres, args.high_thres = 44, 55
     else:
         raise NotImplementedError
 

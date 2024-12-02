@@ -36,7 +36,7 @@ def focal_binary_cross_entropy(inputs, targets, gamma=0.9):
 
 
 def train_one_epoch_multioutputs(args, model, data_loader, optimizer, device, 
-    epoch, loss_scaler, max_norm, set_training_mode=True, rank=0):
+    epoch, loss_scaler, clip_grad, set_training_mode=True, rank=0):
     """
     Train the model for one epoch with multiple outputs.
 
@@ -84,7 +84,7 @@ def train_one_epoch_multioutputs(args, model, data_loader, optimizer, device,
         is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
         loss_scaler(total_loss,
                     optimizer,
-                    clip_grad=max_norm,
+                    clip_grad=clip_grad,
                     parameters=model.parameters(),
                     create_graph=is_second_order)
         
@@ -99,10 +99,9 @@ def train_one_epoch_multioutputs(args, model, data_loader, optimizer, device,
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}  
 
 
-
 def train_one_epoch_basic(
     args, model, data_loader, optimizer, device, epoch,
-    loss_scaler, max_norm, set_training_mode=True, rank=0):
+    loss_scaler, clip_grad, set_training_mode=True, rank=0):
 
     print_freq = 10
     model.train(set_training_mode)
@@ -126,7 +125,7 @@ def train_one_epoch_basic(
 
         optimizer.zero_grad()
         is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
-        loss_scaler(total_loss, optimizer, clip_grad=max_norm,
+        loss_scaler(total_loss, optimizer, clip_grad=clip_grad,
                     parameters=model.parameters(), create_graph=is_second_order)
         torch.cuda.synchronize()
         metric_logger.update(loss=loss_value)
@@ -141,7 +140,7 @@ def train_one_epoch_basic(
 
 def train_one_epoch_mctformerplus(
         args,model,data_loader,optimizer, device,epoch, loss_scaler, 
-        max_norm, set_training_mode=True):
+        clip_grad, set_training_mode=True):
     model.train(set_training_mode)
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
@@ -188,7 +187,7 @@ def train_one_epoch_mctformerplus(
         optimizer.zero_grad()
 
         is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
-        loss_scaler(loss, optimizer, clip_grad=max_norm,
+        loss_scaler(loss, optimizer, clip_grad=clip_grad,
                     parameters=model.parameters(), create_graph=is_second_order)
 
         torch.cuda.synchronize()

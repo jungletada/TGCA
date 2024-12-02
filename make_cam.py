@@ -155,6 +155,10 @@ def _work_testset(process_id, model, dataset, args):
             img_name = pack['name'][0] # Img_id->str
             size = pack['size']        # image size->Torch.tensor [2]
             pseudo_labels, outputs = [], []
+            
+            if os.path.exists(osp.join(args.cam_out_dir, img_name + '.npy')):
+                continue
+
             try:
                 for img in pack['img']:
                     pseudo_label, output_cam = model(
@@ -165,14 +169,16 @@ def _work_testset(process_id, model, dataset, args):
                     outputs.append(output_cam)
                     
             except RuntimeError as e:
+                print(e)
                 if "out of memory" in str(e):
                     for img in pack['img']:
                         pseudo_label, output_cam = model(
-                            resize_input_minbound(x=img[0].cuda(non_blocking=True), min_size=args.min_size),
+                            resize_input_minbound(
+                                x=img[0].cuda(non_blocking=True), min_size=int(args.min_size//2)),
                             return_cls=True,
                             bg_score=bg_score) # img[0]->[(2, 3, H', W')]
                         pseudo_labels.append(pseudo_label)
-                        outputs.append(output_cam) 
+                        outputs.append(output_cam)
                 else:
                     raise e
             # print(f'{img_name}, {pseudo_label[0][0]} {patch_label[0][0]}')

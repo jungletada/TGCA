@@ -62,7 +62,7 @@ def get_args_parser():
                         help='Optimizer Epsilon (default: 1e-8)')
     parser.add_argument('--opt-betas', default=None, type=float, nargs='+', metavar='BETA',
                         help='Optimizer Betas (default: None, use opt default)')
-    parser.add_argument('--clip-grad', type=float, default=None, metavar='NORM',
+    parser.add_argument('--clip-grad', type=float, default=1.0, metavar='NORM',
                         help='Clip gradient norm (default: None, no clipping)')
     parser.add_argument('--momentum', type=float, default=0.9, metavar='M',
                         help='SGD momentum (default: 0.9)')
@@ -310,13 +310,8 @@ def main(args):
     linear_scaled_lr = args.lr * args.batch_per_gpu * dist.get_world_size() / 512.0
     args.lr = linear_scaled_lr
 
-    # optimizer = create_optimizer(args, model)
-    param_groups = model.get_parameters_group()
     optimizer = torch.optim.AdamW(
-        [
-            {'params': param_groups[0], 'lr': args.lr * 10},
-            {'params': param_groups[1], 'lr': args.lr},
-        ],
+       model.parameters(),
         betas=(0.9, 0.999),
         eps=1e-08,
         weight_decay=0.01)
@@ -365,7 +360,7 @@ def main(args):
             device=device,
             epoch=epoch,
             loss_scaler=loss_scaler,
-            max_norm=args.clip_grad)
+            clip_grad=args.clip_grad)
 
         lr_scheduler.step(epoch)
 
