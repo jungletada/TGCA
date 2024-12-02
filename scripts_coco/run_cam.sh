@@ -1,6 +1,6 @@
 #!/bin/bash
-GPU=0,1
-NODES=2
+GPU=0
+NODES=1
 DATASET=COCO
 DATACONFIG=data/MSCOCO/ImageList
 
@@ -26,25 +26,25 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --train_list ${TRAINID} \
     --work_space ${WORKDIR} \
     --seed 8 \
-    --epoch 32 \
-    --batch_per_gpu 20 \
+    --epoch 30 \
+    --batch_per_gpu 40 \
     
 
-# ============= Make Class Activation Maps of Model=============#
-python make_cam.py \
-    --dataset ${DATASET} \
-    --model ${MODELNAME} \
-    --work_space ${WORKDIR} \
-    --cam_out_dir ${SEGDIR} \
-    --train_list ${TRAINID} \
-    --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
-    # --checkpoint ${WORKDIR}/msgformer_4550.pth \
+# # ============= Make Class Activation Maps of Model=============#
+# python make_cam.py \
+#     --dataset ${DATASET} \
+#     --model ${MODELNAME} \
+#     --work_space ${WORKDIR} \
+#     --cam_out_dir ${SEGDIR} \
+#     --train_list ${TRAINID} \
+#     --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
+#     # --checkpoint ${WORKDIR}/msgformer_4550.pth \
     
 
-# ============= Evaluate Class Activation Maps =============#
-python eval_cam_crf.py \
-    --dataset ${DATASET} \
-    --work_space ${WORKDIR} \
-    --eval_cam_dir ${SEGDIR} \
-    --id_list ${TRAINID} \
-    --curve_threshold \
+# # ============= Evaluate Class Activation Maps =============#
+# python eval_cam_crf.py \
+#     --dataset ${DATASET} \
+#     --work_space ${WORKDIR} \
+#     --eval_cam_dir ${SEGDIR} \
+#     --id_list ${TRAINID} \
+#     --curve_threshold \

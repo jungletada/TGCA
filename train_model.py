@@ -13,6 +13,7 @@ import torch.nn.functional as F
 
 from timm.models import create_model
 from timm.scheduler import create_scheduler
+from timm.scheduler.cosine_lr import CosineLRScheduler
 from timm.optim import create_optimizer
 from timm.utils import NativeScaler
 import torch.distributed as dist
@@ -73,21 +74,21 @@ def get_args_parser():
     parser.add_argument('--sched', default='cosine', type=str, metavar='SCHEDULER',
                         help='LR scheduler (default: "cosine"')
     parser.add_argument('--lr', type=float, default=1e-3, metavar='LR',
-                        help='learning rate (default: 5e-4)')
+                        help='learning rate (default: 1e-3)')
     parser.add_argument('--lr-noise', type=float, nargs='+', default=None, metavar='pct, pct',
                         help='learning rate noise on/off epoch percentages')
     parser.add_argument('--lr-noise-pct', type=float, default=0.67, metavar='PERCENT',
                         help='learning rate noise limit percent (default: 0.67)')
     parser.add_argument('--lr-noise-std', type=float, default=1.0, metavar='STDDEV',
                         help='learning rate noise std-dev (default: 1.0)')
-    parser.add_argument('--warmup-lr', type=float, default=1e-6, metavar='LR',
+    parser.add_argument('--warmup-lr', type=float, default=5e-6, metavar='LR',
                         help='warmup learning rate (default: 1e-6)')
-    parser.add_argument('--min-lr', type=float, default=1e-5, metavar='LR',
+    parser.add_argument('--min-lr', type=float, default=1e-6, metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0 (1e-5)')
 
-    parser.add_argument('--decay-epochs', type=int, default=30, metavar='N',
+    parser.add_argument('--decay-epochs', type=int, default=10, metavar='N',
                         help='epoch interval to decay LR')
-    parser.add_argument('--warmup-epochs', type=int, default=5, metavar='N',
+    parser.add_argument('--warmup-epochs', type=int, default=10, metavar='N',
                         help='epochs to warmup LR, if scheduler supports')
     parser.add_argument('--cooldown-epochs', type=int, default=10, metavar='N',
                         help='epochs to cooldown LR at min_lr, after cyclic schedule ends')
@@ -310,22 +311,16 @@ def main(args):
     linear_scaled_lr = args.lr * args.batch_per_gpu * dist.get_world_size() / 512.0
     args.lr = linear_scaled_lr
 
-    optimizer = torch.optim.AdamW(
-       model.parameters(),
-        betas=(0.9, 0.999),
-        eps=1e-08,
-        weight_decay=0.01)
-    
+    optimizer = create_optimizer(args, model)
     loss_scaler = NativeScaler()
 
     # if args.resume is not None:
     #     checkpoint = torch.load(args.resume, map_location='cpu')
     #     model.load_state_dict(checkpoint['model'], strict=True)
     #     args.start_epoch = checkpoint['epoch']
-    #     # optimizer.load_state_dict(checkpoint['optimizer'])
+    #     optimizer.load_state_dict(checkpoint['optimizer'])
 
     lr_scheduler, _ = create_scheduler(args, optimizer)
-
     max_accuracy = 0.0
     if dist.get_rank() == 0:
         logger.info(
@@ -348,7 +343,7 @@ def main(args):
         train_one_epoch = train_one_epoch_multioutputs
     
     torch.autograd.set_detect_anomaly(True)
-    
+
     for epoch in range(args.start_epoch, args.epochs):
         data_loader_train.sampler.set_epoch(epoch)
 
@@ -360,10 +355,12 @@ def main(args):
             device=device,
             epoch=epoch,
             loss_scaler=loss_scaler,
-            clip_grad=args.clip_grad)
+            max_norm=0.1)
 
         lr_scheduler.step(epoch)
-
+        # tlr=optimizer.param_groups[0]["lr"]
+        # logger.info(f'{epoch}: {tlr:.8f}')
+        
         test_stats = evaluate(
             model=model,
             data_loader=data_loader_val,
@@ -383,11 +380,8 @@ def main(args):
                 f'mAP on the {len(dataset_val)} test images: {test_stats["mAP"] * 100:.1f}%\n' +
                 f'Max mAP: {max_accuracy * 100:.2f}%\n' + json.dumps(log_stats)
             )
-    torch.save({'model': model.module.state_dict(), 'epoch': epoch, 'optimizer': optimizer.state_dict()},
-               os.path.join(args.work_space, f'{args.model}_last_ckpt.pth'))
-    # total_time = time.time() - start_time
-    # total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-
+        torch.save({'model': model.module.state_dict(), 'epoch': epoch, 'optimizer': optimizer.state_dict()},
+                   os.path.join(args.work_space, f'{args.model}_last_ckpt.pth'))
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(

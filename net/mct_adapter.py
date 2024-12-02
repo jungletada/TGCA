@@ -288,9 +288,9 @@ class MCTAdapter(MCTViT):
                     'channel_reduction', 'weights', 'head']
         for name, params in self.named_parameters():
             if any(adapter in name for adapter in adapters):
-                groups[0].append(params) 
+                groups[1].append(params) 
             else:
-                groups[1].append(params)  
+                groups[0].append(params)  
 
         return groups
 
