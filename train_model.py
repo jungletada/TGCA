@@ -355,7 +355,7 @@ def main(args):
             device=device,
             epoch=epoch,
             loss_scaler=loss_scaler,
-            max_norm=0.1)
+            max_norm=args.clip_grad)
 
         lr_scheduler.step(epoch)
         # tlr=optimizer.param_groups[0]["lr"]
