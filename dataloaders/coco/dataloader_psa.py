@@ -15,6 +15,7 @@ TRAIN_FOLDER_NAME = "train2014"
 VAL_FOLDER_NAME = "val2014"
 ANNOT_FOLDER_NAME = "Annotations"
 LABEL_FOLDER_NAME = 'ImageLabel'
+LIST_FOLDER_NAME = 'ImageList'
 
 
 def load_image_label_list_from_npy_coco(coco_root, img_name_list):
@@ -228,12 +229,12 @@ class COCOAffDatasetCRF(COCOImageDataset):
     
 
 class COCOSegmentationLabelDataset(Dataset):
-    def __init__(self, 
-                 data_dir, 
-                 id_list_file="configs/coco/train_id.txt",
+    def __init__(self,
+                 data_dir,
+                 id_list_file,
                  annotation_dir='MaskSets'):
         super(COCOSegmentationLabelDataset, self).__init__()
-
+       
         self.ids = [id_.strip() for id_ in open(id_list_file)]
         self.data_dir = data_dir
         if "train" in id_list_file:
@@ -252,7 +253,7 @@ class COCOSegmentationLabelDataset(Dataset):
         label_path = osp.join(self.mask_dir, name_id + '.png')
         
         image = cv2.imread(image_path, cv2.IMREAD_COLOR).astype(np.float32)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.float32)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB).astype(np.uint8)
         label = np.asarray(Image.open(label_path), dtype=np.int32)
         
         return {"name_id": name_id, "image": image, "label": label}

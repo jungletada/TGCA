@@ -81,20 +81,20 @@ def get_args_parser():
                         help='learning rate noise limit percent (default: 0.67)')
     parser.add_argument('--lr-noise-std', type=float, default=1.0, metavar='STDDEV',
                         help='learning rate noise std-dev (default: 1.0)')
-    parser.add_argument('--warmup-lr', type=float, default=2e-6, metavar='LR',
+    parser.add_argument('--warmup-lr', type=float, default=1e-6, metavar='LR',
                         help='warmup learning rate (default: 1e-6)')
     parser.add_argument('--min-lr', type=float, default=1e-6, metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0 (1e-6)')
 
     parser.add_argument('--decay-epochs', type=int, default=10, metavar='N',
                         help='epoch interval to decay LR')
-    parser.add_argument('--warmup-epochs', type=int, default=7, metavar='N',
+    parser.add_argument('--warmup-epochs', type=int, default=10, metavar='N',
                         help='epochs to warmup LR, if scheduler supports')
     parser.add_argument('--cooldown-epochs', type=int, default=10, metavar='N',
                         help='epochs to cooldown LR at min_lr, after cyclic schedule ends')
     parser.add_argument('--patience-epochs', type=int, default=10, metavar='N',
                         help='patience epochs for Plateau LR scheduler (default: 10')
-    parser.add_argument('--decay-rate', '--dr', type=float, default=0.1, metavar='RATE',
+    parser.add_argument('--decay-rate', '--dr', type=float, default=0.05, metavar='RATE',
                         help='LR decay rate (default: 0.1)')
 
     # Augmentation parameters
@@ -124,9 +124,7 @@ def get_args_parser():
     parser.add_argument('--finetune', 
                         default='https://dl.fbaipublicfiles.com/deit/deit_small_patch16_224-cd65a155.pth', 
                         help='finetune from checkpoint')
-    parser.add_argument('--resume',
-                        default='results_coco/mcta/msgformer_last_ckpt.pth',
-                        help='resume from checkpoint')
+    parser.add_argument('--resume', action='store_true', default=False, help='resume from checkpoint')
 
     # Dataset parameters
     parser.add_argument('--dataset', default='', type=str, help='name of dataset')
@@ -314,11 +312,12 @@ def main(args):
     optimizer = create_optimizer(args, model)
     loss_scaler = NativeScaler()
 
-    # if args.resume is not None:
-    #     checkpoint = torch.load(args.resume, map_location='cpu')
-    #     model.load_state_dict(checkpoint['model'], strict=True)
-    #     args.start_epoch = checkpoint['epoch']
-    #     optimizer.load_state_dict(checkpoint['optimizer'])
+    if args.resume:
+        ckpt = os.path.join(args.work_space, f'{args.model}_last_ckpt.pth')
+        checkpoint = torch.load(ckpt, map_location='cpu')
+        model.load_state_dict(checkpoint['model'], strict=True)
+        args.start_epoch = checkpoint['epoch']
+        optimizer.load_state_dict(checkpoint['optimizer'])
 
     lr_scheduler, _ = create_scheduler(args, optimizer)
     max_accuracy = 0.0
@@ -355,9 +354,10 @@ def main(args):
             device=device,
             epoch=epoch,
             loss_scaler=loss_scaler,
-            max_norm=args.clip_grad)
+            clip_grad=args.clip_grad)
 
         lr_scheduler.step(epoch)
+        
         # tlr=optimizer.param_groups[0]["lr"]
         # logger.info(f'{epoch}: {tlr:.8f}')
         

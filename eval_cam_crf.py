@@ -127,7 +127,7 @@ def make_cam_crf(process_id, dataset, args):
 
         try:
             cam_dict = np.load(
-                osp.join(args.eval_cam_dir, filename + '.npy'), 
+                osp.join(args.eval_cam_dir, filename + '.npy'),
                 allow_pickle=True).item()
         except EOFError as e:
             print(f'{e}, {filename}')
@@ -187,19 +187,20 @@ if __name__ == '__main__':
     parser.add_argument('--dataset', default='', type=str, help='name of dataset')
     parser.add_argument('--mscoco_root', default='data/MSCOCO', type=str, help='COCO dataset path')
     parser.add_argument('--voc12_root', default='data/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
-    parser.add_argument("--id_list", default="train_aug_id.txt", type=str, 
+    parser.add_argument("--id_list", default="train_aug_id.txt", type=str,
                         help='train_id.txt or train_aug_id.txt')
     parser.add_argument('--work_space', default='results', help='work space directory')
     parser.add_argument('--eval_cam_dir', default='cam_mask', help='cam_mask directory')
-    parser.add_argument('--log_file', default='eval_cam.log', type=str, 
+    parser.add_argument('--log_file', default='eval_cam.log', type=str,
                         help='log file to save the results')
-    parser.add_argument('--log_dir', default='log_dir', type=str, 
+    parser.add_argument('--log_dir', default='log_dir', type=str,
                         help='log dir to save the results')
     parser.add_argument('--curve_threshold', action='store_true', help='whether to use a range of thresholds')
     parser.add_argument('--threshold', default=0.45, type=float, help='threshold for evaluation as background')
     parser.add_argument('--low_thres', default=43, type=int, help='low threshold for evaluation as background')
     parser.add_argument('--high_thres', default=50, type=int, help='high threshold for evaluation as background')
     parser.add_argument('--alpha', default=1.15, type=float, help='use alpha to set background')
+    parser.add_argument('--eval_nprocs', default=8, type=int, help='use nprocs processess.')
     parser.add_argument("--crf_cam_dir", default="crf_mask", type=str, help="crf mask path")
     args = parser.parse_args()
     #----------------------------------------------------------------------------------#
@@ -237,9 +238,9 @@ if __name__ == '__main__':
         torch.cuda.empty_cache()
         
     else:
-        args.log_file = osp.join(args.log_dir, 
+        args.log_file = osp.join(args.log_dir,
                                  f"eval-cam-{current_session}-{time}.log")
-        EVAL_NPROCS = 8
+        EVAL_NPROCS = args.eval_nprocs
         split_dataset = torchutils.split_dataset(dataset, EVAL_NPROCS)
         multiprocessing.spawn(
             make_cam_crf,

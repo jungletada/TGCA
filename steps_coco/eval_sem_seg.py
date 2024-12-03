@@ -9,7 +9,7 @@ from tqdm import tqdm
 import imageio.v2 as imageio
 
 sys.path.append(osp.dirname(__file__) + os.sep + '../')
-from data.coco.dataloader_psa import COCOSegmentationLabelDataset
+from dataloaders.coco.dataloader_psa import COCOSegmentationLabelDataset
 from engine import calc_semantic_segmentation_confusion
 import utils
 
@@ -18,21 +18,21 @@ def run(args):
     session_name = "pseudo_mask"
     
     now = datetime.datetime.now().strftime("%Y-%m-%d-%H_%M")
-    utils.logger_info(logger_name=session_name, 
+    utils.logger_info(logger_name=session_name,
                       log_path=osp.join(
                           args.work_space, f'{session_name}_{now}.log'))
     logger = logging.getLogger(session_name)
     
     dataset = COCOSegmentationLabelDataset(
         data_dir=args.mscoco_root,
-        id_list_file="configs/coco/train_id.txt",
+        id_list_file=args.id_list,
         annotation_dir='MaskSets')
     
     num_images = len(dataset)
     logger.info(f"COCO: Number of images = {num_images}")
     
     chunk_size = 10000     # for memory efficient
-    split_indices = [(i, min(i + chunk_size, num_images)) 
+    split_indices = [(i, min(i + chunk_size, num_images))
                      for i in range(0, num_images, chunk_size)]
     
     def chunk_eval(begin_idx, end_idx):
@@ -80,9 +80,10 @@ def run(args):
     
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Evaluate Pseudo Masks', add_help=False)
-    parser.add_argument("--work_space", default="results_coco/MCTG", type=str)
-    parser.add_argument("--mscoco_root", default='datasets/MSCOCO', type=str,help="Path to MSCOCO")
+    parser.add_argument("--work_space", default="results_coco/mcta", type=str)
+    parser.add_argument("--mscoco_root", default='data/MSCOCO', type=str,help="Path to MSCOCO")
     parser.add_argument('--seg_out_dir', default='pseudo_mask', help='pseudo_mask directory')
+    parser.add_argument('--id_list', default='val_id.txt', help='list file path')
     args = parser.parse_args()
     args.seg_out_dir = osp.join(args.work_space, args.seg_out_dir)
     run(args=args)

@@ -17,19 +17,18 @@ WORKDIR=results_coco/mcta
 
 CUDA_VISIBLE_DEVICES=${GPU}
 
-# # ============= Train Model ===============#
-# OMP_NUM_THREADS=${NODES} \
-# torchrun --nproc_per_node=${NODES} --nnodes=1 \
-#     train_model.py \
-#     --dataset ${DATASET} \
-#     --model ${MODELNAME} \
-#     --train_list ${TRAINID} \
-#     --work_space ${WORKDIR} \
-#     --seed 8 \
-#     --epoch 30 \
-#     --batch_per_gpu 20 \
+# ============= Train Model ===============#
+OMP_NUM_THREADS=${NODES} \
+torchrun --nproc_per_node=${NODES} --nnodes=1 \
+    train_model.py \
+    --dataset ${DATASET} \
+    --model ${MODELNAME} \
+    --train_list ${TRAINID} \
+    --work_space ${WORKDIR} \
+    --seed 8 \
+    --epoch 35 \
+    --batch_per_gpu 20 \
     
-
 # ============= Make Class Activation Maps of Model=============#
 python make_cam.py \
     --dataset ${DATASET} \
@@ -37,10 +36,8 @@ python make_cam.py \
     --work_space ${WORKDIR} \
     --cam_out_dir ${SEGDIR} \
     --train_list ${TRAINID} \
-    --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
-#     # --checkpoint ${WORKDIR}/msgformer_4550.pth \
+    --checkpoint ${WORKDIR}/mcta_best.pth \
     
-
 # ============= Evaluate Class Activation Maps =============#
 python eval_cam_crf.py \
     --dataset ${DATASET} \
