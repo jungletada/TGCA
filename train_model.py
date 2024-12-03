@@ -53,8 +53,7 @@ def get_args_parser():
                         help='Dropout rate (default: 0.)')
     parser.add_argument('--drop-path', type=float, default=0.1, metavar='PCT',
                         help='Drop path rate (default: 0.1)')
-    parser.add_argument('--cls_weight', type=float, default=3.0,
-                        help='weight for class output loss')
+    parser.add_argument('--cls_weight', type=float, default=3.0, help='weight for class output loss')
 
     # Optimizer parameters
     parser.add_argument('--opt', default='adamw', type=str, metavar='OPTIMIZER',
@@ -130,10 +129,8 @@ def get_args_parser():
     parser.add_argument('--dataset', default='', type=str, help='name of dataset')
     parser.add_argument('--voc12_root', default='data/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
     parser.add_argument("--coco_root", default='data/MSCOCO', type=str, help="Path to MSCOCO")
-    parser.add_argument("--train_list", default="train_aug_id.txt", type=str, 
-                        help='train_id.txt or train_aug_id.txt')
-    parser.add_argument('--log_dir', default='log_dir', type=str, 
-                        help='log dir to save the results')
+    parser.add_argument("--train_list", default="train_aug_id.txt", type=str, help='train_id.txt or train_aug_id.txt')
+    parser.add_argument('--log_dir', default='log_dir', type=str, help='log dir to save the results')
     parser.add_argument('--checkpoint', default='', help='checkpoint for generating maps')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
