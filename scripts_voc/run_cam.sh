@@ -26,9 +26,9 @@ CUDA_VISIBLE_DEVICES=${GPU}
 #     --model ${MODELNAME} \
 #     --train_list ${TRAINAUGID} \
 #     --work_space ${WORKDIR} \
-#     --seed 11 \
-#     --epoch 27 \
-#     --batch_per_gpu 20 \
+#     --seed 3 \
+#     --epoch 30 \
+#     --batch_per_gpu 40 \
     
 # ============= Make Class Activation Maps of Model ============= #
 python make_cam.py \
@@ -38,9 +38,8 @@ python make_cam.py \
     --cam_out_dir ${SEGDIR} \
     --train_list ${TRAINID} \
     --input_size ${INPUTSIZE} \
-    --checkpoint results_voc/mcta/mcta-deit-small-voc-7458.pth \
-    # --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
-    
+    --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
+#     # --checkpoint results_voc/mcta/mcta-deit-small-voc-7458.pth \
     
 # ============= Evaluate Class Activation Maps without CRF =============#
 python eval_cam_crf.py \

@@ -442,3 +442,8 @@ def str2bool(v):
         return True
     elif v.lower() in ('no','false','f','n','0','False'):
         return False
+
+
+def parse_scales(value):
+    """Parses a string of numbers separated by commas into a tuple of floats."""
+    return tuple(map(float, value.split(',')))

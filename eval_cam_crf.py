@@ -113,7 +113,7 @@ def make_cam_crf(process_id, dataset, args):
         iter_max=5,
         pos_xy_std=3,
         pos_w=3,
-        bi_xy_std=65,
+        bi_xy_std=60,
         bi_rgb_std=3,
         bi_w=3,
     )
@@ -122,7 +122,7 @@ def make_cam_crf(process_id, dataset, args):
     num_images = len(databin)
     for i in tqdm(range(num_images)):
         pack = databin[i]
-        image = pack['image'] # H, W, 3
+        image = pack['image']
         filename = pack['name_id']
 
         try:

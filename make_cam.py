@@ -13,7 +13,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 from misc import torchutils
-from utils import create_cam_model
+from utils import create_cam_model, parse_scales
 from net.adapter_modules import resize_input_minbound
 
 
@@ -51,7 +51,7 @@ def get_args_parser():
 
     # generating attention maps
     parser.add_argument('--layer-index', type=int, default=3, help='extract attention maps from the last layers')
-    parser.add_argument("--scales", default=(1.0,), help="Multi-scale inferences")
+    parser.add_argument("--scales", type=parse_scales, default=(1.0,), help="Multi-scale inferences")
     parser.add_argument("--cam_out_dir", default="cam", type=str)
     
     args = parser.parse_args()

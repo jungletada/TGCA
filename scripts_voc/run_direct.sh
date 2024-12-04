@@ -25,16 +25,15 @@ python make_cam.py \
     --train_list ${VALID} \
     --input_size ${INPUTSIZE} \
     --cam_out_dir ${SEGDIR} \
-    --checkpoint results_voc/mcta/mcta-deit-small-voc-7458.pth \
+    --checkpoint ${WORKDIR}/mcta_best.pth \
       
-# # ============= Evaluate Class Activation Maps No CRF =============#
-# python eval_cam_crf.py \
-#     --dataset ${DATASET} \
-#     --work_space ${WORKDIR} \
-#     --eval_cam_dir ${SEGDIR} \
-#     --crf_cam_dir ${CRFDIR} \
-#     --id_list ${VALID} \
-#     --curve_threshold \
+# ============= Evaluate Class Activation Maps No CRF =============#
+python eval_cam_crf.py \
+    --dataset ${DATASET} \
+    --work_space ${WORKDIR} \
+    --eval_cam_dir ${SEGDIR} \
+    --id_list ${VALID} \
+    --curve_threshold \
 
 # ============= Evaluate Class Activation Maps =============#
 python eval_cam_crf.py \
@@ -43,6 +42,7 @@ python eval_cam_crf.py \
     --work_space ${WORKDIR} \
     --eval_cam_dir ${SEGDIR} \
     --crf_cam_dir ${CRFDIR} \
+    --alpha 1.2 \
     --id_list ${VALID} \
 
 #============= Evaluate =============#
