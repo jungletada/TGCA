@@ -113,7 +113,7 @@ def make_cam_crf(process_id, dataset, args):
         iter_max=5,
         pos_xy_std=3,
         pos_w=3,
-        bi_xy_std=60,
+        bi_xy_std=65,
         bi_rgb_std=3,
         bi_w=3,
     )

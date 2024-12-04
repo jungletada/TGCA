@@ -1,6 +1,6 @@
 #!/bin/bash
-GPU=0
-NODES=1
+GPU=0,1
+NODES=2
 
 DATASET=VOC12
 DATACONFIG=data/VOCdevkit/VOC2012/ImageLists
@@ -38,8 +38,8 @@ python make_cam.py \
     --cam_out_dir ${SEGDIR} \
     --train_list ${TRAINID} \
     --input_size ${INPUTSIZE} \
-    --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
-#     # --checkpoint results_voc/mcta/mcta-deit-small-voc-7458.pth \
+    --checkpoint results_voc/mcta/mcta-deit-small-voc-7458.pth \
+    # --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
     
 # ============= Evaluate Class Activation Maps without CRF =============#
 python eval_cam_crf.py \
