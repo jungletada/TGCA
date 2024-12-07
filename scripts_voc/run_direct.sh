@@ -25,6 +25,7 @@ python make_cam.py \
     --train_list ${VALID} \
     --input_size ${INPUTSIZE} \
     --cam_out_dir ${SEGDIR} \
+    --scales 1.0,0.5,0.75,1.25,1.5 \
     --checkpoint ${WORKDIR}/mcta_best.pth \
       
 # ============= Evaluate Class Activation Maps No CRF =============#
@@ -42,7 +43,7 @@ python eval_cam_crf.py \
     --work_space ${WORKDIR} \
     --eval_cam_dir ${SEGDIR} \
     --crf_cam_dir ${CRFDIR} \
-    --alpha 1.2 \
+    --alpha 1.1 \
     --id_list ${VALID} \
 
 #============= Evaluate =============#

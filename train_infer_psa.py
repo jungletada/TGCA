@@ -19,10 +19,10 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
-from data.coco.dataloader_psa import COCOAffDatasetCRF
-from data.coco.dataloader_psa import COCOImageDataset
-from data.voc12.dataloader_psa import VOC12AffDatasetCRF
-from data.voc12.dataloader_psa import VOC12ImageDataset
+from dataloaders.coco.dataloader_psa import COCOAffDatasetCRF
+from dataloaders.coco.dataloader_psa import COCOImageDataset
+from dataloaders.voc12.dataloader_psa import VOC12AffDatasetCRF
+from dataloaders.voc12.dataloader_psa import VOC12ImageDataset
 
 from net.resnet38_aff import ResNet38d_Aff
 from net.tool import pyutils, imutils, torchutils
@@ -37,16 +37,16 @@ def get_args_parser():
     parser.add_argument("--train", default=False, type=str2bool)
     parser.add_argument("--inference", default=False, type=str2bool)
     # model weights and path to CAM seeds 
-    parser.add_argument("--coco_root", default='datasets/MSCOCO', type=str, help="Path to MSCOCO")
-    parser.add_argument("--voc12_root", default='datasets/VOCdevkit/VOC2012/', type=str,
+    parser.add_argument("--coco_root", default='data/MSCOCO', type=str, help="Path to MSCOCO")
+    parser.add_argument("--voc12_root", default='data/VOCdevkit/VOC2012/', type=str,
                         help="Path to VOC 2012 Devkit, must contain ./JPEGImages as subdirectory.")
-    parser.add_argument("--work_space", default="results/MCTG", type=str)
+    parser.add_argument("--work_space", default="results/mcta", type=str)
     parser.add_argument("--cam_out_dir", default="cam_mask", type=str, help="cam mask path")
     parser.add_argument("--seg_out_dir", default="pseudo_mask", type=str, help="pesudo mask path")
-    parser.add_argument("--train_list", default="configs/voc12/train_aug_id.txt", type=str, 
-                        help='configs/coco/train_id.txt or configs/voc12/train_aug_id.txt')
-    parser.add_argument('--infer_list', default='configs/coco/train_id.txt', type=str,
-                        help='configs/coco/train_id.txt or configs/voc12/train_id.txt')
+    parser.add_argument("--train_list", default="train_aug_id.txt", type=str, 
+                        help='train_id.txt or train_aug_id.txt')
+    parser.add_argument('--infer_list', default='train_id.txt', type=str,
+                        help='train_id.txt or train_id.txt')
     parser.add_argument("--weights", default='checkpoints/res38_cls.pth', type=str)
 
     # ddp settings
@@ -73,7 +73,7 @@ def get_args_parser():
     # hyper parameters settings
     parser.add_argument("--beta", default=11, type=int)
     parser.add_argument("--logt", default=7, type=int)
-    parser.add_argument("--threshold", default=0.45, type=float, 
+    parser.add_argument("--threshold", default=0.48, type=float, 
                         help='the optimal one obtained for seeds')
     args = parser.parse_args()
     return args

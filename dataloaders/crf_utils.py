@@ -28,7 +28,7 @@ def crf_inference(img, probs, t=5, scale_factor=1, labels=21):
 
     d.setUnaryEnergy(unary)
     d.addPairwiseGaussian(sxy=3/scale_factor, compat=3)
-    d.addPairwiseBilateral(sxy=70/scale_factor, srgb=3, rgbim=np.copy(img), compat=3)
+    d.addPairwiseBilateral(sxy=65/scale_factor, srgb=3, rgbim=np.copy(img), compat=3)
     Q = d.inference(t)
     return np.array(Q).reshape((n_labels, h, w))
 

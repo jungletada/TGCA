@@ -1,6 +1,6 @@
 #!/bin/bash
-GPU=0,1
-NODES=2
+GPU=0
+NODES=1
 
 DATASET=VOC12
 DATACONFIG=data/VOCdevkit/VOC2012/ImageLists
@@ -10,7 +10,8 @@ TRAINID=${DATACONFIG}/train_id.txt
 VALID=${DATACONFIG}/val_id.txt
 
 INPUTSIZE=448
-SEGDIR=pseudo_mask_448
+CAMDIR=cam_mask_train
+SEGDIR=pseudo_mask_train
 
 MODELNAME=mcta
 WORKDIR=results_voc/mcta
@@ -24,8 +25,10 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --train True \
     --dataset ${DATASET} \
     --work_space ${WORKDIR} \
+    --cam_out_dir ${CAMDIR} \
     --train_list ${TRAINAUGID} \
     --weights checkpoints/res38_cls.pth \
+    --batch_per_gpu 20 \
     --seed 3 \
     --low_alpha 1 \
     --high_alpha 1.2 \
@@ -36,6 +39,7 @@ python train_infer_psa.py \
     --dataset ${DATASET} \
     --work_space ${WORKDIR} \
     --infer_list ${TRAINID} \
+    --cam_out_dir ${CAMDIR} \
     --seg_out_dir ${SEGDIR} \
     --threshold 0.48 \
 
