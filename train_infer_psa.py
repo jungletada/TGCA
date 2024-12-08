@@ -55,11 +55,11 @@ def get_args_parser():
     parser.add_argument("--local_rank", type=int, help='rank in current node')  
     parser.add_argument('--device', default='cuda',help='device id (i.e. 0 or 0,1 or cpu)')
     # training settings
-    parser.add_argument('--seed', default=0, type=int)
+    parser.add_argument('--seed', default=3407, type=int)
     parser.add_argument("--network", default="network.resnet38_aff", type=str)
     parser.add_argument("--batch_per_gpu", default=12, type=int)
     parser.add_argument("--epoch", default=5, type=int)
-    parser.add_argument("--lr", default=0.1, type=float)
+    parser.add_argument("--lr", default=0.01, type=float)
     parser.add_argument("--num_workers", default=8, type=int)
     parser.add_argument("--wt_dec", default=5e-4, type=float)
 

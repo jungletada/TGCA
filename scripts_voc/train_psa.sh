@@ -28,10 +28,9 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --cam_out_dir ${CAMDIR} \
     --train_list ${TRAINAUGID} \
     --weights checkpoints/res38_cls.pth \
-    --batch_per_gpu 20 \
-    --seed 3 \
+    --batch_per_gpu 8 \
     --low_alpha 1 \
-    --high_alpha 1.2 \
+    --high_alpha 2 \
 
 #============= Infer with Pixel Semantic Affnity =============#
 python train_infer_psa.py \
