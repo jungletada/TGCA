@@ -19,10 +19,10 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
-from data.coco.dataloader_psa import COCOAffDatasetCRF
-from data.coco.dataloader_psa import COCOImageDataset
-from data.voc12.dataloader_psa import VOC12AffDatasetCRF
-from data.voc12.dataloader_psa import VOC12ImageDataset
+from dataloaders.coco.dataloader_psa import COCOAffDatasetCRF
+from dataloaders.coco.dataloader_psa import COCOImageDataset
+from dataloaders.voc12.dataloader_psa import VOC12AffDatasetCRF
+from dataloaders.voc12.dataloader_psa import VOC12ImageDataset
 
 from net.resnet38_aff import ResNet38d_Aff
 from net.tool import pyutils, imutils, torchutils
@@ -37,16 +37,16 @@ def get_args_parser():
     parser.add_argument("--train", default=False, type=str2bool)
     parser.add_argument("--inference", default=False, type=str2bool)
     # model weights and path to CAM seeds 
-    parser.add_argument("--coco_root", default='datasets/MSCOCO', type=str, help="Path to MSCOCO")
-    parser.add_argument("--voc12_root", default='datasets/VOCdevkit/VOC2012/', type=str,
+    parser.add_argument("--coco_root", default='data/MSCOCO', type=str, help="Path to MSCOCO")
+    parser.add_argument("--voc12_root", default='data/VOCdevkit/VOC2012/', type=str,
                         help="Path to VOC 2012 Devkit, must contain ./JPEGImages as subdirectory.")
-    parser.add_argument("--work_space", default="results/MCTG", type=str)
+    parser.add_argument("--work_space", default="results/mcta", type=str)
     parser.add_argument("--cam_out_dir", default="cam_mask", type=str, help="cam mask path")
     parser.add_argument("--seg_out_dir", default="pseudo_mask", type=str, help="pesudo mask path")
-    parser.add_argument("--train_list", default="configs/voc12/train_aug_id.txt", type=str, 
-                        help='configs/coco/train_id.txt or configs/voc12/train_aug_id.txt')
-    parser.add_argument('--infer_list', default='configs/coco/train_id.txt', type=str,
-                        help='configs/coco/train_id.txt or configs/voc12/train_id.txt')
+    parser.add_argument("--train_list", default="train_aug_id.txt", type=str, 
+                        help='train_id.txt or train_aug_id.txt')
+    parser.add_argument('--infer_list', default='train_id.txt', type=str,
+                        help='train_id.txt or train_id.txt')
     parser.add_argument("--weights", default='checkpoints/res38_cls.pth', type=str)
 
     # ddp settings
@@ -55,11 +55,11 @@ def get_args_parser():
     parser.add_argument("--local_rank", type=int, help='rank in current node')  
     parser.add_argument('--device', default='cuda',help='device id (i.e. 0 or 0,1 or cpu)')
     # training settings
-    parser.add_argument('--seed', default=0, type=int)
+    parser.add_argument('--seed', default=3, type=int)
     parser.add_argument("--network", default="network.resnet38_aff", type=str)
-    parser.add_argument("--batch_per_gpu", default=12, type=int)
+    parser.add_argument("--batch_per_gpu", default=16, type=int)
     parser.add_argument("--epoch", default=5, type=int)
-    parser.add_argument("--lr", default=0.1, type=float)
+    parser.add_argument("--lr", default=0.01, type=float)
     parser.add_argument("--num_workers", default=8, type=int)
     parser.add_argument("--wt_dec", default=5e-4, type=float)
 
@@ -67,13 +67,13 @@ def get_args_parser():
     parser.add_argument("--dataset", default="COCO", type=str, help='choose `COCO` or `VOC12`')
     parser.add_argument("--crop_size", default=448, type=int)
     parser.add_argument("--low_alpha", default=1, type=float)
-    parser.add_argument("--high_alpha", default=2, type=float)
+    parser.add_argument("--high_alpha", default=1.15, type=float)
     parser.add_argument("--radius", default=5, type=int)
 
     # hyper parameters settings
     parser.add_argument("--beta", default=11, type=int)
     parser.add_argument("--logt", default=7, type=int)
-    parser.add_argument("--threshold", default=0.45, type=float, 
+    parser.add_argument("--threshold", default=0.48, type=float, 
                         help='the optimal one obtained for seeds')
     args = parser.parse_args()
     return args
@@ -175,9 +175,9 @@ def build_train_dataset(args):
                 imutils.RandomHorizontalFlip()],
             img_transform_list=[
                 transforms.ColorJitter(
-                    brightness=0.35, 
-                    contrast=0.35, 
-                    saturation=0.35, 
+                    brightness=0.3, 
+                    contrast=0.3, 
+                    saturation=0.3, 
                     hue=0.1),
                 np.asarray,
                 Normalize(),
@@ -353,7 +353,7 @@ def train_affinity(args):
     avg_meter = pyutils.AverageMeter('loss', 'bg_loss', 'fg_loss', 'neg_loss',
                                      'bg_cnt', 'fg_cnt', 'neg_cnt')
     timer = pyutils.Timer("Session started: ")
-    eps = 1e-5
+    eps = 1e-8
     
     for epoch in range(args.epoch):
         sampler_train.set_epoch(epoch)

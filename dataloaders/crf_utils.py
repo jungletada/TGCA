@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def crf_inference(img, probs, t=5, scale_factor=1, labels=21):
+def crf_inference(img, probs, t=5, labels=21):
     """
     Perform CRF inference on the given image and probabilities.
 
@@ -9,7 +9,6 @@ def crf_inference(img, probs, t=5, scale_factor=1, labels=21):
     img (numpy.ndarray): The input image.
     probs (numpy.ndarray): The probabilities for each label.
     t (int): Number of iterations for inference (default is 5).
-    scale_factor (float): Factor to scale the spatial parameters (default is 1).
     labels (int): Number of labels (default is 21).
 
     Returns:
@@ -27,8 +26,8 @@ def crf_inference(img, probs, t=5, scale_factor=1, labels=21):
     unary = np.ascontiguousarray(unary)
 
     d.setUnaryEnergy(unary)
-    d.addPairwiseGaussian(sxy=3/scale_factor, compat=3)
-    d.addPairwiseBilateral(sxy=70/scale_factor, srgb=3, rgbim=np.copy(img), compat=3)
+    d.addPairwiseGaussian(sxy=3, compat=3)
+    d.addPairwiseBilateral(sxy=70, srgb=3, rgbim=np.copy(img), compat=3)
     Q = d.inference(t)
     return np.array(Q).reshape((n_labels, h, w))
 

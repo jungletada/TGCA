@@ -36,15 +36,32 @@ python make_cam.py \
     --model ${MODELNAME} \
     --work_space ${WORKDIR} \
     --cam_out_dir ${SEGDIR} \
-    --train_list ${TRAINID} \
+    --train_list ${TRAINAUGID} \
     --input_size ${INPUTSIZE} \
     --checkpoint results_voc/mcta/mcta-deit-small-voc-7458.pth \
     # --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
     
-# ============= Evaluate Class Activation Maps without CRF =============#
-python eval_cam_crf.py \
-    --dataset ${DATASET} \
-    --work_space ${WORKDIR} \
-    --id_list ${TRAINID} \
-    --eval_cam_dir ${SEGDIR} \
-    --curve_threshold \
+# # ============= Evaluate Class Activation Maps without CRF =============#
+# python eval_cam_crf.py \
+#     --dataset ${DATASET} \
+#     --work_space ${WORKDIR} \
+#     --id_list ${TRAINID} \
+#     --eval_cam_dir ${SEGDIR} \
+#     --curve_threshold \
+
+
+# # ============= Evaluate Class Activation Maps =============#
+# python eval_cam_crf.py \
+#     --use_crf \
+#     --dataset ${DATASET} \
+#     --work_space ${WORKDIR} \
+#     --id_list ${TRAINID} \
+#     --eval_cam_dir ${SEGDIR} \
+#     --crf_cam_dir ${CRFDIR} \
+#     --alpha 1.2 \
+
+# #============= Evaluate =============#
+# python steps_voc/eval_sem_seg.py \
+#     --work_space ${WORKDIR} \
+#     --seg_out_dir ${CRFDIR} \
+#     --infer_list ${TRAINID} \
