@@ -110,7 +110,7 @@ def make_cam_crf(process_id, dataset, args):
         args (Namespace): The arguments containing configuration settings.
     """
     crf_inference = DenseCRF(
-        iter_max=5,
+        iter_max=8,
         pos_xy_std=3,
         pos_w=3,
         bi_xy_std=60,
