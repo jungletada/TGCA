@@ -246,14 +246,13 @@ if __name__ == '__main__':
     
     function = _work_trainset if 'train' in args.train_list else _work_testset
     print(f'Using function {function}')
+    
     print('[ ', end='')
-
     multiprocessing.spawn(
         function,
         nprocs=n_gpus,
         args=(model, dataset, args),
         join=True)
-    
     print(']')
 
     torch.cuda.empty_cache()

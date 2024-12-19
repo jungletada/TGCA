@@ -18,6 +18,16 @@ from engine import calc_semantic_segmentation_confusion
 from misc.dcrf import DenseCRF
 
 
+crf_inference = DenseCRF(
+    iter_max=10,
+    pos_xy_std=1,
+    pos_w=1,
+    bi_xy_std=121,
+    bi_rgb_std=5,
+    bi_w=4,
+)
+    
+    
 def logfile(args, msg):
     with open(args.log_file, "a", encoding="utf-8") as f:
         f.write(msg + '\n')
@@ -109,15 +119,6 @@ def make_cam_crf(process_id, dataset, args):
         dataset (list): The dataset to evaluate.
         args (Namespace): The arguments containing configuration settings.
     """
-    crf_inference = DenseCRF(
-        iter_max=8,
-        pos_xy_std=3,
-        pos_w=3,
-        bi_xy_std=60,
-        bi_rgb_std=3,
-        bi_w=3,
-    )
-    
     databin = dataset[process_id]
     num_images = len(databin)
     for i in tqdm(range(num_images)):

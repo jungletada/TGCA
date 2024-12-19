@@ -20,7 +20,7 @@ def copy_images(images, src_folder, dest_folder):
 def main():
     path = 'results_voc/mcta'
     folder1 = 'data/VOCdevkit/VOC2012/SegmentationClassAug'
-    folder2 = f'{path}/pseudo_mask'
+    folder2 = f'{path}/pseudo_mask_train'
     folder3 = f'{path}/pseudo_mask_448'
     
     # Create folder3 if it does not exist
@@ -31,15 +31,15 @@ def main():
     images_folder2 = get_images(folder2)
     
     print(f"Number of images: {len(images_folder1)} and {len(images_folder2)}")
+    
     # Check for common images
     common_images = set(images_folder1).intersection(images_folder2)
-    
     if not common_images:
         print("No common images found in folder1 and folder2")
         return
     
     # Calculate number of images to select
-    alpha = 0.25
+    alpha = 0.6
     num_images_folder1 = int(len(common_images) * alpha)
     num_images_folder2 = len(common_images) - num_images_folder1
     
