@@ -1,7 +1,9 @@
 import numpy as np
+import pydensecrf.densecrf as dcrf
+from pydensecrf.utils import unary_from_softmax
 
 
-def crf_inference(img, probs, t=5, labels=21):
+def crf_inference(img, probs, t=10, labels=21):
     """
     Perform CRF inference on the given image and probabilities.
 
@@ -14,9 +16,6 @@ def crf_inference(img, probs, t=5, labels=21):
     Returns:
         numpy.ndarray: The CRF refined probabilities reshaped to (labels, height, width).
     """
-    import pydensecrf.densecrf as dcrf
-    from pydensecrf.utils import unary_from_softmax
-
     h, w = img.shape[:2]
     n_labels = labels
 
@@ -26,8 +25,8 @@ def crf_inference(img, probs, t=5, labels=21):
     unary = np.ascontiguousarray(unary)
 
     d.setUnaryEnergy(unary)
-    d.addPairwiseGaussian(sxy=3, compat=3)
-    d.addPairwiseBilateral(sxy=70, srgb=3, rgbim=np.copy(img), compat=3)
+    d.addPairwiseGaussian(sxy=1, compat=1)
+    d.addPairwiseBilateral(sxy=121, srgb=5, rgbim=np.copy(img), compat=4)
     Q = d.inference(t)
     return np.array(Q).reshape((n_labels, h, w))
 
