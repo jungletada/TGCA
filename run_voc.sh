@@ -24,7 +24,6 @@ WORKDIR=results_voc/msgformer_${INPUTSIZE}
 # MODELNAME=mctformerplus
 # WORKDIR=results_voc/mctformerplus_${INPUTSIZE}
 
-
 CUDA_VISIBLE_DEVICES=${GPU}
 
 #============= Train Model ============= #

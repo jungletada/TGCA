@@ -180,13 +180,17 @@ class MCTAdapter(MCTViT):
         x = self.pos_drop(x)                  # B x (N') x C, where N' = Nc + Np
         
         attn_weights = []
-       
+        all_x_cls = []
+        all_x_vit = []
         #-------------------  Modify block for ablation study -------------------#
         for i in range(self.stages):
             for j in range(self.stage_indices[i], self.stage_indices[i+1]):
                 x, weights_j = self.blocks[j](x)
                 attn_weights.append(weights_j)
-            
+
+                all_x_vit.append(x[:, self.num_classes:])
+                all_x_cls.append(x[:, :self.num_classes])
+
             cls_stru, x_spatial[i] = self.spatial_fuse[i](
                 x_spatial=x_spatial[i],
                 x_backbone=x,
@@ -194,6 +198,8 @@ class MCTAdapter(MCTViT):
             # zero initialized weights for adding new class tokens
             x_cls = x[:, :self.num_classes] + self.weights[i] * cls_stru
             x_vit = x[:, self.num_classes:]
+            all_x_cls[-1] = x_cls
+            
             x = torch.cat((x_cls, x_vit), dim=1)
             
             if i != self.stages - 1:
@@ -201,8 +207,8 @@ class MCTAdapter(MCTViT):
                 x_spatial[i + 1] = x_spatial[i + 1] + z
 
         return {
-            'x_cls_last': x[:, :self.num_classes], 
-            'x_vit': x[:, self.num_classes:], 
+            'x_cls': all_x_cls, 
+            'x_vit': all_x_vit, 
             'attn': attn_weights, 
             'x_branch': x_spatial,}
     
@@ -243,6 +249,15 @@ class MCTAdapter(MCTViT):
 
         return out
     
+    def forward_eval(self, x):
+        b, _, h, w = x.shape
+        feat_dict = self.forward_features(x)
+        all_cls_tokens = feat_dict['x_cls']
+        all_patch_tokens = feat_dict['x_vit']
+        return {
+            'all_cls':all_cls_tokens, 
+            'all_patches':all_patch_tokens}
+
     def forward(self, x):
         """
         Basic forward for training image classification.
@@ -251,11 +266,11 @@ class MCTAdapter(MCTViT):
         # basic forward
         feat_dict = self.forward_features(x)
         # class tokens
-        last_cls_tokens = feat_dict['x_cls_last'] # [B, K, C]
+        last_cls_tokens = feat_dict['x_cls'][-1] # [B, K, C]
         cls_logits = last_cls_tokens.mean(-1) # [B, K]
         
         x_vit = self.reshape_patch_tokens(
-            feat_dict['x_vit'], h, w) # [B, C, Hp, Wp]
+            feat_dict['x_vit'][-1], h, w) # [B, C, Hp, Wp]
         x_out = [x_vit]
         out_size = x_vit.shape[2:]
         for feat in feat_dict['x_branch']:
