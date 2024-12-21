@@ -68,18 +68,27 @@ class MCTformerPlus(VisionTransformer):
 
         x = self.pos_drop(x)
         attn_weights = []
-        class_embeddings = []
+        all_x_cls = []
+        all_x_vit = []
 
         for i, blk in enumerate(self.blocks):
             x, weights_i = blk(x)
             attn_weights.append(weights_i)
-            class_embeddings.append(x[:, 0:self.num_classes])
+            all_x_cls.append(x[:, :self.num_classes])
+            all_x_vit.append(x[:, self.num_classes:])
+            
+        return x[:, 0:self.num_classes], x[:, self.num_classes:], attn_weights, all_x_cls, all_x_vit
 
-        return x[:, 0:self.num_classes], x[:, self.num_classes:], attn_weights, class_embeddings
-
+    def forward_eval(self, x):
+        x_cls, x_patch, _, all_x_cls, all_x_vit = self.forward_features(x)
+        return {
+            'all_cls':all_x_cls, 
+            'all_patches': all_x_vit
+            }
+        
     def forward(self, x):
         w, h = x.shape[2:]
-        x_cls, x_patch, attn_weights, all_x_cls = self.forward_features(x)
+        x_cls, x_patch, _, all_x_cls, _ = self.forward_features(x)
 
         n, p, c = x_patch.shape
         if w != h:

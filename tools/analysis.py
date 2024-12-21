@@ -1,14 +1,16 @@
 import os
+import sys
 import csv
 import torch
 
 import argparse
 import numpy as np
+import pandas as pd
 import seaborn as sns
 from tqdm import tqdm
 import os.path as osp
 import matplotlib.pyplot as plt
-
+import sklearn.metrics as metrics
 import torch.nn.functional as F
 from torch import multiprocessing, cuda
 from torch.utils.data import DataLoader
@@ -16,7 +18,7 @@ from torch.backends import cudnn
 
 
 cudnn.enabled = True
-
+sys.path.append(".")
 from misc import torchutils
 from utils import create_cam_model
 from net.adapter_modules import resize_input_minbound
@@ -29,25 +31,25 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Generating attention maps', add_help=False)
-    # Model parameters
+   
     parser.add_argument("--num_workers", default=2, type=int)
-    parser.add_argument('--model', default='deit_small_mctgformer', type=str, metavar='MODEL',
+    parser.add_argument('--work_space', default='results_voc/mctformerplus', type=str, help='work space')
+    parser.add_argument('--model', default='mctformerplus', type=str, metavar='MODEL',
                         help='Name of model to train')
-    parser.add_argument('--checkpoint', default='', help='checkpoint for generating maps')
-    parser.add_argument('--input_size', default=224, type=int, help='images input size')
-    parser.add_argument('--min_size', default=224, type=int, help='images input size')
-    parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
-                        help='Dropout rate (default: 0.)')
-    parser.add_argument('--drop-path', type=float, default=0.1, metavar='PCT',
-                        help='Drop path rate (default: 0.1)')
-
+    parser.add_argument('--checkpoint', default='results_voc/mctformerplus/mctformerplus_6887.pth',
+                        help='checkpoint for generating maps')
+    parser.add_argument('--csv_path', default='cls_token_score.csv', type=str,
+                        help='evaluation csv for cosine similarity.')
+     # Model parameters
+    parser.add_argument('--input_size', default=448, type=int, help='images input size')
+    parser.add_argument('--min_size', default=448, type=int, help='images input size')
+    
     # Dataset parameters
-    parser.add_argument('--dataset', default='', type=str, help='name of dataset')
-    parser.add_argument('--work_space', default='results_voc/your_model', type=str, help='work space')
-    parser.add_argument('--voc12_root', default='datasets/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
-    parser.add_argument("--coco_root", default='datasets/MSCOCO', type=str, help="Path to MSCOCO")
-    parser.add_argument("--train_list", default="configs/voc12/train_aug_id.txt", type=str, 
-                        help='configs/coco/train_id.txt or configs/voc12/train_aug_id.txt')
+    parser.add_argument('--dataset', default='VOC12', type=str, help='name of dataset')
+    parser.add_argument('--voc12_root', default='data/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
+    parser.add_argument("--coco_root", default='data/MSCOCO', type=str, help="Path to MSCOCO")
+    parser.add_argument("--train_list", default="data/VOCdevkit/VOC2012/ImageLists/train_id.txt", type=str, 
+                        help='image name lists.')
     
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
@@ -57,12 +59,10 @@ def get_args_parser():
     parser.set_defaults(pin_mem=True)
 
     # generating attention maps
-    parser.add_argument('--layer-index', type=int, default=3, help='extract attention maps from the last layers')
     parser.add_argument("--scales", default=(1.0,), help="Multi-scale inferences")
     parser.add_argument("--attn_dir", default="attns_dir", type=str)
     parser.add_argument("--log_dir", default="log_dir", type=str)
-    args = parser.parse_args()
-    return args
+    return parser.parse_args()
                                                                                                                         
         
 def normalize_cam(cam_mask):
@@ -128,15 +128,10 @@ def calculate_cosine_similarity(outputs_block):
         list: A list of mean cosine similarities for each layer.
     """
     cosine_similarities = []
-    for layer_output in outputs_block:
-        # pair-wise comparison: (N, C)
-        patch_tokens = layer_output[0] 
-        # Normalize the vectors to unit vectors to calculate cosine similarity
+    for layer_output in outputs_block: # pair-wise comparison: (N, C)
+        patch_tokens = layer_output[0] # batch size=1
         patch_tokens = F.normalize(patch_tokens, p=2, dim=1, eps=1e-8)  # (N, C)
-        # Compute cosine similarity for all pairs by matrix multiplication
-        # The result will be a (N, N) matrix
         cosine_sim = torch.matmul(patch_tokens, patch_tokens.T)
-        # Append to the list for this layer
         all_pairs = cosine_sim.triu(diagonal=0)
         cosine_similarities.append(all_pairs.mean())
 
@@ -164,16 +159,28 @@ def calculate_loss_class_tokens(outputs_block, label):
     print(label)
 
 
-def _work_tokens(model, dataset, args):
+def calculate_class_score(all_cls_tokens, cls_label):
+    f1_score_layer = []
+    for cls_logits in all_cls_tokens: # pair-wise comparison: (N, C)
+        cls_logits = cls_logits[0].mean(dim=-1)
+        cls_pred = (cls_logits > 0).type(torch.int16)
+        _f1_cls = metrics.f1_score(
+            cls_label.cpu().numpy(),
+            cls_pred.cpu().numpy())
+        f1_score_layer.append(_f1_cls)
+    return f1_score_layer
+
+   
+def _eval_tokens(model, dataset, args):
     data_loader = DataLoader(
         dataset,
         shuffle=False,
         num_workers=args.num_workers,
         pin_memory=True)
     
-    column_names = list(range(1, model.n_layers + 1))
+    column_names = list(range(1, 12 + 1))
 
-    with open("output_token.csv", mode="w", newline="", encoding="utf-8") as file:
+    with open(args.csv_path, mode="w", newline="", encoding="utf-8") as file:
         
         writer = csv.writer(file)
         writer.writerow(column_names)
@@ -185,24 +192,29 @@ def _work_tokens(model, dataset, args):
                 img_name = pack['name'][0] # Img_id->str
                 label = pack['label'][0]   # image-level label->Torch.Tensor [1]
                 size = pack['size']        # image size->Torch.tensor [2]
-                
+                inputs = pack['img'][0]
                 valid_cat = torch.nonzero(label)[:, 0] # get validate class->[#val_cls]
-                outputs = [model(img[0].cuda(non_blocking=True)) # img[0]->[(2, 3, H', W')]
-                        for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
-                # label = label.to(outputs[0][0].device)
-                # loss = calculate_loss_class_tokens(outputs[0], label)
-                # rounded_values = [round(item.item(), 3) for item in loss]
-                # writer.writerow(rounded_values)
-                attn_maps = outputs[0][:, 0, :, :].cpu().numpy()
-                attn_maps = np.sum(attn_maps, axis=0) # sum over all layer
-                draw_heat_map(attn_maps, args, img_name, n_dim=3)
-                print(attn_maps.shape, size)
+                
+                output_dict = model.forward_eval(inputs[0].cuda(non_blocking=True)) # img[0]->[(2, 3, H', W')]
+                all_cls_tokens = output_dict['all_cls']
+                all_patch_tokens = output_dict['all_patches']
+
+                results = calculate_cosine_similarity(outputs_block=all_cls_tokens)
+                results = calculate_class_score(all_cls_tokens, label.cuda())
+                rounded_values = [round(item.item(), 3) for item in results]
+                writer.writerow(rounded_values)
+
+                # outputs = [model.forward(img[0].cuda(non_blocking=True)) # img[0]->[(2, 3, H', W')]
+                #         for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
+                # attn_maps = outputs[0][:, 0, :, :].cpu().numpy()
+                # attn_maps = np.sum(attn_maps, axis=0) # sum over all layer
+                # draw_heat_map(attn_maps, args, img_name, n_dim=3)
                 # Generate heatmaps for each layer's attention map
                 if iter_ % (len(dataset) // 20) == 0:
                     print("%d " % ((5*iter_+1) // (len(dataset) // 20)), end='')
                     
 
-def _work_attn(model, dataset, args):
+def _eval_attentions(model, dataset, args):
     data_loader = DataLoader(
         dataset,
         shuffle=False,
@@ -248,9 +260,18 @@ def _work_attn(model, dataset, args):
         writer.writerow(pat_attn)
 
 
+def analysis_er_layer_result(args):
+    data_frame = pd.read_csv(args.csv_path, header=0)
+    print(data_frame)
+    column_means = data_frame.iloc[1:].astype(float).mean()
+    for i in column_means:
+        print(i)
+
+
 if __name__ == '__main__':
     args = get_args_parser()
-    args.attn_dir = os.path.join(args.work_space, args.attn_dir) 
+    args.attn_dir = os.path.join(args.work_space, args.attn_dir)
+    args.csv_path = os.path.join(args.work_space, args.csv_path)
     os.makedirs(args.attn_dir, exist_ok=True)
 
     from datasets_cam import build_dataset
@@ -280,7 +301,8 @@ if __name__ == '__main__':
     # print(']')
 
     print('[ ', end='')
-    _work_tokens(model, dataset, args)
+    _eval_tokens(model, dataset, args)
     print(']')
 
+    analysis_er_layer_result(args)
     torch.cuda.empty_cache()

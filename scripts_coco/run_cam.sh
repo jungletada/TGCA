@@ -2,7 +2,7 @@
 GPU=0,1
 NODES=2
 DATASET=COCO
-DATACONFIG=data/MSCOCO/ImageList
+DATACONFIG=data/MSCOCO/ImageLists
 
 TRAINID=${DATACONFIG}/train_id.txt
 VALID=${DATACONFIG}/val_id.txt
@@ -36,7 +36,7 @@ python make_cam.py \
     --work_space ${WORKDIR} \
     --cam_out_dir ${SEGDIR} \
     --train_list ${TRAINID} \
-    --checkpoint ${WORKDIR}/mcta_best.pth \
+    --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
     
 # ============= Evaluate Class Activation Maps =============#
 python eval_cam_crf.py \
