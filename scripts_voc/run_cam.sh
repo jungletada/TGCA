@@ -1,6 +1,6 @@
 #!/bin/bash
-GPU=0
-NODES=1
+GPU=0,1
+NODES=2
 
 DATASET=VOC12
 DATACONFIG=data/VOCdevkit/VOC2012/ImageLists

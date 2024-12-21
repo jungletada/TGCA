@@ -1,6 +1,6 @@
 #!/bin/bash
-GPU=0
-NODES=1
+GPU=0,1
+NODES=2
 
 SEGDIR=cam_mask_val
 CRFDIR=crf_mask_val
@@ -17,6 +17,18 @@ WORKDIR=results_voc/mcta
 
 CUDA_VISIBLE_DEVICES=${GPU}
 
+<<<<<<< HEAD
+# # ============= Make Class Activation Maps of Model ============= #
+# python make_cam.py \
+#     --dataset ${DATASET} \
+#     --model ${MODELNAME} \
+#     --work_space ${WORKDIR} \
+#     --train_list ${VALID} \
+#     --input_size ${INPUTSIZE} \
+#     --cam_out_dir ${SEGDIR} \
+#     --scales 1.0,0.75,1.25 \
+#     --checkpoint results_voc/mcta/mcta_best.pth \
+=======
 # ============= Make Class Activation Maps of Model ============= #
 python make_cam.py \
     --dataset ${DATASET} \
@@ -27,14 +39,15 @@ python make_cam.py \
     --cam_out_dir ${SEGDIR} \
     --scales 1.0,0.5,0.75,1.25,1.5 \
     --checkpoint ${WORKDIR}/mcta_best.pth \
+>>>>>>> 2f7ab046cf1e909ae270875a2e1eed2f335e3f5e
       
-# ============= Evaluate Class Activation Maps No CRF =============#
-python eval_cam_crf.py \
-    --dataset ${DATASET} \
-    --work_space ${WORKDIR} \
-    --eval_cam_dir ${SEGDIR} \
-    --id_list ${VALID} \
-    --curve_threshold \
+# # ============= Evaluate Class Activation Maps No CRF =============#
+# python eval_cam_crf.py \
+#     --dataset ${DATASET} \
+#     --work_space ${WORKDIR} \
+#     --eval_cam_dir ${SEGDIR} \
+#     --id_list ${VALID} \
+#     --curve_threshold \
 
 # ============= Evaluate Class Activation Maps =============#
 python eval_cam_crf.py \
@@ -43,7 +56,11 @@ python eval_cam_crf.py \
     --work_space ${WORKDIR} \
     --eval_cam_dir ${SEGDIR} \
     --crf_cam_dir ${CRFDIR} \
+<<<<<<< HEAD
+    --alpha 1.0 \
+=======
     --alpha 1.1 \
+>>>>>>> 2f7ab046cf1e909ae270875a2e1eed2f335e3f5e
     --id_list ${VALID} \
 
 #============= Evaluate =============#

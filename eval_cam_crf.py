@@ -119,6 +119,15 @@ def make_cam_crf(process_id, dataset, args):
         dataset (list): The dataset to evaluate.
         args (Namespace): The arguments containing configuration settings.
     """
+    crf_inference = DenseCRF(
+        iter_max=8,
+        pos_xy_std=3,
+        pos_w=3,
+        bi_xy_std=65,
+        bi_rgb_std=3,
+        bi_w=3,
+    )
+    
     databin = dataset[process_id]
     num_images = len(databin)
     for i in tqdm(range(num_images)):
