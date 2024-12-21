@@ -39,7 +39,7 @@ def main():
         return
     
     # Calculate number of images to select
-    alpha = 0.6
+    alpha = 0.45
     num_images_folder1 = int(len(common_images) * alpha)
     num_images_folder2 = len(common_images) - num_images_folder1
     
