@@ -24,9 +24,9 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --work_space ${WORKDIR} \
     --train_list ${TRAINID} \
     --cam_out_dir ${CAMDIR} \
-    --batch_per_gpu 8 \
+    --batch_per_gpu 12 \
     --low_alpha 1 \
-    --high_alpha 1.5 \
+    --high_alpha 1.2 \
     
 
 #============= Infer with Pixel Semantic Affnity =============#

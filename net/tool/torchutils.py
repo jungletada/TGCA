@@ -1,10 +1,10 @@
-
-import torch
-from torch.utils.data import Dataset
-from PIL import Image
 import os.path
 import random
 import numpy as np
+from PIL import Image
+
+import torch
+from torch.utils.data import Dataset
 from . import imutils
 
 
@@ -20,8 +20,53 @@ class PolyOptimizer(torch.optim.SGD):
     def step(self, closure=None):
         if self.global_step < self.max_step:
             lr_mult = (1 - self.global_step / self.max_step) ** self.momentum
-            for i in range(len(self.param_groups)):
-                self.param_groups[i]['lr'] = self.__initial_lr[i] * lr_mult
+            for i, group in enumerate(self.param_groups):
+                group['lr'] = self.__initial_lr[i] * lr_mult
+        super().step(closure)
+        self.global_step += 1
+
+
+class PolyAdamW(torch.optim.AdamW):
+    def __init__(self, params, lr, min_lr, weight_decay, max_step, warmup_step=0, betas=(0.9, 0.999), eps=1e-8):
+        """
+        AdamW optimizer with warmup and polynomial learning rate schedule.
+
+        Args:
+            params: Iterable of parameters to optimize or dictionaries defining parameter groups.
+            lr: Initial learning rate (after warmup).
+            min_lr: Starting learning rate during warmup.
+            weight_decay: Weight decay coefficient.
+            max_step: Total number of steps for the polynomial learning rate schedule.
+            warmup_step: Number of warmup steps (default: 0).
+            betas: Coefficients used for computing running averages of gradient and its square (default: (0.9, 0.999)).
+            eps: Term added to the denominator to improve numerical stability (default: 1e-8).
+        """
+        super().__init__(params, lr=lr, weight_decay=weight_decay, betas=betas, eps=eps)
+        self.global_step = 0
+        self.max_step = max_step
+        self.warmup_step = warmup_step
+        self.min_lr = min_lr
+        self.__initial_lr = [group['lr'] for group in self.param_groups]
+
+    def step(self, closure=None):
+        """
+        Performs a single optimization step and updates the learning rate using warmup and polynomial schedule.
+        """
+        if self.global_step < self.warmup_step:
+            # Warmup phase: linear increase from min_lr to initial_lr
+            warmup_mult = self.global_step / self.warmup_step
+            for i, group in enumerate(self.param_groups):
+                group['lr'] = self.min_lr + (self.__initial_lr[i] - self.min_lr) * warmup_mult
+        elif self.global_step < self.max_step:
+            # Polynomial decay phase
+            lr_mult = (1 - (self.global_step - self.warmup_step) / (self.max_step - self.warmup_step)) ** 0.9
+            for i, group in enumerate(self.param_groups):
+                group['lr'] = self.__initial_lr[i] * lr_mult
+        else:
+            # After max_step: set learning rate to 0
+            for group in self.param_groups:
+                group['lr'] = 0.0
+
         super().step(closure)
         self.global_step += 1
 
@@ -97,7 +142,6 @@ class SegmentationDataset(Dataset):
 
 
 class ExtractAffinityLabelInRadius():
-
     def __init__(self, cropsize, radius=5):
         self.radius = radius
 

@@ -26,7 +26,7 @@ from dataloaders.voc12.dataloader_psa import VOC12ImageDataset
 
 from net.resnet38_aff import ResNet38d_Aff
 from net.tool import pyutils, imutils, torchutils
-from misc.torchutils import split_dataset 
+from misc.torchutils import split_dataset
 from utils import str2bool, data_mkdir
 
 cudnn.enabled = True
@@ -36,39 +36,42 @@ def get_args_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--train", default=False, type=str2bool)
     parser.add_argument("--inference", default=False, type=str2bool)
-    # model weights and path to CAM seeds 
+    
+    # model weights and path to CAM
     parser.add_argument("--coco_root", default='data/MSCOCO', type=str, help="Path to MSCOCO")
     parser.add_argument("--voc12_root", default='data/VOCdevkit/VOC2012/', type=str,
                         help="Path to VOC 2012 Devkit, must contain ./JPEGImages as subdirectory.")
     parser.add_argument("--work_space", default="results/mcta", type=str)
-    parser.add_argument("--cam_out_dir", default="cam_mask", type=str, help="cam mask path")
-    parser.add_argument("--seg_out_dir", default="pseudo_mask", type=str, help="pesudo mask path")
+    parser.add_argument("--cam_out_dir", default="cam_mask_train", type=str, help="cam mask path")
+    parser.add_argument("--seg_out_dir", default="pseudo_mask_train", type=str, help="pesudo mask path")
     parser.add_argument("--train_list", default="train_aug_id.txt", type=str, 
                         help='train_id.txt or train_aug_id.txt')
     parser.add_argument('--infer_list', default='train_id.txt', type=str,
                         help='train_id.txt or train_id.txt')
-    parser.add_argument("--weights", default='checkpoints/res38_cls.pth', type=str)
-
-    # ddp settings
-    parser.add_argument('--rank', default=0, type=int, help='rank of current process')  
-    parser.add_argument('--gpu_id', default=0, type=int, help="which gpu to use")
-    parser.add_argument("--local_rank", type=int, help='rank in current node')  
-    parser.add_argument('--device', default='cuda',help='device id (i.e. 0 or 0,1 or cpu)')
+    # parser.add_argument("--weights", default='checkpoints/res38_cls.pth', type=str)
+    parser.add_argument("--weights", default='results_coco/mcta/res38_aff_1724.pth', type=str)
     
+    # ddp settings
+    parser.add_argument('--rank', default=0, type=int, help='rank of current process')
+    parser.add_argument('--gpu_id', default=0, type=int, help="which gpu to use")
+    parser.add_argument("--local_rank", type=int, help='rank in current node')
+    parser.add_argument('--device', default='cuda',help='device id (i.e. 0 or 0,1 or cpu)')
+
     # training settings
     parser.add_argument('--seed', default=3, type=int)
-    parser.add_argument("--network", default="network.resnet38_aff", type=str)
-    parser.add_argument("--batch_per_gpu", default=8, type=int)
+    parser.add_argument("--batch_per_gpu", default=12, type=int)
     parser.add_argument("--epoch", default=5, type=int)
-    parser.add_argument("--lr", default=0.01, type=float)
+    parser.add_argument("--lr", default=6e-5, type=float)
+    parser.add_argument("--min_lr", default=1e-6, type=float)
+    parser.add_argument("--warmup_step", default=1500, type=int)
     parser.add_argument("--num_workers", default=8, type=int)
-    parser.add_argument("--wt_dec", default=5e-4, type=float)
+    parser.add_argument("--wt_dec", default=1e-4, type=float)
 
     # dataset settings
     parser.add_argument("--dataset", default="COCO", type=str, help='choose `COCO` or `VOC12`')
     parser.add_argument("--crop_size", default=448, type=int)
-    parser.add_argument("--low_alpha", default=1, type=float)
-    parser.add_argument("--high_alpha", default=1.15, type=float)
+    parser.add_argument("--low_alpha", default=1.0, type=float)
+    parser.add_argument("--high_alpha", default=1.2, type=float)
     parser.add_argument("--radius", default=5, type=int)
 
     # hyper parameters settings
@@ -133,11 +136,11 @@ def build_train_dataset(args):
     """
     if args.dataset == 'COCO':
         train_dataset = COCOAffDatasetCRF(
-            img_name_list_path=args.train_list, 
+            img_name_list_path=args.train_list,
             cam_npy_dir=args.cam_out_dir,
-            coco_root=args.coco_root, 
-            cropsize=args.crop_size, 
-            low_alpha=args.low_alpha, 
+            coco_root=args.coco_root,
+            cropsize=args.crop_size,
+            low_alpha=args.low_alpha,
             high_alpha=args.high_alpha,
             radius=args.radius,
             joint_transform_list=[
@@ -147,9 +150,9 @@ def build_train_dataset(args):
                 imutils.RandomHorizontalFlip()],
             img_transform_list=[
                 transforms.ColorJitter(
-                    brightness=0.3, 
-                    contrast=0.3, 
-                    saturation=0.3, 
+                    brightness=0.3,
+                    contrast=0.3,
+                    saturation=0.3,
                     hue=0.1),
                 np.asarray,
                 Normalize(),
@@ -162,11 +165,11 @@ def build_train_dataset(args):
     
     elif args.dataset == 'VOC12':
         train_dataset = VOC12AffDatasetCRF(
-            img_name_list_path=args.train_list, 
+            img_name_list_path=args.train_list,
             cam_npy_dir=args.cam_out_dir,
-            voc12_root=args.voc12_root, 
-            cropsize=args.crop_size, 
-            low_alpha=args.low_alpha, 
+            voc12_root=args.voc12_root,
+            cropsize=args.crop_size,
+            low_alpha=args.low_alpha,
             high_alpha=args.high_alpha,
             radius=args.radius,
             joint_transform_list=[
@@ -176,9 +179,9 @@ def build_train_dataset(args):
                 imutils.RandomHorizontalFlip()],
             img_transform_list=[
                 transforms.ColorJitter(
-                    brightness=0.3, 
+                    brightness=0.3,
                     contrast=0.3, 
-                    saturation=0.3, 
+                    saturation=0.3,
                     hue=0.1),
                 np.asarray,
                 Normalize(),
@@ -221,7 +224,7 @@ def build_infer_dataset(args):
         
     elif args.dataset == 'VOC12':
         infer_dataset = VOC12ImageDataset(
-            args.infer_list, 
+            args.infer_list,
             voc12_root=args.voc12_root,
             transform=torchvision.transforms.Compose(
                 [np.asarray,
@@ -248,8 +251,8 @@ def _work(process_id, model, dataset, args):
     data_loader = DataLoader(
         databin, 
         shuffle=False, 
-        num_workers=args.num_workers // n_gpus, 
-        pin_memory=False) 
+        num_workers=args.num_workers // n_gpus,
+        pin_memory=False)
     
     stride = 8
     
@@ -259,7 +262,7 @@ def _work(process_id, model, dataset, args):
                 tqdm(data_loader, position=process_id, desc=f'[PID{process_id}]')):
             name = name[0]
             oH, oW = img.shape[2:]
-            img = imutils.resize_input_minbound(img, min_size=args.crop_size) 
+            img = imutils.resize_input_minbound(img, min_size=args.crop_size)
             sH, sW = img.shape[2:]
             cam_dict = np.load(osp.join(args.cam_out_dir, name + '.npy'), allow_pickle=True).item()
             
@@ -314,34 +317,37 @@ def train_affinity(args):
     torch.cuda.set_device(args.local_rank)
     same_seeds(args.seed)
     
-    args.cam_out_dir = osp.join(args.work_space, args.cam_out_dir) 
-    pyutils.Logger(osp.join(args.work_space, 'res38_aff.log'))
+    args.cam_out_dir = osp.join(args.work_space, args.cam_out_dir)
+    pyutils.Logger(osp.join(args.work_space, 'res38_aff_train.log'))
     
     train_dataset = build_train_dataset(args)
     sampler_train, train_data_loader = build_train_dataloader(train_dataset, args)
 
     args.world_size = dist.get_world_size()
     args.batch_size = args.batch_per_gpu * args.world_size
-    max_step = len(train_dataset) * args.epoch // args.batch_size 
+    max_step = len(train_dataset) * args.epoch // args.batch_size
     args.max_step = max_step
    
     args_dict = vars(args)
-    if dist.get_rank() == 0:
-        pprint.pprint(args_dict)
     
     model = ResNet38d_Aff()
     param_groups = model.get_parameter_groups()
-    optimizer = torchutils.PolyOptimizer([
+    optimizer = torchutils.PolyAdamW([
         {'params': param_groups[0], 'lr': args.lr, 'weight_decay': args.wt_dec},
         {'params': param_groups[1], 'lr': 2 * args.lr, 'weight_decay': 0},
         {'params': param_groups[2], 'lr': 10 * args.lr, 'weight_decay': args.wt_dec},
         {'params': param_groups[3], 'lr': 20 * args.lr, 'weight_decay': 0}
-    ], lr=args.lr, weight_decay=args.wt_dec, max_step=max_step)
-    
+    ],
+    lr=args.lr, min_lr=args.min_lr, weight_decay=args.wt_dec,
+    max_step=max_step, warmup_step=args.warmup_step)
+
     weights_dict = torch.load(args.weights)
     model.load_state_dict(weights_dict, strict=False)
     model.to(device)
     
+    if dist.get_rank() == 0:
+        pprint.pprint(args_dict)
+        
     if args.world_size > 1:
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
@@ -351,8 +357,10 @@ def train_affinity(args):
         device_ids=[args.local_rank])
     model.train()
 
-    avg_meter = pyutils.AverageMeter('loss', 'bg_loss', 'fg_loss', 'neg_loss',
-                                     'bg_cnt', 'fg_cnt', 'neg_cnt')
+    avg_meter = pyutils.AverageMeter(
+        'loss', 'bg_loss', 'fg_loss', 'neg_loss',
+        'bg_cnt', 'fg_cnt', 'neg_cnt')
+    
     timer = pyutils.Timer("Session started: ")
     eps = 1e-8
     
@@ -395,9 +403,13 @@ def train_affinity(args):
                       'cnt: %.0f %.0f %.0f;' % avg_meter.get('bg_cnt', 'fg_cnt', 'neg_cnt'),
                       'imps: %.1f;' % ((iteration + 1) * args.batch_size / timer.get_stage_elapsed()),
                       'Fin: %s;' % (timer.str_est_finish()),
-                      'lr: %.4f' % (optimizer.param_groups[0]['lr']), flush=True)
+                      'lr: %.6f' % (optimizer.param_groups[0]['lr']), flush=True)
                 avg_meter.pop()
-                
+
+            if optimizer.global_step % (max_step // 10) == 0 and dist.get_rank() == 0:
+                torch.save(model.module.state_dict(),
+                           osp.join(args.work_space, f'res38_aff_{optimizer.global_step}.pth'))
+
     if dist.get_rank() == 0:
         torch.save(model.module.state_dict(), args.ckpt)
     
@@ -433,13 +445,12 @@ def infer_affinity(args):
     
 if __name__ == '__main__':
     args = get_args_parser()
-    model_name = 'res38_aff'
-    args.ckpt = osp.join(args.work_space, f'{model_name}_final.pth')
+    args.ckpt = osp.join(args.work_space, 'res38_aff_final.pth')
     
     if args.dataset == 'COCO':
         args.num_classes = 80
     elif args.dataset == 'VOC12':
-        args.num_classes = 20 
+        args.num_classes = 20
     else:
         raise NotImplementedError
     

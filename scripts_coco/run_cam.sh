@@ -1,6 +1,6 @@
 #!/bin/bash
-GPU=0
-NODES=1
+GPU=0,1
+NODES=2
 DATASET=COCO
 DATACONFIG=data/MSCOCO/ImageLists
 
@@ -38,6 +38,7 @@ python make_cam.py \
     --train_list ${TRAINID} \
     --checkpoint results_coco/mcta/mcta-deit-small-coco-4627.pth \
     # --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
+    
     
 # ============= Evaluate Class Activation Maps =============#
 python eval_cam_crf.py \
