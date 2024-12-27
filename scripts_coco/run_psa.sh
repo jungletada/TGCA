@@ -25,9 +25,9 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --train_list ${TRAINID} \
     --cam_out_dir ${CAMDIR} \
     --batch_per_gpu 12 \
+    --epoch 3 \
     --low_alpha 1 \
-    --high_alpha 1.2 \
-    
+    --high_alpha 1.3 \
 
 #============= Infer with Pixel Semantic Affnity =============#
 python train_infer_psa.py --inference True \
@@ -36,15 +36,11 @@ python train_infer_psa.py --inference True \
     --infer_list ${TRAINID} \
     --cam_out_dir ${CAMDIR} \
     --seg_out_dir ${SEGDIR} \
+    --checkpoint res38_aff_final.pth \
     --threshold 0.46 \
-
 
 #============= Evaluate =============#
 python steps_coco/eval_sem_seg.py \
     --work_space ${WORKDIR} \
-    --seg_out_dir ${SEGDIR} \
+    --seg_out_dir ${SEGDIR}  \
     --infer_list ${TRAINID} \
-    # --seg_out_dir pseudo_mask_448 \
-
-# Save the generated mask to zip
-# cd ${WORKDIR} && zip -r ${SEGDIR}.zip ${SEGDIR} && cd -

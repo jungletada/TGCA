@@ -8,8 +8,8 @@ from torch.utils.data import Dataset
 from . import imutils
 
 
-class PolyOptimizer(torch.optim.SGD):
-    def __init__(self, params, lr, weight_decay, max_step, momentum=0.9):
+class PolySGD(torch.optim.SGD):
+    def __init__(self, params, lr, weight_decay, max_step, momentum=1.0):
         super().__init__(params, lr, weight_decay)
         self.global_step = 0
         self.max_step = max_step

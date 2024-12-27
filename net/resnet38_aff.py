@@ -38,7 +38,7 @@ class ResNet38d_Aff(ResNet38d):
         self.chns = (64, 128, 256) # default settings
         self.res_chans = (512, 1024, 4096)
         # change to CBR
-        self.f8_3 = nn.Conv2d(self.res_chans[0], self.chns[0], 1, bias=False)   
+        self.f8_3 = nn.Conv2d(self.res_chans[0], self.chns[0], 1, bias=False)
         self.f8_4 = nn.Conv2d(self.res_chans[1], self.chns[1], 1, bias=False)
         self.f8_5 = nn.Conv2d(self.res_chans[2], self.chns[2], 1, bias=False)
         self.f9 = nn.Conv2d(sum(self.chns), 448, 1, bias=False)
@@ -91,7 +91,7 @@ class ResNet38d_Aff(ResNet38d):
             return aff_mat
         else:
             return aff
-
+    
     def get_parameter_groups(self):
         groups = ([], [], [], [])
         for m in self.modules():
@@ -107,14 +107,12 @@ class ResNet38d_Aff(ResNet38d):
                     else:
                         groups[1].append(m.bias)    # 2xlr & no weight dacay
         return groups
-    
+
     def train(self, mode=True):
         super().train(mode)
         for layer in self.not_training:
             if isinstance(layer, torch.nn.Conv2d):
                 layer.weight.requires_grad = False
-                if layer.bias is not None:
-                    layer.bias.requires_grad = False
             elif isinstance(layer, torch.nn.Module):
                 for c in layer.children():
                     c.weight.requires_grad = False
@@ -126,3 +124,4 @@ class ResNet38d_Aff(ResNet38d):
                 layer.eval()
                 layer.bias.requires_grad = False
                 layer.weight.requires_grad = False
+

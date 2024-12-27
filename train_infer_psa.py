@@ -1,4 +1,5 @@
 import os
+import sys
 import math
 import random
 import pprint
@@ -36,51 +37,49 @@ def get_args_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--train", default=False, type=str2bool)
     parser.add_argument("--inference", default=False, type=str2bool)
-    
     # model weights and path to CAM
     parser.add_argument("--coco_root", default='data/MSCOCO', type=str, help="Path to MSCOCO")
     parser.add_argument("--voc12_root", default='data/VOCdevkit/VOC2012/', type=str,
                         help="Path to VOC 2012 Devkit, must contain ./JPEGImages as subdirectory.")
     parser.add_argument("--work_space", default="results/mcta", type=str)
+    parser.add_argument('--log_dir', default='log_dir', type=str, help='log dir to save the results')
+    # directory settings
     parser.add_argument("--cam_out_dir", default="cam_mask_train", type=str, help="cam mask path")
     parser.add_argument("--seg_out_dir", default="pseudo_mask_train", type=str, help="pesudo mask path")
-    parser.add_argument("--train_list", default="train_aug_id.txt", type=str, 
+    parser.add_argument("--train_list", default="train_aug_id.txt", type=str,
                         help='train_id.txt or train_aug_id.txt')
     parser.add_argument('--infer_list', default='train_id.txt', type=str,
                         help='train_id.txt or train_id.txt')
-    # parser.add_argument("--weights", default='checkpoints/res38_cls.pth', type=str)
-    parser.add_argument("--weights", default='results_coco/mcta/res38_aff_1724.pth', type=str)
-    
-    # ddp settings
+    # weights path
+    parser.add_argument("--weights", default='checkpoints/res38_cls.pth', type=str)
+    parser.add_argument("--checkpoint", default='res38_aff_final.pth', type=str)
+    # ddp settings     
     parser.add_argument('--rank', default=0, type=int, help='rank of current process')
     parser.add_argument('--gpu_id', default=0, type=int, help="which gpu to use")
     parser.add_argument("--local_rank", type=int, help='rank in current node')
     parser.add_argument('--device', default='cuda',help='device id (i.e. 0 or 0,1 or cpu)')
-
     # training settings
-    parser.add_argument('--seed', default=3, type=int)
+    parser.add_argument('--seed', default=8, type=int)
     parser.add_argument("--batch_per_gpu", default=12, type=int)
     parser.add_argument("--epoch", default=5, type=int)
-    parser.add_argument("--lr", default=6e-5, type=float)
-    parser.add_argument("--min_lr", default=1e-6, type=float)
-    parser.add_argument("--warmup_step", default=1500, type=int)
+    parser.add_argument("--lr", default=6e-3, type=float)
+    # parser.add_argument("--min_lr", default=1e-6, type=float)
+    # parser.add_argument("--warmup_step", default=0, type=int)
     parser.add_argument("--num_workers", default=8, type=int)
     parser.add_argument("--wt_dec", default=1e-4, type=float)
-
+    parser.add_argument("--momentum", default=2, type=int)
     # dataset settings
     parser.add_argument("--dataset", default="COCO", type=str, help='choose `COCO` or `VOC12`')
     parser.add_argument("--crop_size", default=448, type=int)
     parser.add_argument("--low_alpha", default=1.0, type=float)
     parser.add_argument("--high_alpha", default=1.2, type=float)
     parser.add_argument("--radius", default=5, type=int)
-
     # hyper parameters settings
     parser.add_argument("--beta", default=11, type=int)
     parser.add_argument("--logt", default=7, type=int)
-    parser.add_argument("--threshold", default=0.48, type=float, 
+    parser.add_argument("--threshold", default=0.48, type=float,
                         help='the optimal one obtained for seeds')
-    args = parser.parse_args()
-    return args
+    return parser.parse_args()
 
 
 class Normalize():
@@ -216,7 +215,7 @@ def build_infer_dataset(args):
     if args.dataset == 'COCO':
         infer_dataset = COCOImageDataset(
             coco_root=args.coco_root,
-            img_name_list_path=args.infer_list, 
+            img_name_list_path=args.infer_list,
             transform=torchvision.transforms.Compose(
                 [np.asarray,
                 Normalize(),
@@ -316,10 +315,10 @@ def train_affinity(args):
     device = torch.device(args.device)
     torch.cuda.set_device(args.local_rank)
     same_seeds(args.seed)
-    
+
     args.cam_out_dir = osp.join(args.work_space, args.cam_out_dir)
     pyutils.Logger(osp.join(args.work_space, 'res38_aff_train.log'))
-    
+
     train_dataset = build_train_dataset(args)
     sampler_train, train_data_loader = build_train_dataloader(train_dataset, args)
 
@@ -332,15 +331,23 @@ def train_affinity(args):
     
     model = ResNet38d_Aff()
     param_groups = model.get_parameter_groups()
-    optimizer = torchutils.PolyAdamW([
+    optimizer = torchutils.PolySGD([
         {'params': param_groups[0], 'lr': args.lr, 'weight_decay': args.wt_dec},
-        {'params': param_groups[1], 'lr': 2 * args.lr, 'weight_decay': 0},
+        {'params': param_groups[1], 'lr': args.lr, 'weight_decay': 0},
         {'params': param_groups[2], 'lr': 10 * args.lr, 'weight_decay': args.wt_dec},
-        {'params': param_groups[3], 'lr': 20 * args.lr, 'weight_decay': 0}
-    ],
-    lr=args.lr, min_lr=args.min_lr, weight_decay=args.wt_dec,
-    max_step=max_step, warmup_step=args.warmup_step)
-
+        {'params': param_groups[3], 'lr': 10 * args.lr, 'weight_decay': 0}],
+        lr=args.lr,
+        weight_decay=args.wt_dec,
+        max_step=max_step,
+        momentum=args.momentum)
+    
+    # optimizer = torchutils.PolyAdamW([
+    #     {'params': param_groups[0], 'lr': args.lr},
+    #     {'params': param_groups[1], 'lr': 10 * args.lr},
+    # ],
+    # lr=args.lr, min_lr=args.min_lr, weight_decay=args.wt_dec,
+    # max_step=max_step, warmup_step=args.warmup_step)
+    
     weights_dict = torch.load(args.weights)
     model.load_state_dict(weights_dict, strict=False)
     model.to(device)
@@ -352,8 +359,8 @@ def train_affinity(args):
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
     model = nn.parallel.DistributedDataParallel(
-        model, 
-        find_unused_parameters=True, 
+        model,
+        find_unused_parameters=True,
         device_ids=[args.local_rank])
     model.train()
 
@@ -382,7 +389,12 @@ def train_affinity(args):
             neg_loss = torch.sum(- neg_label * torch.log(1. + eps - aff)) / neg_count
 
             loss = bg_loss / 4 + fg_loss / 4 + neg_loss / 2
-           
+            
+            loss_value = loss.item()
+            if not math.isfinite(loss_value):
+                print(f"Loss is {loss_value}, stopping training")
+                sys.exit(1)
+                
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -393,7 +405,7 @@ def train_affinity(args):
                 'bg_cnt': bg_count.item(), 'fg_cnt': fg_count.item(), 'neg_cnt': neg_count.item()
             })
             
-            torch.cuda.synchronize()   
+            torch.cuda.synchronize()
              
             if (optimizer.global_step - 1) % 50 == 0 and dist.get_rank() == 0:
                 timer.update_progress(optimizer.global_step / max_step)
@@ -406,12 +418,12 @@ def train_affinity(args):
                       'lr: %.6f' % (optimizer.param_groups[0]['lr']), flush=True)
                 avg_meter.pop()
 
-            if optimizer.global_step % (max_step // 10) == 0 and dist.get_rank() == 0:
+            if optimizer.global_step % 2000 == 0 and dist.get_rank() == 0:
                 torch.save(model.module.state_dict(),
                            osp.join(args.work_space, f'res38_aff_{optimizer.global_step}.pth'))
 
     if dist.get_rank() == 0:
-        torch.save(model.module.state_dict(), args.ckpt)
+        torch.save(model.module.state_dict(), args.checkpoint)
     
     
 def infer_affinity(args):
@@ -422,7 +434,7 @@ def infer_affinity(args):
     pprint.pprint(vars(args))
 
     model = ResNet38d_Aff()
-    model_dict = torch.load(args.ckpt, map_location='cpu')
+    model_dict = torch.load(args.checkpoint, map_location='cpu')
     model.load_state_dict(model_dict)
     model.eval()
     model.cuda()
@@ -445,18 +457,19 @@ def infer_affinity(args):
     
 if __name__ == '__main__':
     args = get_args_parser()
-    args.ckpt = osp.join(args.work_space, 'res38_aff_final.pth')
-    
+    args.checkpoint = osp.join(args.work_space, args.checkpoint)
+    args.log_dir = osp.join(args.work_space, args.log_dir)
+
     if args.dataset == 'COCO':
         args.num_classes = 80
     elif args.dataset == 'VOC12':
         args.num_classes = 20
     else:
         raise NotImplementedError
-    
+
     if args.train:
         train_affinity(args)
-        
+
     if args.inference:
         infer_affinity(args)
-       
+
