@@ -20,15 +20,15 @@ from torch.utils.data.distributed import DistributedSampler
 
 import utils
 from engine import compute_mAP
-from utils import str2bool
 from datasets_cam import build_dataset
+import net.resnet38d
 
 import warnings
 warnings.filterwarnings("ignore")
 
  
 def get_args_parser():
-    parser = argparse.ArgumentParser('DeiT training and evaluation script', add_help=False)
+    parser = argparse.ArgumentParser('Classification training and evaluation script', add_help=False)
     parser.add_argument('--batch_per_gpu', default=16, type=int)
     parser.add_argument('--epochs', default=30, type=int)
     parser.add_argument('--seed', default=0, type=int)
@@ -41,7 +41,9 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',help='device id (i.e. 0 or 0,1 or cpu)')
 
     # Model parameters
-    parser.add_argument('--model', default='ResNet38d_patch_224', type=str, metavar='MODEL',
+    parser.add_argument('--model', default='resnet38d', type=str, metavar='MODEL',
+                        help='Name of model to train')
+    parser.add_argument('--pretrained', default='checkpoints/res38_cls.pth', type=str, metavar='MODEL',
                         help='Name of model to train')
     parser.add_argument('--input_size', default=448, type=int, help='images input size')
     parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
@@ -67,7 +69,7 @@ def get_args_parser():
     parser.add_argument('--sched', default='cosine', type=str, metavar='SCHEDULER',
                         help='LR scheduler (default: "cosine"')
     parser.add_argument('--lr', type=float, default=1e-3, metavar='LR',
-                        help='learning rate (default: 5e-4)')
+                        help='learning rate (default: 1e-3)')
     parser.add_argument('--lr-noise', type=float, nargs='+', default=None, metavar='pct, pct',
                         help='learning rate noise on/off epoch percentages')
     parser.add_argument('--lr-noise-pct', type=float, default=0.67, metavar='PERCENT',
@@ -79,9 +81,9 @@ def get_args_parser():
     parser.add_argument('--min-lr', type=float, default=1e-5, metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0 (1e-5)')
 
-    parser.add_argument('--decay-epochs', type=float, default=30, metavar='N',
+    parser.add_argument('--decay-epochs', type=float, default=10, metavar='N',
                         help='epoch interval to decay LR')
-    parser.add_argument('--warmup-epochs', type=int, default=5, metavar='N',
+    parser.add_argument('--warmup-epochs', type=int, default=10, metavar='N',
                         help='epochs to warmup LR, if scheduler supports')
     parser.add_argument('--cooldown-epochs', type=int, default=10, metavar='N',
                         help='epochs to cooldown LR at min_lr, after cyclic schedule ends')
@@ -116,10 +118,10 @@ def get_args_parser():
 
     # Dataset parameters
     parser.add_argument('--dataset', default='', type=str, help='name of dataset')
-    parser.add_argument('--voc12_root', default='datasets/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
-    parser.add_argument("--coco_root", default='datasets/MSCOCO', type=str, help="Path to MSCOCO")
-    parser.add_argument("--train_list", default="configs/voc12/train_aug_id.txt", type=str, 
-                        help='configs/coco/train_id.txt or configs/voc12/train_aug_id.txt')
+    parser.add_argument('--voc12_root', default='data/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
+    parser.add_argument("--coco_root", default='data/MSCOCO', type=str, help="Path to MSCOCO")
+    parser.add_argument("--train_list", default="train_aug_id.txt", type=str, 
+                        help='train_id.txt or train_aug_id.txt')
     parser.add_argument('--checkpoint', default='', help='checkpoint for generating maps')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
@@ -170,11 +172,6 @@ def init_distributed_mode(args):
     dist.barrier()
       
 
-def ddp_print(logger, log_msg):
-     if dist.get_rank() == 0:
-         logger.info(log_msg)
-
-
 def train_one_epoch(model, data_loader, optimizer, device, epoch,
                     loss_scaler, max_norm, set_training_mode=True):
     print_freq = 10
@@ -207,7 +204,7 @@ def train_one_epoch(model, data_loader, optimizer, device, epoch,
         torch.cuda.synchronize()
         metric_logger.update(loss=loss_value)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
-    # gather the stats from all processes
+
     metric_logger.synchronize_between_processes()
     
     if dist.get_rank() == 0:
@@ -280,7 +277,7 @@ def main(args):
     
     model = create_model(
         args.model,
-        pretrained=None,
+        pretrained=args.pretrained,
         num_classes=args.nb_classes)
    
     best_ckpt_name = f'{args.model}_best.pth'
@@ -289,14 +286,10 @@ def main(args):
     utils.logger_info(logger_name=session_name, 
                       log_path=os.path.join(args.work_space, f'train_cam_{args.dataset}.log'))
     logger = logging.getLogger(session_name)
-    ddp_print(logger, f"Use seed: {args.seed}")
     
-    model.load_state_dict(checkpoint_model, strict=False)
+    # model.load_state_dict(, strict=False)
     
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    ddp_print(logger, f'Number of parameters: {n_parameters}')
-    ddp_print(logger, best_ckpt_name)
-
     linear_scaled_lr = args.lr * args.batch_per_gpu * dist.get_world_size() / 512.0
     args.lr = linear_scaled_lr
     
@@ -304,10 +297,20 @@ def main(args):
     loss_scaler = NativeScaler()
 
     lr_scheduler, _ = create_scheduler(args, optimizer)
-    ddp_print(logger, f"|-- Total epochs: {args.epochs}")
+
     start_time = time.time()
     max_accuracy = 0.0
-
+    
+    if dist.get_rank() == 0:
+        logger.info(
+            "Model:%s\n"
+            "Use seed: %s\n"
+            "Number of parameters: %d\n"
+            "Checkpoint saved as %s\n"
+            "|-- Total epochs: %d",
+            model, args.seed, n_parameters, best_ckpt_name, args.epochs
+        )
+        
     model.to(device)
     if args.world_size > 1:
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model) 
@@ -332,31 +335,29 @@ def main(args):
             data_loader=data_loader_val, 
             device=device)
     
-        ddp_print(logger, f"mAP of the network on the {len(dataset_val)} test images: {test_stats['mAP']*100:.1f}%")
+       
         if test_stats["mAP"] > max_accuracy:
             torch.save({'model': model.module.state_dict()}, 
                        os.path.join(args.work_space, f'{args.model}_best.pth'))
 
         max_accuracy = max(max_accuracy, test_stats["mAP"])
-        ddp_print(logger, f'Max mAP: {max_accuracy * 100:.2f}%')
-
-        log_stats = {'epoch': epoch,
+        if utils.is_main_process():
+            log_stats = {'epoch': epoch,
                      **{f'train_{k}': v for k, v in train_stats.items()},
                      **{f'test_{k}': v for k, v in test_stats.items()}}
-
-        if utils.is_main_process():
-            ddp_print(logger, json.dumps(log_stats))
-
-    torch.save({'model': model.module.state_dict()}, os.path.join(args.work_space, f'{args.model}_last.pth'))
-    total_time = time.time() - start_time
-    total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    ddp_print(logger, 'Training time {}'.format(total_time_str))
+            logger.info(
+                f'mAP on the {len(dataset_val)} test images: {test_stats["mAP"] * 100:.1f}%\n' +
+                f'Max mAP: {max_accuracy * 100:.2f}%\n' + json.dumps(log_stats)
+            )
+            
+    torch.save({'model': model.module.state_dict()}, 
+               os.path.join(args.work_space, f'{args.model}_last.pth'))
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        'DeiT training and evaluation script', 
+        'Classification training and evaluation script', 
         parents=[get_args_parser()])
-    
+
     args = parser.parse_args()
     main(args)

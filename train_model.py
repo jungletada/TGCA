@@ -356,9 +356,6 @@ def main(args):
 
         lr_scheduler.step(epoch)
         
-        # tlr=optimizer.param_groups[0]["lr"]
-        # logger.info(f'{epoch}: {tlr:.8f}')
-        
         test_stats = evaluate(
             model=model,
             data_loader=data_loader_val,

@@ -164,7 +164,7 @@ class ResNet38d(nn.Module):
 
 
 @register_model
-def ResNet38d_patch_224(pretrained=None, **kwargs):
+def resnet38d(pretrained=None, **kwargs):
     model = ResNet38d(**kwargs)
     if pretrained is not None:
         weights_dict = torch.load(pretrained)
@@ -177,7 +177,7 @@ def ResNet38d_patch_224(pretrained=None, **kwargs):
 if __name__ == '__main__':
     from timm.models import create_model
     model = create_model(
-        "ResNet38d_patch_224",
+        "resnet38d",
         pretrained="checkpoints/res38_cls.pth",
         num_classes=20)
     
