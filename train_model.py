@@ -320,11 +320,12 @@ def main(args):
     max_accuracy = 0.0
     if dist.get_rank() == 0:
         logger.info(
+            "Model:%s\n"
             "Use seed: %s\n"
             "Number of parameters: %d\n"
             "Checkpoint saved as %s\n"
             "|-- Total epochs: %d",
-            args.seed, n_parameters, best_ckpt_name, args.epochs
+            model, args.seed, n_parameters, best_ckpt_name, args.epochs
         )
 
     model.to(device)
@@ -380,10 +381,10 @@ def main(args):
         torch.save({'model': model.module.state_dict(), 'epoch': epoch, 'optimizer': optimizer.state_dict()},
                    os.path.join(args.work_space, f'{args.model}_last_ckpt.pth'))
 
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         'DeiT training and evaluation script', 
         parents=[get_args_parser()])
-
     args = parser.parse_args()
     main(args)

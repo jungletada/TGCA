@@ -3,8 +3,9 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 from timm.models.layers import DropPath
+
 from net.gcn_lib import Grapher
-from net.modules_plug.cbam import ChannelAttention, SpatialAttention
+# from modules_plug.cbam import ChannelAttention, SpatialAttention
 
 
 def nlc2nchw(x, d_size):
@@ -520,25 +521,25 @@ class MLP(nn.Module):
         return x
 
 
-class FeatureFusion(nn.Module):
-    def __init__(self, in_features, out_features):
-        super().__init__()
-        self.conv_module = nn.Sequential(
-            nn.Conv2d(in_features, out_features, 1),
-            nn.BatchNorm2d(out_features),
-            nn.GELU())
-        self.ca = ChannelAttention(out_features)
-        self.sa = SpatialAttention()
+# class FeatureFusion(nn.Module):
+#     def __init__(self, in_features, out_features):
+#         super().__init__()
+#         self.conv_module = nn.Sequential(
+#             nn.Conv2d(in_features, out_features, 1),
+#             nn.BatchNorm2d(out_features),
+#             nn.GELU())
+#         self.ca = ChannelAttention(out_features)
+#         self.sa = SpatialAttention()
         
 
-    def forward(self, x):
-        x = self.conv_module(x)
-        z = x.clone()
-        channel = self.ca(x)  # (3, 64, 1, 1)
-        x = channel * x       # (3, 64, 56, 56)
-        spatial = self.sa(x)  # (3, 1, 56, 56)
-        x = spatial * x       # (3, 64, 56, 56)
-        return x + z
+#     def forward(self, x):
+#         x = self.conv_module(x)
+#         z = x.clone()
+#         channel = self.ca(x)  # (3, 64, 1, 1)
+#         x = channel * x       # (3, 64, 56, 56)
+#         spatial = self.sa(x)  # (3, 1, 56, 56)
+#         x = spatial * x       # (3, 64, 56, 56)
+#         return x + z
 
 
 class SemanticAttnModule(nn.Module):

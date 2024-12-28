@@ -18,17 +18,17 @@ CRFDIR=crf_mask_train
 
 CUDA_VISIBLE_DEVICES=${GPU}
 
-# #============= Train Model ============= #
-# OMP_NUM_THREADS=${NODES} \
-# torchrun --nproc_per_node=${NODES} --nnodes=1 \
-#     train_model.py \
-#     --dataset ${DATASET} \
-#     --model ${MODELNAME} \
-#     --train_list ${TRAINAUGID} \
-#     --work_space ${WORKDIR} \
-#     --seed 3 \
-#     --epoch 30 \
-#     --batch_per_gpu 40 \
+#============= Train Model ============= #
+OMP_NUM_THREADS=${NODES} \
+torchrun --nproc_per_node=${NODES} --nnodes=1 \
+    train_model.py \
+    --dataset ${DATASET} \
+    --model ${MODELNAME} \
+    --train_list ${TRAINAUGID} \
+    --work_space ${WORKDIR} \
+    --seed 3 \
+    --epoch 26 \
+    --batch_per_gpu 20 \
     
 # ============= Make Class Activation Maps of Model ============= #
 python make_cam.py \
@@ -38,7 +38,7 @@ python make_cam.py \
     --cam_out_dir ${SEGDIR} \
     --train_list ${TRAINAUGID} \
     --input_size ${INPUTSIZE} \
-    --checkpoint results_voc/mcta/mcta-deit-small-voc-7458.pth \
+    --checkpoint results_voc/mcta/mcta_best.pth \
     
 # ============= Evaluate Class Activation Maps without CRF =============#
 python eval_cam_crf.py \

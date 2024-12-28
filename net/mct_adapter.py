@@ -6,10 +6,11 @@ import torch.nn.functional as F
 
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
-
+#net.
 from net.adapter_modules import DownConv, SemanticAttnModule
 from net.adapter_modules import SpatialPriorGNN
 from net.mct_vit import MCTViT, _cfg
+
 
 __all__ = ['mcta']
 
@@ -146,7 +147,7 @@ class MCTAdapter(MCTViT):
         x_cls = self.proj_cls_embed(x_cls)      # B x C x Cls
         x_cls = x_cls.permute(0, 2, 1).contiguous()  # B x Cls x C
         return x_cls
-         
+     
     def forward_features(self, x):
         """
         Input:
@@ -161,35 +162,30 @@ class MCTAdapter(MCTViT):
         x_spatial = self.spatial_prior(x)   # list [B x C x H^ x W^]
         x = self.patch_embed(x)
         token_size = (H // self.patch_embed.patch_size[0], W // self.patch_embed.patch_size[1])
-        
+
         if not self.training:
             pos_embed_pat = self.interpolate_pos_encoding(x, token_size=token_size)
             x = x + pos_embed_pat
             sptial_pos_embed = self.interpolate_spatial_pos_encoding(x_spatial)
             for i in range(self.stages):
                 x_spatial[i] += sptial_pos_embed[i].to(x.device)
-        else: 
+        else:
             x = x + self.pos_embed_pat
             for i in range(self.stages):
                 x_spatial[i] += self.sptial_pos_embed[i].to(x.device)
-            
+
         nn_cls_tokens = self.cls_token.expand(b, -1, -1) + self.pos_embed_cls
         cls_tokens = self.build_class_tokens(x_spatial) + nn_cls_tokens
-        
+
         x = torch.cat((cls_tokens, x), dim=1) # Concat input with Nc class tokens
         x = self.pos_drop(x)                  # B x (N') x C, where N' = Nc + Np
-        
+
         attn_weights = []
-        all_x_cls = []
-        all_x_vit = []
         #-------------------  Modify block for ablation study -------------------#
         for i in range(self.stages):
             for j in range(self.stage_indices[i], self.stage_indices[i+1]):
-                x, weights_j = self.blocks[j](x)
+                x, weights_j = self.blocks[j](x, d_size=token_size)
                 attn_weights.append(weights_j)
-
-                # all_x_vit.append(x[:, self.num_classes:])
-                # all_x_cls.append(x[:, :self.num_classes])
 
             cls_stru, x_spatial[i] = self.spatial_fuse[i](
                 x_spatial=x_spatial[i],
@@ -198,10 +194,8 @@ class MCTAdapter(MCTViT):
             # zero initialized weights for adding new class tokens
             x_cls = x[:, :self.num_classes] + self.weights[i] * cls_stru
             x_vit = x[:, self.num_classes:]
-            # all_x_cls[-1] = x_cls
-            
             x = torch.cat((x_cls, x_vit), dim=1)
-            
+
             if i != self.stages - 1:
                 z = self.down_convs[i](x_spatial[i])
                 x_spatial[i + 1] = x_spatial[i + 1] + z
@@ -249,15 +243,6 @@ class MCTAdapter(MCTViT):
         out = torch.sum(sorted_x * weights, dim=-2) / weights.sum()
 
         return out
-    
-    def forward_eval(self, x):
-        b, _, h, w = x.shape
-        feat_dict = self.forward_features(x)
-        all_cls_tokens = feat_dict['x_cls']
-        all_patch_tokens = feat_dict['x_vit']
-        return {
-            'all_cls':all_cls_tokens, 
-            'all_patches':all_patch_tokens}
 
     def forward(self, x):
         """
@@ -444,46 +429,6 @@ def mcta(pretrained=False, **kwargs):
     return model
 
 
-@register_model
-def mcta_base(pretrained=False, **kwargs):
-    """Create a MCTA model instance.
-       Base: deit_base_patch16_224.fb_in1k
-    Args:
-        pretrained (bool): Whether to load pretrained weights
-        **kwargs: Additional arguments passed to the MCTA constructor
-        
-    Returns:
-        MCTA: The constructed model
-    """
-    model = MCTAdapter(
-        patch_size=16,
-        embed_dim=768,
-        depth=12,
-        num_heads=12,
-        **kwargs)
-
-    model.default_cfg = _cfg()
-
-    if pretrained:
-        checkpoint = torch.hub.load_state_dict_from_url(
-            url='https://dl.fbaipublicfiles.com/deit/deit_base_patch16_224-b5f2ef4d.pth',
-            map_location="cpu", check_hash=True)['model']
-        model_dict = model.state_dict()
-
-        for k in ['head.weight', 'head.bias', 'head_dist.weight', 'head_dist.bias']:
-            if k in checkpoint and checkpoint[k].shape != model_dict[k].shape:
-                print(f"Removing key {k} from pretrained checkpoint")
-                del checkpoint[k]
-
-        pretrained_dict = {k: v for k, v in checkpoint.items()
-                           if k in model_dict}
-        pretrained_dict = {k: v for k, v in pretrained_dict.items()
-                           if k not in ['cls_token', 'pos_embed']}
-        model_dict.update(pretrained_dict)
-        model.load_state_dict(model_dict)
-    return model
-
-
 def mcta_cam(**kwargs):
     """Create a MCTACam small model instance.
     
@@ -497,20 +442,4 @@ def mcta_cam(**kwargs):
         num_heads=6,
         **kwargs)
     return model
-    
-    
-def mcta_base_cam(**kwargs):
-    """Create a MCTACam model instance.
-    
-    Args:
-        **kwargs: Additional arguments passed to the MCTACam constructor.
-    """
-    model = MCTAdapterCam(
-        patch_size=16,
-        embed_dim=768,
-        depth=12,
-        num_heads=12,
-        **kwargs)
-    return model
-     
-     
+

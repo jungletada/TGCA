@@ -16,7 +16,6 @@ class PolySGD(torch.optim.SGD):
         self.momentum = momentum
         self.__initial_lr = [group['lr'] for group in self.param_groups]
 
-
     def step(self, closure=None):
         if self.global_step < self.max_step:
             lr_mult = (1 - self.global_step / self.max_step) ** self.momentum
@@ -27,7 +26,8 @@ class PolySGD(torch.optim.SGD):
 
 
 class PolyAdamW(torch.optim.AdamW):
-    def __init__(self, params, lr, min_lr, weight_decay, max_step, warmup_step=0, betas=(0.9, 0.999), eps=1e-8):
+    def __init__(self, params, lr, weight_decay, max_step, 
+                 betas=(0.9, 0.999), eps=1e-8, momentum=1.0):
         """
         AdamW optimizer with warmup and polynomial learning rate schedule.
 
@@ -44,22 +44,15 @@ class PolyAdamW(torch.optim.AdamW):
         super().__init__(params, lr=lr, weight_decay=weight_decay, betas=betas, eps=eps)
         self.global_step = 0
         self.max_step = max_step
-        self.warmup_step = warmup_step
-        self.min_lr = min_lr
+        self.momentum = momentum
         self.__initial_lr = [group['lr'] for group in self.param_groups]
 
     def step(self, closure=None):
         """
         Performs a single optimization step and updates the learning rate using warmup and polynomial schedule.
         """
-        if self.global_step < self.warmup_step:
-            # Warmup phase: linear increase from min_lr to initial_lr
-            warmup_mult = self.global_step / self.warmup_step
-            for i, group in enumerate(self.param_groups):
-                group['lr'] = self.min_lr + (self.__initial_lr[i] - self.min_lr) * warmup_mult
-        elif self.global_step < self.max_step:
-            # Polynomial decay phase
-            lr_mult = (1 - (self.global_step - self.warmup_step) / (self.max_step - self.warmup_step)) ** 0.9
+        if self.global_step < self.max_step:
+            lr_mult = (1 - self.global_step / self.max_step) ** self.momentum
             for i, group in enumerate(self.param_groups):
                 group['lr'] = self.__initial_lr[i] * lr_mult
         else:

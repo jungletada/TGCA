@@ -50,6 +50,8 @@ def get_args_parser():
                         help='train_id.txt or train_aug_id.txt')
     parser.add_argument('--infer_list', default='train_id.txt', type=str,
                         help='train_id.txt or train_id.txt')
+    parser.add_argument('--save_step', default=1000, type=int,
+                        help='every save_step to save the training checkpoint.')
     # weights path
     parser.add_argument("--weights", default='checkpoints/res38_cls.pth', type=str)
     parser.add_argument("--checkpoint", default='res38_aff_final.pth', type=str)
@@ -61,18 +63,16 @@ def get_args_parser():
     # training settings
     parser.add_argument('--seed', default=8, type=int)
     parser.add_argument("--batch_per_gpu", default=12, type=int)
-    parser.add_argument("--epoch", default=5, type=int)
-    parser.add_argument("--lr", default=6e-3, type=float)
-    # parser.add_argument("--min_lr", default=1e-6, type=float)
-    # parser.add_argument("--warmup_step", default=0, type=int)
+    parser.add_argument("--epoch", default=3, type=int)
+    parser.add_argument("--lr", default=6e-4, type=float)
     parser.add_argument("--num_workers", default=8, type=int)
-    parser.add_argument("--wt_dec", default=1e-4, type=float)
-    parser.add_argument("--momentum", default=2, type=int)
+    parser.add_argument("--wt_dec", default=5e-4, type=float)
+    parser.add_argument("--momentum", default=1.0, type=float)
     # dataset settings
     parser.add_argument("--dataset", default="COCO", type=str, help='choose `COCO` or `VOC12`')
     parser.add_argument("--crop_size", default=448, type=int)
     parser.add_argument("--low_alpha", default=1.0, type=float)
-    parser.add_argument("--high_alpha", default=1.2, type=float)
+    parser.add_argument("--high_alpha", default=2.0, type=float)
     parser.add_argument("--radius", default=5, type=int)
     # hyper parameters settings
     parser.add_argument("--beta", default=11, type=int)
@@ -341,13 +341,6 @@ def train_affinity(args):
         max_step=max_step,
         momentum=args.momentum)
     
-    # optimizer = torchutils.PolyAdamW([
-    #     {'params': param_groups[0], 'lr': args.lr},
-    #     {'params': param_groups[1], 'lr': 10 * args.lr},
-    # ],
-    # lr=args.lr, min_lr=args.min_lr, weight_decay=args.wt_dec,
-    # max_step=max_step, warmup_step=args.warmup_step)
-    
     weights_dict = torch.load(args.weights)
     model.load_state_dict(weights_dict, strict=False)
     model.to(device)
@@ -418,7 +411,7 @@ def train_affinity(args):
                       'lr: %.6f' % (optimizer.param_groups[0]['lr']), flush=True)
                 avg_meter.pop()
 
-            if optimizer.global_step % 2000 == 0 and dist.get_rank() == 0:
+            if optimizer.global_step % args.save_step == 0 and dist.get_rank() == 0:
                 torch.save(model.module.state_dict(),
                            osp.join(args.work_space, f'res38_aff_{optimizer.global_step}.pth'))
 
