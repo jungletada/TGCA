@@ -61,8 +61,8 @@ def get_args_parser():
     parser.add_argument("--local_rank", type=int, help='rank in current node')
     parser.add_argument('--device', default='cuda',help='device id (i.e. 0 or 0,1 or cpu)')
     # training settings
-    parser.add_argument('--seed', default=8, type=int)
-    parser.add_argument("--batch_per_gpu", default=12, type=int)
+    parser.add_argument('--seed', default=3, type=int)
+    parser.add_argument("--batch_per_gpu", default=8, type=int)
     parser.add_argument("--epoch", default=3, type=int)
     parser.add_argument("--lr", default=6e-4, type=float)
     parser.add_argument("--num_workers", default=8, type=int)
