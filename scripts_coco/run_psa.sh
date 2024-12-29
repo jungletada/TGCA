@@ -1,6 +1,6 @@
 #!/bin/bash
-GPU=0,1
-NODES=2
+GPU=0
+NODES=1
 CUDA_VISIBLE_DEVICES=${GPU}
 OMP_NUM_THREADS=${NODES} 
 
@@ -24,8 +24,8 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --work_space ${WORKDIR} \
     --train_list ${TRAINID} \
     --cam_out_dir ${CAMDIR} \
-    --batch_per_gpu 12 \
-    --epoch 3 \
+    --batch_per_gpu 8 \
+    --epoch 5 \
     --low_alpha 1 \
     --high_alpha 1.5 \
     --weights checkpoints/res38_cls.pth \
