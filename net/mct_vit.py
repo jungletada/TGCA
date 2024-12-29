@@ -5,9 +5,6 @@ from functools import partial
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 
-from net.gcn_lib import Grapher
-from net.adapter_modules import nlc2nchw, nchw2nlc
-
 def _cfg(url='', **kwargs):
     return {
         'url': url,
@@ -17,7 +14,6 @@ def _cfg(url='', **kwargs):
         'first_conv': 'patch_embed.proj', 'classifier': 'head',
         **kwargs
     }
-
 
 default_cfgs = {
     'vit_tiny_patch16_224': _cfg(
@@ -50,31 +46,9 @@ default_cfgs = {
 }
 
 
-class Cls2PatAttentionGNN(nn.Module):
-    def __init__(self, num_classes=20, kernel_size=9, dilation=1, conv='mr', groups=6):
-        super().__init__()
-        self.cls_gnn = Grapher(
-            in_channels=groups * num_classes,
-            kernel_size=kernel_size,
-            dilation=dilation,
-            conv=conv,
-            groups=groups)
-    
-    def forward(self, x, d_size):
-        """
-        x: Class-to-Patch Attention map, (B, d, N_cls, N)
-        """
-        _, d, N_cls, N = x.shape
-        idendity = x
-        x = x.reshape(-1, d * N_cls, d_size[0], d_size[1]).contiguous()
-        x = self.cls_gnn(x)
-        x = x.reshape(-1, d, N_cls,  N).contiguous()
-        x = idendity + x
-        return x
-
-
 class Mlp(nn.Module):
-    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
+    def __init__(self, in_features, hidden_features=None, 
+                 out_features=None, act_layer=nn.GELU, drop=0.):
         super().__init__()
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
@@ -97,7 +71,7 @@ class Attention(nn.Module):
     Base Attention for DeiT.
     """
     def __init__(self, dim, num_heads=6, qkv_bias=False, qk_scale=None,
-                 attn_drop=0., proj_drop=0., num_classes=20, cls_gnn=False):
+                 attn_drop=0., proj_drop=0., num_classes=20):
         super().__init__()
         self.nc = num_classes
         self.n_heads = num_heads
@@ -107,15 +81,8 @@ class Attention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
-        if cls_gnn:
-            self.use_gnn = True
-            self.cls_gnn = Cls2PatAttentionGNN(
-                num_classes=num_classes,
-                groups=num_heads)
-        else:
-            self.use_gnn = False
 
-    def forward(self, x, d_size):
+    def forward(self, x):
         B, N, C = x.shape  # Here N = #patches + #class-tokens
         qkv = self.qkv(x).reshape(
             B, N, 3, self.n_heads, C // self.n_heads).permute(2, 0, 3, 1, 4)
@@ -124,12 +91,6 @@ class Attention(nn.Module):
         attn = (q @ k.transpose(-2, -1)) * self.scale  # B x Nd x N x N
         #======================================================================#
         attn_cls, attn_pat = torch.split(attn, [self.nc, N-self.nc], dim=-1)
-        
-        if self.use_gnn:
-            cls2pat, pat2pat = torch.split(attn_pat, [self.nc, N-self.nc], dim=-2)
-            cls2pat = self.cls_gnn(cls2pat, d_size)
-            attn_pat = torch.cat((cls2pat, pat2pat), dim=-2)
-
         attn_pat = attn_pat.softmax(dim=-1)
         attn_cls = attn_cls.softmax(dim=-1)
         attn = torch.cat((attn_cls, attn_pat), dim=-1)
@@ -149,7 +110,7 @@ class Block(nn.Module):
     Transformer Block requires both patch tokens and class tokens
     """
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
-                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, num_classes=20, cls_gnn=False):
+                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, num_classes=20):
         super().__init__()
         self.norm1 = norm_layer(dim)
         self.attn = Attention(
@@ -159,16 +120,15 @@ class Block(nn.Module):
             qk_scale=qk_scale,
             attn_drop=attn_drop,
             proj_drop=drop,
-            num_classes=num_classes,
-            cls_gnn=cls_gnn)
+            num_classes=num_classes)
 
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
-    def forward(self, x, d_size):
-        o, weights = self.attn(self.norm1(x), d_size)
+    def forward(self, x):
+        o, weights = self.attn(self.norm1(x))
         x = x + self.drop_path(o)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x, weights
@@ -217,21 +177,13 @@ class MCTViT(nn.Module):
 
         dpr = [x.item() for x in torch.linspace(
             0, drop_path_rate, depth)]  # stochastic depth decay rule
-
-        m = depth - 1
+        
         blocks = []
         for i in range(depth):
-            if i < m:
-                blocks.append(
-                    Block(dim=embed_dim,num_heads=num_heads,mlp_ratio=mlp_ratio, qkv_bias=qkv_bias,
-                          qk_scale=qk_scale,drop=drop_rate,attn_drop=attn_drop_rate,drop_path=dpr[i],
-                          norm_layer=norm_layer,num_classes=num_classes,cls_gnn=False))
-            else:
-                blocks.append(
-                    Block(dim=embed_dim,num_heads=num_heads,mlp_ratio=mlp_ratio, qkv_bias=qkv_bias,
-                          qk_scale=qk_scale,drop=drop_rate,attn_drop=attn_drop_rate,drop_path=dpr[i],
-                          norm_layer=norm_layer,num_classes=num_classes,cls_gnn=True))
-        
+            blocks.append(
+                Block(dim=embed_dim,num_heads=num_heads,mlp_ratio=mlp_ratio, qkv_bias=qkv_bias,
+                        qk_scale=qk_scale,drop=drop_rate,attn_drop=attn_drop_rate,drop_path=dpr[i],
+                        norm_layer=norm_layer,num_classes=num_classes))
         self.blocks = nn.ModuleList(blocks)
 
         self.norm = norm_layer(embed_dim)

@@ -184,7 +184,7 @@ class MCTAdapter(MCTViT):
         #-------------------  Modify block for ablation study -------------------#
         for i in range(self.stages):
             for j in range(self.stage_indices[i], self.stage_indices[i+1]):
-                x, weights_j = self.blocks[j](x, d_size=token_size)
+                x, weights_j = self.blocks[j](x)
                 attn_weights.append(weights_j)
 
             cls_stru, x_spatial[i] = self.spatial_fuse[i](
@@ -289,9 +289,9 @@ class MCTAdapter(MCTViT):
                     'channel_reduction', 'weights', 'head']
         for name, params in self.named_parameters():
             if any(adapter in name for adapter in adapters):
-                groups[1].append(params) 
+                groups[1].append(params)
             else:
-                groups[0].append(params)  
+                groups[0].append(params)
 
         return groups
 

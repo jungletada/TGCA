@@ -28,6 +28,7 @@ from datasets_cam import build_dataset
 import net.srmct
 import net.mct_adapter
 import net.mctformer_plus
+from net.tool import torchutils
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -37,7 +38,7 @@ def get_args_parser():
     parser.add_argument('--batch_per_gpu', default=16, type=int)
     parser.add_argument('--epochs', default=30, type=int)
     parser.add_argument('--seed', default=8, type=int)
-    parser.add_argument("--work_space", default="results/", type=str)
+    parser.add_argument("--work_space", default="results/mcta", type=str)
     
     # ddp settings
     parser.add_argument('--rank', default=0, type=int, help='rank of current process')
@@ -62,40 +63,39 @@ def get_args_parser():
                         help='Optimizer Epsilon (default: 1e-8)')
     parser.add_argument('--opt-betas', default=None, type=float, nargs='+', metavar='BETA',
                         help='Optimizer Betas (default: None, use opt default)')
-    parser.add_argument('--clip-grad', type=float, default=1.0, metavar='NORM',
+    parser.add_argument('--clip-grad', type=float, default=None, metavar='NORM',
                         help='Clip gradient norm (default: None, no clipping)')
     parser.add_argument('--momentum', type=float, default=0.9, metavar='M',
                         help='SGD momentum (default: 0.9)')
     parser.add_argument('--weight-decay', type=float, default=0.05,
                         help='weight decay (default: 0.05)')
-    
     # Learning rate schedule parameters
     parser.add_argument('--sched', default='cosine', type=str, metavar='SCHEDULER',
                         help='LR scheduler (default: "cosine"')
-    parser.add_argument('--lr', type=float, default=1e-3, metavar='LR',
-                        help='learning rate')
+    parser.add_argument('--lr', type=float, default=5e-4, metavar='LR',
+                        help='learning rate (default: 5e-4)')
     parser.add_argument('--lr-noise', type=float, nargs='+', default=None, metavar='pct, pct',
                         help='learning rate noise on/off epoch percentages')
     parser.add_argument('--lr-noise-pct', type=float, default=0.67, metavar='PERCENT',
-                        help='learning rate noise limit percent')
+                        help='learning rate noise limit percent (default: 0.67)')
     parser.add_argument('--lr-noise-std', type=float, default=1.0, metavar='STDDEV',
-                        help='learning rate noise std-dev')
+                        help='learning rate noise std-dev (default: 1.0)')
     parser.add_argument('--warmup-lr', type=float, default=1e-6, metavar='LR',
-                        help='warmup learning rate ')
-    parser.add_argument('--min-lr', type=float, default=0., metavar='LR',
-                        help='lower lr bound for cyclic schedulers that hit 0')
+                        help='warmup learning rate (default: 1e-6)')
+    parser.add_argument('--min-lr', type=float, default=1e-5, metavar='LR',
+                        help='lower lr bound for cyclic schedulers that hit 0 (1e-5)')
 
-    parser.add_argument('--decay-epochs', type=int, default=10, metavar='N',
+    parser.add_argument('--decay-epochs', type=float, default=25, metavar='N',
                         help='epoch interval to decay LR')
-    parser.add_argument('--warmup-epochs', type=int, default=10, metavar='N',
+    parser.add_argument('--warmup-epochs', type=int, default=5, metavar='N',
                         help='epochs to warmup LR, if scheduler supports')
-    parser.add_argument('--cooldown-epochs', type=int, default=10, metavar='N',
+    parser.add_argument('--cooldown-epochs', type=int, default=5, metavar='N',
                         help='epochs to cooldown LR at min_lr, after cyclic schedule ends')
     parser.add_argument('--patience-epochs', type=int, default=10, metavar='N',
                         help='patience epochs for Plateau LR scheduler (default: 10')
-    parser.add_argument('--decay-rate', '--dr', type=float, default=0.05, metavar='RATE',
-                        help='LR decay rate')
-
+    parser.add_argument('--decay-rate', '--dr', type=float, default=0.1, metavar='RATE',
+                        help='LR decay rate (default: 0.1)')
+    
     # Augmentation parameters
     parser.add_argument('--color-jitter', type=float, default=0.4, metavar='PCT',
                         help='Color jitter factor (default: 0.4)')
