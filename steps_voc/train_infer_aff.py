@@ -22,8 +22,8 @@ from torch.utils.data.distributed import DistributedSampler
 sys.path.append(osp.dirname(__file__) + os.sep + '../')
 from data.voc12.dataloader_psa import VOC12AffDatasetCRF
 from data.voc12.dataloader_psa import VOC12ImageDataset
-from net.resnet38_aff import ResNet38d_Aff
-from net.tool import pyutils, imutils, torchutils
+from models.resnet38_aff import ResNet38d_Aff
+from models.tool import pyutils, imutils, torchutils
 from misc.torchutils import split_dataset 
 from utils import str2bool, data_mkdir
 

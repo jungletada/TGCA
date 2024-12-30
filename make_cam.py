@@ -14,7 +14,7 @@ warnings.filterwarnings("ignore")
 
 from misc import torchutils
 from utils import create_cam_model, parse_scales
-from net.adapter_modules import resize_input_minbound
+from models.adapter_modules import resize_input_minbound
 
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from net.resnet38d import ResNet38d
+from models.resnet38d import ResNet38d
 
 
 class ResNet38d_Seg(ResNet38d):

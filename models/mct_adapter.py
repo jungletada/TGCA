@@ -7,9 +7,9 @@ import torch.nn.functional as F
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
 #net.
-from net.adapter_modules import DownConv, SemanticAttnModule
-from net.adapter_modules import SpatialPriorGNN
-from net.mct_vit import MCTViT, _cfg
+from models.adapter_modules import DownConv, SemanticAttnModule
+from models.adapter_modules import SpatialPriorGNN
+from models.mct_vit import MCTViT, _cfg
 
 
 __all__ = ['mcta']
@@ -53,7 +53,7 @@ class MCTAdapter(MCTViT):
             spt_strides=spt_strides)
                 
         self.decay_parameter = decay_parameter
-        self.spatial_sizes = [(math.ceil(img_size[0] / scale), math.ceil(img_size[1] / scale)) 
+        self.spatial_sizes = [(math.ceil(img_size[0] / scale), math.ceil(img_size[1] / scale))
                               for scale in self.spatial_scales]
         self.sptial_pos_embed = [nn.Parameter(
             torch.zeros(1, self.spatial_dims[i], self.spatial_sizes[i][0], self.spatial_sizes[i][1]))
@@ -298,11 +298,12 @@ class MCTAdapter(MCTViT):
 
 class MCTAdapterCam(MCTAdapter):
     """Class Activation Map variant of MCTA for visualization purposes."""
-    def __init__(self, *args, cls_ind=4, **kwargs):
+    def __init__(self, *args, cls_ind=4, bg_score=0.2, **kwargs):
         """fuse_layers: The attention of the last L layers to fuse"""
         super().__init__(*args, **kwargs)
         self.cls_ind = cls_ind # fusion layer for mixing class-to-patch
-        
+        self.bg_score = bg_score
+
     @torch.no_grad()
     def get_cam(self, tokens, attn_weights):
         """
@@ -352,12 +353,16 @@ class MCTAdapterCam(MCTAdapter):
         return cls2pat
 
     @torch.no_grad()
-    def forward(self, x, bg_score=0.2, return_cls=False):
+    def forward(self, x, return_attn=False, return_cls=False, use_cls_guide=False):
         b, _, h, w = x.shape
         feat_dict = self.forward_features(x)
         attn_weights = torch.mean(torch.stack(feat_dict['attn']), dim=2).detach()
-        patch_tokens = self.reshape_patch_tokens(feat_dict['x_vit'], h, w) # B x C x Hp x Wp
-        # ----------------------------------------------- #
+        
+        if return_attn:
+            return attn_weights
+        
+        patch_tokens = self.reshape_patch_tokens(feat_dict['x_vit'], h, w)
+
         x_out = [patch_tokens]
         out_size = patch_tokens.shape[2:]
         for feat in feat_dict['x_branch']:
@@ -372,18 +377,17 @@ class MCTAdapterCam(MCTAdapter):
         last_cls_tokens = feat_dict['x_cls'] # [B, K, C]
         cls_logits = last_cls_tokens.mean(-1) # [B, K]
         
-        pseudo_label = torch.ones(b, self.num_classes).to(x.device)
-        pseudo_label[cls_logits < 0] = 0
+        if use_cls_guide:
+            cls_guidance = torch.ones(b, self.num_classes).to(x.device)
+            cls_guidance[cls_logits <= 0] = self.bg_score
+            cls_guidance = cls_guidance.unsqueeze(-1).unsqueeze(-1)
+            x_out = cls_guidance * x_out
         
-        # cls_guidance = torch.ones(b, self.num_classes).to(x.device)
-        # cls_guidance[cls_logits <= 0] = bg_score
-        # cg = cls_guidance.unsqueeze(-1).unsqueeze(-1)
-        # x_out = cg * x_out
-        
-        outputs = self.get_cam(
-            x_out, attn_weights)
-        
+        outputs = self.get_cam(x_out, attn_weights)
+
         if return_cls:
+            pseudo_label = torch.ones(b, self.num_classes).to(x.device)
+            pseudo_label[cls_logits < 0] = 0
             return pseudo_label, outputs
         
         return outputs

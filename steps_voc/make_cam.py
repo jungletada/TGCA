@@ -126,7 +126,7 @@ if __name__ == '__main__':
     dataset, num_classes = build_dataset(
         is_train=False, make_cam=True, args=args)
         
-    from net.mctg_v2 import MCTGFormer_CAM
+    from models.mctg_v2 import MCTGFormer_CAM
     model = MCTGFormer_CAM(num_classes=20)
     model_dict = torch.load(args.checkpoint, map_location='cpu')['model']
     

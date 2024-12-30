@@ -21,19 +21,20 @@ from torch.utils.data.distributed import DistributedSampler
 import utils
 from engine import compute_mAP
 from datasets_cam import build_dataset
-import net.resnet38d
+import models.resnet38d
+import models.resnet
 
 import warnings
 warnings.filterwarnings("ignore")
 
- 
+
 def get_args_parser():
     parser = argparse.ArgumentParser('Classification training and evaluation script', add_help=False)
     parser.add_argument('--batch_per_gpu', default=16, type=int)
     parser.add_argument('--epochs', default=30, type=int)
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument("--work_space", default="results_voc", type=str)
-    
+    parser.add_argument('--log_dir', default='log_dir', type=str, help='log dir to save the results')
     # ddp settings
     parser.add_argument('--rank', default=0, type=int, help='rank of current process')  
     parser.add_argument('--gpu_id', default=0, type=int, help="which gpu to use")
@@ -244,8 +245,7 @@ def evaluate(data_loader, model, device):
 
      
 def main(args):
-    session_name = 'Train-CAM'
-    args = parser.parse_args()
+    session_name = 'Train-CAM-ResNet'
     init_distributed_mode(args)   
     device = torch.device(args.device)
     torch.cuda.set_device(args.local_rank)
@@ -283,10 +283,13 @@ def main(args):
     best_ckpt_name = f'{args.model}_best.pth'
     utils.data_mkdir(args.work_space)
     
-    utils.logger_info(logger_name=session_name, 
-                      log_path=os.path.join(args.work_space, f'train_cam_{args.dataset}.log'))
-    logger = logging.getLogger(session_name)
+    args.log_dir = os.path.join(args.work_space, args.log_dir)
+    utils.data_mkdir(args.log_dir)
+    time = datetime.datetime.now().strftime("%Y%m%d-%H%M")
+    utils.logger_info(logger_name=session_name, log_path=os.path.join(
+                      args.log_dir, f'train-{time}-{args.dataset}.log'))
     
+    logger = logging.getLogger(session_name)
     # model.load_state_dict(, strict=False)
     
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -298,9 +301,7 @@ def main(args):
 
     lr_scheduler, _ = create_scheduler(args, optimizer)
 
-    start_time = time.time()
-    max_accuracy = 0.0
-    
+    max_accuracy = 0.0    
     if dist.get_rank() == 0:
         logger.info(
             "Model:%s\n"
@@ -334,8 +335,7 @@ def main(args):
             model=model, 
             data_loader=data_loader_val, 
             device=device)
-    
-       
+
         if test_stats["mAP"] > max_accuracy:
             torch.save({'model': model.module.state_dict()}, 
                        os.path.join(args.work_space, f'{args.model}_best.pth'))

@@ -5,11 +5,9 @@ from functools import partial
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
 import torch.nn.functional as F
-from net.vit import VisionTransformer, _cfg
-
+from models.vit import VisionTransformer, _cfg
 
 __all__ = ['mctformerplus']
-
 
 class MCTformerPlus(VisionTransformer):
     def __init__(self, decay_parameter=0.996, input_size=448, *args, **kwargs):
@@ -69,26 +67,17 @@ class MCTformerPlus(VisionTransformer):
         x = self.pos_drop(x)
         attn_weights = []
         all_x_cls = []
-        all_x_vit = []
 
         for i, blk in enumerate(self.blocks):
             x, weights_i = blk(x)
             attn_weights.append(weights_i)
             all_x_cls.append(x[:, :self.num_classes])
-            all_x_vit.append(x[:, self.num_classes:])
             
-        return x[:, 0:self.num_classes], x[:, self.num_classes:], attn_weights, all_x_cls, all_x_vit
-
-    def forward_eval(self, x):
-        x_cls, x_patch, _, all_x_cls, all_x_vit = self.forward_features(x)
-        return {
-            'all_cls':all_x_cls, 
-            'all_patches': all_x_vit
-            }
+        return x[:, 0:self.num_classes], x[:, self.num_classes:], attn_weights, all_x_cls
         
     def forward(self, x):
         w, h = x.shape[2:]
-        x_cls, x_patch, _, all_x_cls, _ = self.forward_features(x)
+        x_cls, x_patch, _, all_x_cls = self.forward_features(x)
 
         n, p, c = x_patch.shape
         if w != h:

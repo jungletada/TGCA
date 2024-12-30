@@ -10,10 +10,10 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from collections import defaultdict, deque
 
-from net.mctformer import MCTformerV2Cam
-from net.mctformer_plus import MCTformerPlusCam
-from net.mct_adapter import mcta_cam
-from net.srmct import SRMCTformerCam
+from models.mctformer import MCTformerV2Cam
+from models.mctformer_plus import MCTformerPlusCam
+from models.mct_adapter import mcta_cam
+from models.srmct import SRMCTformerCam
 
 
 def data_mkdir(directory_path):

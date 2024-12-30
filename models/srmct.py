@@ -5,9 +5,9 @@ from functools import partial
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
 import torch.nn.functional as F
-from net.modules import DownConv, SpatialPriorModule, SRMCTModule
-from net.modules import auto_resize_input
-from net.mct_vit import MCTViT, _cfg
+from models.modules import DownConv, SpatialPriorModule, SRMCTModule
+from models.modules import auto_resize_input
+from models.mct_vit import MCTViT, _cfg
 
 
 __all__ = ['srmctformer']

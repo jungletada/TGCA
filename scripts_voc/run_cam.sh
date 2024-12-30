@@ -27,7 +27,7 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --train_list ${TRAINAUGID} \
     --work_space ${WORKDIR} \
     --seed 8 \
-    --epoch 35 \
+    --epoch 45 \
     --batch_per_gpu 20 \
     
 # ============= Make Class Activation Maps of Model ============= #
@@ -36,7 +36,7 @@ python make_cam.py \
     --model ${MODELNAME} \
     --work_space ${WORKDIR} \
     --cam_out_dir ${SEGDIR} \
-    --train_list ${TRAINAUGID} \
+    --train_list ${TRAINID} \
     --input_size ${INPUTSIZE} \
     --checkpoint results_voc/mcta/mcta_best.pth \
     

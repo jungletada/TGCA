@@ -25,7 +25,7 @@ from utils import str2bool
 from misc import imutils, pyutils, torchutils
 from misc.metrics import Evaluator
 from data.voc12.dataloader import VOCAugSegmentationDataset
-from net.resnet38d_seg import ResNet38d_Seg
+from models.resnet38d_seg import ResNet38d_Seg
 cudnn.enabled = True
 
 

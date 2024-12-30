@@ -12,7 +12,7 @@ cudnn.enabled = True
 
 import torchutils
 from .utils import create_cam_model
-from net.adapter_modules import resize_input_minbound
+from models.adapter_modules import resize_input_minbound
 
 import warnings
 warnings.filterwarnings("ignore")

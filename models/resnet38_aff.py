@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
-from net.resnet38d import ResNet38d
+from models.resnet38d import ResNet38d
 
 
 def get_indices_of_pairs(radius, size):

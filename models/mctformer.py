@@ -2,7 +2,7 @@ import math
 import torch
 import torch.nn as nn
 from functools import partial
-from net.vit import VisionTransformer, _cfg
+from models.vit import VisionTransformer, _cfg
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
 import torch.nn.functional as F

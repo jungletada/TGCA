@@ -21,8 +21,8 @@ from torch.utils.data.distributed import DistributedSampler
 sys.path.append(osp.dirname(__file__) + os.sep + '../')
 from data.coco.dataloader_psa import COCOAffDatasetCRF
 from data.coco.dataloader_psa import COCOImageDataset
-from net.resnet38_aff import ResNet38d_Aff
-from net.tool import pyutils, imutils, torchutils
+from models.resnet38_aff import ResNet38d_Aff
+from models.tool import pyutils, imutils, torchutils
 from misc.torchutils import split_dataset 
 from utils import str2bool, data_mkdir
 

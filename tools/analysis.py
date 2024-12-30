@@ -21,7 +21,7 @@ cudnn.enabled = True
 sys.path.append(".")
 from misc import torchutils
 from utils import create_cam_model
-from net.adapter_modules import resize_input_minbound
+from models.adapter_modules import resize_input_minbound
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -33,12 +33,12 @@ def get_args_parser():
     parser = argparse.ArgumentParser('Generating attention maps', add_help=False)
    
     parser.add_argument("--num_workers", default=2, type=int)
-    parser.add_argument('--work_space', default='results_voc/mctformerplus', type=str, help='work space')
-    parser.add_argument('--model', default='mctformerplus', type=str, metavar='MODEL',
+    parser.add_argument('--work_space', default='results_voc/mcta', type=str, help='work space')
+    parser.add_argument('--model', default='mcta', type=str, metavar='MODEL',
                         help='Name of model to train')
-    parser.add_argument('--checkpoint', default='results_voc/mctformerplus/mctformerplus_6887.pth',
+    parser.add_argument('--checkpoint', default='results_voc/mcta/mcta-deit-small-voc-7458.pth',
                         help='checkpoint for generating maps')
-    parser.add_argument('--csv_path', default='cls_token_score.csv', type=str,
+    parser.add_argument('--csv_path', default='attention_map_score.csv', type=str,
                         help='evaluation csv for cosine similarity.')
      # Model parameters
     parser.add_argument('--input_size', default=448, type=int, help='images input size')
@@ -224,7 +224,7 @@ def _eval_attentions(model, dataset, args):
     column_names = list(range(1, 12 + 1))
     nc = args.num_classes
 
-    with open("output.csv", mode="w", newline="", encoding="utf-8") as file:
+    with open(args.csv_path, mode="w", newline="", encoding="utf-8") as file:
         
         writer = csv.writer(file)
         writer.writerow(column_names)
@@ -260,7 +260,7 @@ def _eval_attentions(model, dataset, args):
         writer.writerow(pat_attn)
 
 
-def analysis_er_layer_result(args):
+def analysis_per_layer_result(args):
     data_frame = pd.read_csv(args.csv_path, header=0)
     print(data_frame)
     column_means = data_frame.iloc[1:].astype(float).mean()
@@ -290,19 +290,14 @@ if __name__ == '__main__':
     args.num_classes = num_classes
     
     model = create_cam_model(args)
-    model_dict = torch.load(args.checkpoint,map_location='cpu')['model']
+    model_dict = torch.load(args.checkpoint, map_location='cpu')['model']
     model.load_state_dict(model_dict)
     model.eval()
-    
+
     print(f'Using {args.checkpoint} for analysis.')
-    
-    # print('[ ', end='')
-    # _work_attn(model, dataset, args)
-    # print(']')
 
     print('[ ', end='')
-    _eval_tokens(model, dataset, args)
+    _eval_attentions(model, dataset, args)
     print(']')
-
-    analysis_er_layer_result(args)
+    
     torch.cuda.empty_cache()

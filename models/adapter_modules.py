@@ -3,9 +3,7 @@ import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 from timm.models.layers import DropPath
-
-from net.gcn_lib import Grapher
-# from modules_plug.cbam import ChannelAttention, SpatialAttention
+from models.gcn_lib import Grapher
 
 
 def nlc2nchw(x, d_size):

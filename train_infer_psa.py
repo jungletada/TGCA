@@ -3,6 +3,7 @@ import sys
 import math
 import random
 import pprint
+import datetime
 import argparse
 import numpy as np
 from tqdm import tqdm
@@ -25,8 +26,8 @@ from dataloaders.coco.dataloader_psa import COCOImageDataset
 from dataloaders.voc12.dataloader_psa import VOC12AffDatasetCRF
 from dataloaders.voc12.dataloader_psa import VOC12ImageDataset
 
-from net.resnet38_aff import ResNet38d_Aff
-from net.tool import pyutils, imutils, torchutils
+from models.resnet38_aff import ResNet38d_Aff
+from models.tool import pyutils, imutils, torchutils
 from misc.torchutils import split_dataset
 from utils import str2bool, data_mkdir
 
@@ -317,7 +318,9 @@ def train_affinity(args):
     same_seeds(args.seed)
 
     args.cam_out_dir = osp.join(args.work_space, args.cam_out_dir)
-    pyutils.Logger(osp.join(args.work_space, 'res38_aff_train.log'))
+    time = datetime.datetime.now().strftime("%Y%m%d-%H%M")
+    args.log_file = f'res38_aff_train-{time}.log'
+    pyutils.Logger(osp.join(args.log_dir, args.log_file))
 
     train_dataset = build_train_dataset(args)
     sampler_train, train_data_loader = build_train_dataloader(train_dataset, args)

@@ -132,7 +132,7 @@ if __name__ == '__main__':
         labels_path='data/coco/train_labels.npy', 
         scales=args.scales)
          
-    from net.mctgvit import MCTGViT_CAM
+    from models.mctgvit import MCTGViT_CAM
     model = MCTGViT_CAM(num_classes=num_classes)
     model_dict = torch.load(args.checkpoint, map_location='cpu')['model']
     
