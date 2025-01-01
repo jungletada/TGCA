@@ -11,9 +11,7 @@ from models.adapter_modules import DownConv, SemanticAttnModule
 from models.adapter_modules import SpatialPriorGNN
 from models.mct_vit import MCTViT, _cfg
 
-
 __all__ = ['mcta']
-
 
 class MCTAdapter(MCTViT):
     """Multi-scale Graph Attention Vision Transformer."""
@@ -83,7 +81,8 @@ class MCTAdapter(MCTViT):
                 proj_drop=0.,
                 drop_path=0.,
                 qkv_bias=True,
-                norm_layer=partial(nn.LayerNorm, eps=1e-6))
+                norm_layer=partial(nn.LayerNorm, eps=1e-6),
+                reallocate=True)
             for i in range(self.stages)])
 
         self.down_convs = nn.ModuleList([

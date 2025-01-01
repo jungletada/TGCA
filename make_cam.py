@@ -50,8 +50,10 @@ def get_args_parser():
     parser.set_defaults(pin_mem=True)
 
     # generating attention maps
-    parser.add_argument('--layer-index', type=int, default=3, help='extract attention maps from the last layers')
-    parser.add_argument("--scales", type=parse_scales, default=(1.0,), help="Multi-scale inferences")
+    parser.add_argument('--layer-index', type=int, default=3, 
+                        help='extract attention maps from the last layers')
+    parser.add_argument("--scales", type=parse_scales, default=(1.0,),
+                        help="Multi-scale inferences")
     parser.add_argument("--cam_out_dir", default="cam", type=str)
     
     args = parser.parse_args()
@@ -64,10 +66,8 @@ def normalize_cam(cam_mask):
     k = cam_mask.size(0)
     min_val = cam_mask.view(k, -1).min(dim=-1, keepdim=True)[0].view(k, 1, 1)
     max_val = cam_mask.view(k, -1).max(dim=-1, keepdim=True)[0].view(k, 1, 1)
-    
     # Normalize each channel
     normalized_cam = (cam_mask - min_val) / (max_val - min_val + 1e-8)
-    
     return normalized_cam
 
 
@@ -79,6 +79,90 @@ def flip_cam(cam_list):
         cam_list[i] = torch.stack([group1, group2_flipped])  
     cam_list = [torch.sum(cam, dim=0) for cam in cam_list]
     return cam_list
+
+
+def simple_resize_test(inputs_flip, model, args):
+    inputs = resize_input_minbound(
+        inputs_flip.cuda(non_blocking=True),
+        min_size=args.min_size)
+    output_cam = model(inputs)
+    return output_cam
+
+
+def combine_images(results, h_splits, w_splits):
+    batch_size, channels, _, _ = results[0].shape
+    h = sum(h_splits)
+    w = sum(w_splits)
+    
+    combined = torch.zeros((batch_size, channels, h, w), device=results[0].device)
+    
+    h_start = 0
+    idx = 0
+    for h_part in h_splits:
+        w_start = 0
+        for w_part in w_splits:
+            combined[:, :, h_start:h_start + h_part, w_start:w_start + w_part] = results[idx]
+            w_start += w_part
+            idx += 1
+        h_start += h_part
+    return combined
+
+
+def split_image_test(inputs_flip, model, args):
+    inputs_flip = resize_input_minbound(
+        inputs_flip.cuda(non_blocking=True),
+        min_size=args.min_size)
+
+    _, _, h, w = inputs_flip.shape
+    def split_length(length):
+        if length > args.min_size:
+            base_length = length // 4
+            parts = [base_length] * 3  
+            parts.append(length - sum(parts))
+            return parts
+        else:
+            return [length]
+
+    h_splits = split_length(h)
+    w_splits = split_length(w)
+
+    cropped_outputs = []
+    h_start = 0
+    for h_part in h_splits:
+        w_start = 0
+        for w_part in w_splits:
+            cropped = inputs_flip[:, :, h_start:h_start + h_part, w_start:w_start + w_part]
+            crop_size = cropped.shape[2:]
+            cropped_result = model(cropped)
+            cropped_result = F.interpolate(
+                cropped_result,
+                size=crop_size,
+                mode='bilinear',
+                align_corners=False
+            )
+            cropped_outputs.append(cropped_result)
+            w_start += w_part
+        h_start += h_part
+        
+    combined = combine_images(cropped_outputs, h_splits, w_splits)
+
+    return combined
+
+
+def multi_scale_test(model, pack, args):
+    """
+    
+    """
+    output_cam_list = []
+    for img in pack['img']:
+        inputs_flip = img[0]
+        _h, _w = inputs_flip.shape[2:]
+        if max(_h, _w) <= args.min_size:
+            cam = simple_resize_test(inputs_flip, model, args=args)
+        else:
+            cam = split_image_test(inputs_flip, model, args=args)
+        output_cam_list.append(cam)
+    return output_cam_list
 
 
 def _work_trainset(process_id, model, dataset, args):
@@ -103,20 +187,22 @@ def _work_trainset(process_id, model, dataset, args):
                 np.save(osp.join(args.cam_out_dir, img_name + '.npy'), dict())
                 continue
             try:
-                outputs = [model(resize_input_minbound(
-                        x=img[0].cuda(non_blocking=True),
-                        min_size=args.min_size)) # img[0]->[(2, 3, H', W')]
-                            for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
+                outputs = []
+                for img in pack['img']:
+                    out = model(resize_input_minbound(
+                            x=img[0].cuda(non_blocking=True),
+                            min_size=args.min_size)) # img[0]->[(2, 3, H', W')]
+                    outputs.append(out)
+                 # outputs->list[(2, n_cls, H/16, W/16)]
             except RuntimeError as e:
                 if "out of memory" in str(e):
-                    # If we run out of memory, clear cache and try with smaller size
-                    # print(f'{str(e)}, with image size={size}')
                     outputs = [model(resize_input_minbound(
                         x=img[0].cuda(non_blocking=True),
                         min_size=int(args.min_size * 0.5))) # img[0]->[(2, 3, H', W')]
                             for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
                 else:
                     raise e
+            # outputs = multi_scale_test(model, pack, args)
             #=================== high resolution cam list ===================#
             upsample_cam_list = [# upsample all multi-scale CAMs
                     F.interpolate(cam, size, mode='bilinear', align_corners=False)
@@ -174,7 +260,8 @@ def _work_testset(process_id, model, dataset, args):
                     for img in pack['img']:
                         pseudo_label, output_cam = model(
                             resize_input_minbound(
-                                x=img[0].cuda(non_blocking=True), min_size=int(args.min_size//2)),
+                                x=img[0].cuda(non_blocking=True), 
+                                min_size=int(args.min_size//2)),
                             return_cls=True,
                             bg_score=bg_score) # img[0]->[(2, 3, H', W')]
                         pseudo_labels.append(pseudo_label)

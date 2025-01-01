@@ -220,124 +220,6 @@ class SpatialPriorModule(nn.Module):
         return [c2, c3, c4, c5]
 
 
-class SpatialPriorGNNTest(nn.Module):
-    """
-    Spatial Prior GNN Test Class for processing spatial features.
-    This class implements a GNN-based approach to enhance spatial feature representation.
-    """
-    def __init__(
-            self,
-            inplanes=96,
-            embed_dim=384,
-            num_heads=6,
-            knn=[18, 15, 12, 9],
-            dilation=[4, 3, 2, 1],
-            spt_strides=[4, 1, 2, 2],
-            norm_layer=nn.BatchNorm2d,
-            act_layer=nn.GELU):
-        
-        super().__init__()
-        assert inplanes % num_heads == 0, f"{inplanes} should be divided by {num_heads}"
-        conv_type = 'mr'
-        self.stem = nn.Sequential(*[ # downsample by 4
-            nn.Conv2d(3, inplanes, kernel_size=3, stride=2, padding=1),
-            norm_layer(inplanes),
-            act_layer(),
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-            ])
-                       
-        if spt_strides[0] == 4:
-            self.conv2 = nn.Sequential(*[
-                nn.Conv2d(inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1),
-                norm_layer(2 * inplanes),
-                act_layer(),
-                nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-            ])
-            
-        elif spt_strides[0] == 2:
-            self.conv2 = nn.Sequential(*[
-                nn.Conv2d(inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1),
-                norm_layer(2 * inplanes),
-                act_layer(),
-            ])
-
-        else: raise NotImplementedError
-
-        self.gnn_2 = Grapher(
-            in_channels=2 * inplanes,
-            kernel_size=knn[0],
-            dilation=dilation[0],
-            conv=conv_type,
-            groups=num_heads)
-        
-        self.conv3 = nn.Sequential(*[
-            nn.Conv2d(2 * inplanes, 4 * inplanes, kernel_size=3, stride=spt_strides[1], padding=1),
-            norm_layer(4 * inplanes),
-            act_layer()])
-
-        self.gnn_3 = Grapher(
-            in_channels=4 * inplanes,
-            kernel_size=knn[1],
-            dilation=dilation[1],
-            conv=conv_type,
-            groups=num_heads)
-        
-        self.conv4 = nn.Sequential(*[
-            nn.Conv2d(4 * inplanes, 4 * inplanes, kernel_size=3, stride=spt_strides[2], padding=1),
-            norm_layer(4 * inplanes),
-            act_layer(),
-        ])
-
-        self.gnn_4 = Grapher(
-            in_channels=4 * inplanes,
-            kernel_size=knn[2],
-            dilation=dilation[2],
-            conv=conv_type,
-            groups=num_heads)
-        
-        self.conv5 = nn.Sequential(*[
-            nn.Conv2d(4 * inplanes, 8 * inplanes, kernel_size=3, stride=spt_strides[3], padding=1),
-            norm_layer(8 * inplanes),
-            act_layer(),
-        ])
-        
-        self.gnn_5 = Grapher(
-            in_channels=8 * inplanes,
-            kernel_size=knn[3],
-            dilation=dilation[3],
-            conv=conv_type,
-            groups=num_heads)
-        
-        self.fc2 = nn.Conv2d(2 * inplanes, embed_dim, kernel_size=1, stride=1, padding=0, bias=True)
-        self.fc3 = nn.Conv2d(4 * inplanes, embed_dim, kernel_size=1, stride=1, padding=0, bias=True)
-        self.fc4 = nn.Conv2d(4 * inplanes, embed_dim, kernel_size=1, stride=1, padding=0, bias=True)
-        self.fc5 = nn.Conv2d(8 * inplanes, embed_dim, kernel_size=1, stride=1, padding=0, bias=True)
-
-    def forward(self, x):
-        c1 = self.stem(x)
-
-        c2 = self.conv2(c1)
-        c2 = self.gnn_2(c2)
-
-        c3 = self.conv3(c2)
-        c3 = self.gnn_3(c3)
-
-        c4 = self.conv4(c3)
-        c4 = self.gnn_4(c4)
-
-        c5 = self.conv5(c4)
-        c5 = self.gnn_5(c5)
-
-        c2 = self.fc2(c2) # 16s
-        c3 = self.fc3(c3) # 16s
-        c4 = self.fc4(c4) # 32s
-        c5 = self.fc5(c5) # 64s
-
-        # for i, t in enumerate([c2, c3, c4, c5]):
-        #     print(i, t.shape)
-        return [c2, c3, c4, c5]
-    
-
 class SpatialPriorGNN(nn.Module):
     def __init__(self,
                  inplanes=96,
@@ -519,27 +401,6 @@ class MLP(nn.Module):
         return x
 
 
-# class FeatureFusion(nn.Module):
-#     def __init__(self, in_features, out_features):
-#         super().__init__()
-#         self.conv_module = nn.Sequential(
-#             nn.Conv2d(in_features, out_features, 1),
-#             nn.BatchNorm2d(out_features),
-#             nn.GELU())
-#         self.ca = ChannelAttention(out_features)
-#         self.sa = SpatialAttention()
-        
-
-#     def forward(self, x):
-#         x = self.conv_module(x)
-#         z = x.clone()
-#         channel = self.ca(x)  # (3, 64, 1, 1)
-#         x = channel * x       # (3, 64, 56, 56)
-#         spatial = self.sa(x)  # (3, 1, 56, 56)
-#         x = spatial * x       # (3, 64, 56, 56)
-#         return x + z
-
-
 class SemanticAttnModule(nn.Module):
     """
     Semantic Cross-Attention for Feature fusion
@@ -556,7 +417,8 @@ class SemanticAttnModule(nn.Module):
             mask_ratio=0.,
             qkv_bias=True,
             qk_scale=None,
-            norm_layer=nn.LayerNorm,):
+            norm_layer=nn.LayerNorm,
+            reallocate=False):
         super().__init__()
         self.norm1 = norm_layer(query_dim)
         self.norm2 = norm_layer(key_dim)
@@ -582,6 +444,19 @@ class SemanticAttnModule(nn.Module):
             in_features=self.dim,
             hidden_features=self.dim * 4,
             out_features=self.dim)
+        
+        self.reallocate = reallocate
+        if reallocate:
+            self.gnn_cls2pat = Grapher(
+                in_channels=self.nc * num_heads,
+                kernel_size=9,
+                dilation=1,
+                groups=num_heads)
+            self.gnn_pat2cls = Grapher(
+                in_channels=self.nc * num_heads,
+                kernel_size=9,
+                dilation=1,
+                groups=num_heads)
 
     def forward_attention_gnn(self, input_query, input_key, token_size, spatial_size):
         """
@@ -601,8 +476,27 @@ class SemanticAttnModule(nn.Module):
         attn = (q @ k.transpose(-2, -1)) * self.scale  # B x Nd x (Cls+Ni) x (Cls+N)
         #===============================================================#
         attn_cls, attn_pat = torch.split(attn, [self.nc, N], dim=-1)
+        
+        if self.reallocate:
+            cls2cls, pat2cls = torch.split(attn_cls, [self.nc, Ni], dim=-2)
+            pat2cls = pat2cls.permute(0, 2, 1, 3).reshape(
+                B, -1, self.num_heads * self.nc).contiguous()
+            pat2cls = nlc2nchw(pat2cls, d_size=spatial_size)
+            pat2cls = self.gnn_pat2cls(pat2cls)
+            pat2cls = nchw2nlc(pat2cls).reshape(
+                B, -1, self.num_heads, self.nc).permute(0, 2, 1, 3).contiguous()
+            attn_cls = torch.cat((cls2cls, pat2cls), dim=-2)
+            
+            cls2pat, pat2pat = torch.split(attn_pat, [self.nc, Ni], dim=-2)
+            cls2pat = cls2pat.reshape(
+                B, self.num_heads * self.nc, token_size[0], token_size[1]).contiguous()
+            cls2pat = self.gnn_cls2pat(cls2pat)
+            cls2pat = cls2pat.reshape(
+                B, self.num_heads, self.nc, -1).contiguous()
+            attn_pat = torch.cat((cls2pat, pat2pat), dim=-2)
+            
         attn_pat = attn_pat.softmax(dim=-1)
-        attn_cls = attn_cls.softmax(dim=-1)
+        attn_cls = attn_cls.softmax(dim=-1)    
         attn = torch.cat((attn_cls, attn_pat), dim=-1)
         # attn = attn.softmax(dim=-1) # traditional softmax
         #===============================================================#

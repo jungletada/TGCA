@@ -26,8 +26,8 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --model ${MODELNAME} \
     --train_list ${TRAINAUGID} \
     --work_space ${WORKDIR} \
-    --seed 8 \
-    --epoch 45 \
+    --seed 3 \
+    --epoch 35 \
     --batch_per_gpu 20 \
     
 # ============= Make Class Activation Maps of Model ============= #
@@ -47,7 +47,6 @@ python eval_cam_crf.py \
     --id_list ${TRAINID} \
     --eval_cam_dir ${SEGDIR} \
     --curve_threshold \
-
 
 # # ============= Evaluate Class Activation Maps =============#
 # python eval_cam_crf.py \
