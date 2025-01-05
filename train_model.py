@@ -5,6 +5,7 @@ import datetime
 import time
 import json
 import random
+import pprint
 import torch
 import logging
 import numpy as np
@@ -13,7 +14,6 @@ import torch.nn.functional as F
 
 from timm.models import create_model
 from timm.scheduler import create_scheduler
-from timm.scheduler.cosine_lr import CosineLRScheduler
 from timm.optim import create_optimizer
 from timm.utils import NativeScaler
 import torch.distributed as dist
@@ -37,7 +37,7 @@ def get_args_parser():
     parser = argparse.ArgumentParser('DeiT training and evaluation script', add_help=False)
     parser.add_argument('--batch_per_gpu', default=16, type=int)
     parser.add_argument('--epochs', default=30, type=int)
-    parser.add_argument('--seed', default=8, type=int)
+    parser.add_argument('--seed', default=None, type=int)
     parser.add_argument("--work_space", default="results/mcta", type=str)
     parser.add_argument('--log_dir', default='log_dir', type=str, help='log dir to save the results')
     # ddp settings
@@ -54,7 +54,8 @@ def get_args_parser():
                         help='Dropout rate (default: 0.)')
     parser.add_argument('--drop-path', type=float, default=0.1, metavar='PCT',
                         help='Drop path rate (default: 0.1)')
-    parser.add_argument('--cls_weight', type=float, default=3.0, help='weight for class output loss')
+    parser.add_argument('--cls_weight', type=float, default=3.0,
+                        help='weight for class output loss')
 
     # Optimizer parameters
     parser.add_argument('--opt', default='adamw', type=str, metavar='OPTIMIZER',
@@ -83,10 +84,10 @@ def get_args_parser():
                         help='learning rate noise std-dev (default: 1.0)')
     parser.add_argument('--warmup-lr', type=float, default=1e-6, metavar='LR',
                         help='warmup learning rate')
-    parser.add_argument('--min-lr', type=float, default=1e-5, metavar='LR',
+    parser.add_argument('--min-lr', type=float, default=1e-6, metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0')
 
-    parser.add_argument('--decay-epochs', type=float, default=25, metavar='N',
+    parser.add_argument('--decay-epochs', type=float, default=10, metavar='N',
                         help='epoch interval to decay LR')
     parser.add_argument('--warmup-epochs', type=int, default=5, metavar='N',
                         help='epochs to warmup LR, if scheduler supports')
@@ -321,11 +322,10 @@ def main(args):
     if dist.get_rank() == 0:
         logger.info(
             "Model:%s\n"
-            "Use seed: %s\n"
             "Number of parameters: %d\n"
             "Checkpoint saved as %s\n"
-            "|-- Total epochs: %d",
-            model, args.seed, n_parameters, best_ckpt_name, args.epochs
+            "Arguments: %s",
+            model, n_parameters, best_ckpt_name, vars(args)
         )
 
     model.to(device)

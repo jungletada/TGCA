@@ -19,7 +19,6 @@ warnings.filterwarnings("ignore")
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
 
-
 def get_args_parser():
     parser = argparse.ArgumentParser('Generating attention maps', add_help=False)
     # Model parameters
@@ -35,12 +34,12 @@ def get_args_parser():
                         help='Drop path rate (default: 0.1)')
 
     # Dataset parameters
-    parser.add_argument('--dataset', default='', type=str, help='name of dataset')
-    parser.add_argument('--work_space', default='results_voc/your_model', type=str, help='work space')
-    parser.add_argument('--voc12_root', default='datasets/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
-    parser.add_argument("--coco_root", default='datasets/MSCOCO', type=str, help="Path to MSCOCO")
-    parser.add_argument("--train_list", default="configs/voc12/train_aug_id.txt", type=str, 
-                        help='configs/coco/train_id.txt or configs/voc12/train_aug_id.txt')
+    parser.add_argument('--dataset', default='VOC12', type=str, help='name of dataset')
+    parser.add_argument('--work_space', default='results_voc/mcta', type=str, help='work space')
+    parser.add_argument('--voc12_root', default='data/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
+    parser.add_argument("--coco_root", default='data/MSCOCO', type=str, help="Path to MSCOCO")
+    parser.add_argument("--train_list", default="train_aug_id.txt", type=str,
+                        help='train_id.txt or train_aug_id.txt')
     
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
@@ -103,41 +102,41 @@ def _work(process_id, model, dataset, args):
             
             try:
                 outputs = [model(
-                    resize_input_minbound(x=img[0].cuda(non_blocking=True),min_size=args.min_size),
+                    resize_input_minbound(
+                        x=img[0].cuda(non_blocking=True),
+                        min_size=args.min_size),
                     return_attn=True) # img[0]->[(2, 3, H', W')]
                     for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
                 
             except RuntimeError as e:
                 if "out of memory" in str(e):
-                    # If we run out of memory, clear cache and try with smaller size
-                    # print(f'{str(e)}, with image size={size}')
                     outputs = [model(
-                        resize_input_minbound(x=img[0].cuda(non_blocking=True),min_size=int(args.min_size * 0.75)),
+                        resize_input_minbound(
+                            x=img[0].cuda(non_blocking=True),
+                            min_size=int(args.min_size * 0.75)),
                         return_attn=True) # img[0]->[(2, 3, H', W')]
                         for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
                 else:
                     raise e
-                
             # We only need non flip image for ablation
             attn_weights = outputs[0][0]
             print(attn_weights.shape)
             # #=================== high resolution cam list ===================#
+            upsample_cam_list = [# upsample all multi-scale CAMs
+                    F.interpolate(cam, size, mode='bilinear', align_corners=False)
+                    for cam in outputs] # ->[(2, Cls, H, W)
+            upsample_cam_list = flip_cam(upsample_cam_list)
+            upsample_cam = torch.sum(torch.stack(upsample_cam_list, 0), 0) # (Cls, H, W)
             
-            # upsample_cam_list = [# upsample all multi-scale CAMs
-            #         F.interpolate(cam, size, mode='bilinear', align_corners=False)
-            #         for cam in outputs] # ->[(2, Cls, H, W)
-            # upsample_cam_list = flip_cam(upsample_cam_list)
-            # upsample_cam = torch.sum(torch.stack(upsample_cam_list, 0), 0) # (Cls, H, W)
+            upsample_cam = upsample_cam[valid_cat]
+            upsample_cam = normalize_cam(upsample_cam)
             
-            # upsample_cam = upsample_cam[valid_cat]
-            # upsample_cam = normalize_cam(upsample_cam)
-            
-            # cam_dict = {}
-            # upsample_cam = upsample_cam.cpu().numpy()
-            # for i, cls in enumerate(valid_cat):
-            #     cam_dict[cls] = upsample_cam[i]
+            cam_dict = {}
+            upsample_cam = upsample_cam.cpu().numpy()
+            for i, cls in enumerate(valid_cat):
+                cam_dict[cls] = upsample_cam[i]
                 
-            # np.save(osp.join(args.attn_dir, img_name + '.npy'), cam_dict)  
+            np.save(osp.join(args.attn_dir, img_name + '.npy'), cam_dict)
         
             if process_id == n_gpus - 1 and iter_ % (len(databin) // 20) == 0:
                 print("%d " % ((5*iter_+1) // (len(databin) // 20)), end='')
@@ -145,7 +144,7 @@ def _work(process_id, model, dataset, args):
 
 if __name__ == '__main__':
     args = get_args_parser()
-    args.attn_dir = os.path.join(args.work_space, args.attn_dir) 
+    args.attn_dir = os.path.join(args.work_space, args.attn_dir)
     os.makedirs(args.attn_dir, exist_ok=True)
 
     from datasets_cam import build_dataset

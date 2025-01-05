@@ -119,15 +119,7 @@ def make_cam_crf(process_id, dataset, args):
         dataset (list): The dataset to evaluate.
         args (Namespace): The arguments containing configuration settings.
     """
-    crf_inference = DenseCRF(
-        iter_max=8,
-        pos_xy_std=3,
-        pos_w=3,
-        bi_xy_std=65,
-        bi_rgb_std=3,
-        bi_w=3,
-    )
-    
+
     databin = dataset[process_id]
     num_images = len(databin)
     for i in tqdm(range(num_images)):
@@ -240,7 +232,7 @@ if __name__ == '__main__':
 
     current_session = 'train' if 'train' in args.id_list else 'val'
     if not args.use_crf:
-        args.log_file = osp.join(args.log_dir, 
+        args.log_file = osp.join(args.log_dir,
                                  f"eval-cam-crf-{current_session}-{time}.log")
         with open(args.log_file, "w", encoding="utf-8") as f:
             f.write(f"{time}: Evaluating CAMs for {args.dataset}\n")

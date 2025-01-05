@@ -73,7 +73,7 @@ def train_one_epoch_multioutputs(args, model, data_loader, optimizer, device,
             patch_loss = criterion(outputs[1], targets)
             metric_logger.update(pat_loss=patch_loss.item())
             
-            total_loss = 3 * cls_loss + patch_loss
+            total_loss = args.cls_weight * cls_loss + patch_loss
             
         loss_value = total_loss.item()
         if not math.isfinite(loss_value):

@@ -445,18 +445,18 @@ class SemanticAttnModule(nn.Module):
             hidden_features=self.dim * 4,
             out_features=self.dim)
         
-        self.reallocate = reallocate
-        if reallocate:
-            self.gnn_cls2pat = Grapher(
-                in_channels=self.nc * num_heads,
-                kernel_size=9,
-                dilation=1,
-                groups=num_heads)
-            self.gnn_pat2cls = Grapher(
-                in_channels=self.nc * num_heads,
-                kernel_size=9,
-                dilation=1,
-                groups=num_heads)
+        # self.reallocate = reallocate
+        # if reallocate:
+        #     self.gnn_cls2pat = Grapher(
+        #         in_channels=self.nc * num_heads,
+        #         kernel_size=9,
+        #         dilation=1,
+        #         groups=num_heads)
+        #     self.gnn_pat2cls = Grapher(
+        #         in_channels=self.nc * num_heads,
+        #         kernel_size=9,
+        #         dilation=1,
+        #         groups=num_heads)
 
     def forward_attention_gnn(self, input_query, input_key, token_size, spatial_size):
         """
@@ -477,26 +477,26 @@ class SemanticAttnModule(nn.Module):
         #===============================================================#
         attn_cls, attn_pat = torch.split(attn, [self.nc, N], dim=-1)
         
-        if self.reallocate:
-            cls2cls, pat2cls = torch.split(attn_cls, [self.nc, Ni], dim=-2)
-            pat2cls = pat2cls.permute(0, 2, 1, 3).reshape(
-                B, -1, self.num_heads * self.nc).contiguous()
-            pat2cls = nlc2nchw(pat2cls, d_size=spatial_size)
-            pat2cls = self.gnn_pat2cls(pat2cls)
-            pat2cls = nchw2nlc(pat2cls).reshape(
-                B, -1, self.num_heads, self.nc).permute(0, 2, 1, 3).contiguous()
-            attn_cls = torch.cat((cls2cls, pat2cls), dim=-2)
+        # if self.reallocate:
+        #     cls2cls, pat2cls = torch.split(attn_cls, [self.nc, Ni], dim=-2)
+        #     pat2cls = pat2cls.permute(0, 2, 1, 3).reshape(
+        #         B, -1, self.num_heads * self.nc).contiguous()
+        #     pat2cls = nlc2nchw(pat2cls, d_size=spatial_size)
+        #     pat2cls = self.gnn_pat2cls(pat2cls)
+        #     pat2cls = nchw2nlc(pat2cls).reshape(
+        #         B, -1, self.num_heads, self.nc).permute(0, 2, 1, 3).contiguous()
+        #     attn_cls = torch.cat((cls2cls, pat2cls), dim=-2)
             
-            cls2pat, pat2pat = torch.split(attn_pat, [self.nc, Ni], dim=-2)
-            cls2pat = cls2pat.reshape(
-                B, self.num_heads * self.nc, token_size[0], token_size[1]).contiguous()
-            cls2pat = self.gnn_cls2pat(cls2pat)
-            cls2pat = cls2pat.reshape(
-                B, self.num_heads, self.nc, -1).contiguous()
-            attn_pat = torch.cat((cls2pat, pat2pat), dim=-2)
+        #     cls2pat, pat2pat = torch.split(attn_pat, [self.nc, Ni], dim=-2)
+        #     cls2pat = cls2pat.reshape(
+        #         B, self.num_heads * self.nc, token_size[0], token_size[1]).contiguous()
+        #     cls2pat = self.gnn_cls2pat(cls2pat)
+        #     cls2pat = cls2pat.reshape(
+        #         B, self.num_heads, self.nc, -1).contiguous()
+        #     attn_pat = torch.cat((cls2pat, pat2pat), dim=-2)
             
         attn_pat = attn_pat.softmax(dim=-1)
-        attn_cls = attn_cls.softmax(dim=-1)    
+        attn_cls = attn_cls.softmax(dim=-1)
         attn = torch.cat((attn_cls, attn_pat), dim=-1)
         # attn = attn.softmax(dim=-1) # traditional softmax
         #===============================================================#

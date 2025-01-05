@@ -26,9 +26,9 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --model ${MODELNAME} \
     --train_list ${TRAINAUGID} \
     --work_space ${WORKDIR} \
-    --seed 3 \
-    --epoch 35 \
-    --batch_per_gpu 20 \
+    --seed 2333 \
+    --epoch 26 \
+    --batch_per_gpu 19 \
     
 # ============= Make Class Activation Maps of Model ============= #
 python make_cam.py \
@@ -39,7 +39,7 @@ python make_cam.py \
     --train_list ${TRAINID} \
     --input_size ${INPUTSIZE} \
     --checkpoint results_voc/mcta/mcta_best.pth \
-    
+
 # ============= Evaluate Class Activation Maps without CRF =============#
 python eval_cam_crf.py \
     --dataset ${DATASET} \

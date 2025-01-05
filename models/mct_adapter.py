@@ -6,10 +6,11 @@ import torch.nn.functional as F
 
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
-#net.
+
 from models.adapter_modules import DownConv, SemanticAttnModule
-from models.adapter_modules import SpatialPriorGNN
-from models.mct_vit import MCTViT, _cfg
+from models.adapter_modules import SpatialPriorGNN, nchw2nlc, nlc2nchw
+from models.mct_vit import MCTViT, Block, _cfg
+
 
 __all__ = ['mcta']
 
@@ -35,8 +36,8 @@ class MCTAdapter(MCTViT):
         self.num_patches = self.Hp * self.Wp
         self.spatial_dims = [self.embed_dim] * self.stages
 
-        self.dilations = [1, 2, 3, 4]
-        self.num_knn = [18, 15, 12, 9]
+        self.dilations = [4, 3, 2, 1]  # [4, 3, 2, 1]
+        self.num_knn = [18, 15, 12, 9] # [18, 15, 12, 9]
         self.spatial_scales = [16, 16, 32, 64]
 
         self.spatial_strides = [
@@ -48,6 +49,8 @@ class MCTAdapter(MCTViT):
             inplanes=96,
             embed_dim=self.embed_dim,
             num_heads=self.num_heads,
+            knn=self.num_knn,
+            dilation=self.dilations,
             spt_strides=spt_strides)
                 
         self.decay_parameter = decay_parameter
@@ -81,8 +84,7 @@ class MCTAdapter(MCTViT):
                 proj_drop=0.,
                 drop_path=0.,
                 qkv_bias=True,
-                norm_layer=partial(nn.LayerNorm, eps=1e-6),
-                reallocate=True)
+                norm_layer=partial(nn.LayerNorm, eps=1e-6))
             for i in range(self.stages)])
 
         self.down_convs = nn.ModuleList([
@@ -91,19 +93,27 @@ class MCTAdapter(MCTViT):
                 out_dim=self.spatial_dims[i+1],
                 stride=self.spatial_strides[i])
             for i in range(self.stages - 1)])
-
-        self.channel_reduction = nn.Sequential(
-            nn.Conv2d(self.embed_dim * 5, self.embed_dim, 1),
-            nn.BatchNorm2d(self.embed_dim),
-            nn.GELU())
         
         self.weights = nn.ParameterList([
-            nn.Parameter(torch.zeros(1, self.num_classes, 1))
-            for _ in range(self.stages)])
+                    nn.Parameter(torch.zeros(1, self.num_classes, 1))
+                    for _ in range(self.stages)])
+        
+        fuse_dim = int(self.embed_dim * 1)
+        self.channel_reduction = nn.Sequential(
+            nn.Conv2d(self.embed_dim * 5, fuse_dim, 1),
+            nn.BatchNorm2d(fuse_dim),
+            nn.GELU())
+        
+        # self.fuse_block = Block(
+        #     dim=self.embed_dim,
+        #     num_heads=self.num_heads,
+        #     mlp_ratio=4,
+        #     drop_path=self.dpr[-1],
+        #     num_classes=self.num_classes)
         
         self.head = nn.Conv2d(
-            self.embed_dim, self.num_classes, kernel_size=3, stride=1, padding=1)
-        
+            fuse_dim, self.num_classes, kernel_size=3, stride=1, padding=1)
+ 
     def interpolate_pos_encoding(self, patch_tokens, token_size):
         """
         Interpolate position encoding for backbone tokens
@@ -147,65 +157,6 @@ class MCTAdapter(MCTViT):
         x_cls = x_cls.permute(0, 2, 1).contiguous()  # B x Cls x C
         return x_cls
      
-    def forward_features(self, x):
-        """
-        Input:
-            x: B x 3 x H x W
-        Return:
-            x_cls: [B x K x C] 
-            x_vit: [B x Np x C]
-            attn_weights: list[B x Hd x N' x N']
-            x_spatial: list[B x C x H^ x W^]
-        """
-        b, _, H, W = x.shape                # B x 3 x H x W
-        x_spatial = self.spatial_prior(x)   # list [B x C x H^ x W^]
-        x = self.patch_embed(x)
-        token_size = (H // self.patch_embed.patch_size[0], W // self.patch_embed.patch_size[1])
-
-        if not self.training:
-            pos_embed_pat = self.interpolate_pos_encoding(x, token_size=token_size)
-            x = x + pos_embed_pat
-            sptial_pos_embed = self.interpolate_spatial_pos_encoding(x_spatial)
-            for i in range(self.stages):
-                x_spatial[i] += sptial_pos_embed[i].to(x.device)
-        else:
-            x = x + self.pos_embed_pat
-            for i in range(self.stages):
-                x_spatial[i] += self.sptial_pos_embed[i].to(x.device)
-
-        nn_cls_tokens = self.cls_token.expand(b, -1, -1) + self.pos_embed_cls
-        cls_tokens = self.build_class_tokens(x_spatial) + nn_cls_tokens
-
-        x = torch.cat((cls_tokens, x), dim=1) # Concat input with Nc class tokens
-        x = self.pos_drop(x)                  # B x (N') x C, where N' = Nc + Np
-
-        attn_weights = []
-        #-------------------  Modify block for ablation study -------------------#
-        for i in range(self.stages):
-            for j in range(self.stage_indices[i], self.stage_indices[i+1]):
-                x, weights_j = self.blocks[j](x)
-                attn_weights.append(weights_j)
-
-            cls_stru, x_spatial[i] = self.spatial_fuse[i](
-                x_spatial=x_spatial[i],
-                x_backbone=x,
-                token_size=token_size)
-            # zero initialized weights for adding new class tokens
-            x_cls = x[:, :self.num_classes] + self.weights[i] * cls_stru
-            x_vit = x[:, self.num_classes:]
-            x = torch.cat((x_cls, x_vit), dim=1)
-
-            if i != self.stages - 1:
-                z = self.down_convs[i](x_spatial[i])
-                x_spatial[i + 1] = x_spatial[i + 1] + z
-
-        return {
-            'x_cls': x[:, :self.num_classes], 
-            'x_vit': x[:, self.num_classes:], 
-            'attn': attn_weights, 
-            'x_branch': x_spatial
-            }
-    
     def reshape_patch_tokens(self, patch_tokens, H, W):
         """
         Reshape patch tokens from [B, Np, C] to [B, C, Hp, Wp]
@@ -243,17 +194,74 @@ class MCTAdapter(MCTViT):
 
         return out
 
-    def forward(self, x):
+    def forward_features(self, x):
         """
-        Basic forward for training image classification.
+        Input:
+            x: B x 3 x H x W
+        Return:
+            x_cls: [B x K x C] 
+            x_vit: [B x Np x C]
+            attn_weights: list[B x Hd x N' x N']
+            x_spatial: list[B x C x H^ x W^]
+        """
+        b, _, H, W = x.shape                # B x 3 x H x W
+        x_branc = self.spatial_prior(x)   # list [B x C x H^ x W^]
+        x = self.patch_embed(x)
+        token_size = (H // self.patch_embed.patch_size[0], W // self.patch_embed.patch_size[1])
+
+        if not self.training:
+            pos_embed_pat = self.interpolate_pos_encoding(x, token_size=token_size)
+            x = x + pos_embed_pat
+            sptial_pos_embed = self.interpolate_spatial_pos_encoding(x_branc)
+            for i in range(self.stages):
+                x_branc[i] += sptial_pos_embed[i].to(x.device)
+        else:
+            x = x + self.pos_embed_pat
+            for i in range(self.stages):
+                x_branc[i] += self.sptial_pos_embed[i].to(x.device)
+
+        nn_cls_tokens = self.cls_token.expand(b, -1, -1) + self.pos_embed_cls
+        cls_tokens = self.build_class_tokens(x_branc) + nn_cls_tokens
+
+        x = torch.cat((cls_tokens, x), dim=1) # Concat input with Nc class tokens
+        x = self.pos_drop(x)                  # B x (N') x C, where N' = Nc + Np
+
+        attn_weights = []
+        #-------------------  Modify block for ablation study -------------------#
+        for i in range(self.stages):
+            for j in range(self.stage_indices[i], self.stage_indices[i+1]):
+                x, weights_j = self.blocks[j](x)
+                attn_weights.append(weights_j)
+
+            cls_stru, x_branc[i] = self.spatial_fuse[i](
+                x_spatial=x_branc[i],
+                x_backbone=x,
+                token_size=token_size)
+            # zero initialized weights for adding new class tokens
+            x_cls = x[:, :self.num_classes] + self.weights[i] * cls_stru
+            x_vit = x[:, self.num_classes:]
+            x = torch.cat((x_cls, x_vit), dim=1)
+
+            if i != self.stages - 1:
+                z = self.down_convs[i](x_branc[i])
+                x_branc[i + 1] = x_branc[i + 1] + z
+
+        return {
+            'x_cls': x[:, :self.num_classes], 
+            'x_vit': x[:, self.num_classes:], 
+            'attn': attn_weights, 
+            'x_branch': x_branc
+            }
+
+    def basic_forward(self, x):
+        """
+        Basic forward
         """
         b, _, h, w = x.shape
-        # basic forward
         feat_dict = self.forward_features(x)
-        # class tokens
-        last_cls_tokens = feat_dict['x_cls'] # [B, K, C]
-        cls_logits = last_cls_tokens.mean(-1) # [B, K]
-        
+        attn_weights =  feat_dict['attn']
+        last_x_cls = feat_dict['x_cls'] # [B, K, C]
+
         x_vit = self.reshape_patch_tokens(
             feat_dict['x_vit'], h, w) # [B, C, Hp, Wp]
         x_out = [x_vit]
@@ -269,9 +277,22 @@ class MCTAdapter(MCTViT):
         x_out = torch.cat(x_out, dim=1)
         x_out = self.channel_reduction(x_out) # [B, C, Hp, Wp]
         
+        # x_out = nchw2nlc(x_out)
+        # x_out = torch.cat((last_x_cls, x_out), dim=1)
+        # x_out, f_weights = self.fuse_block(x_out)
+        # last_x_cls, x_out = x_out[:, :self.num_classes], x_out[:, self.num_classes:]
+        # x_out = nlc2nchw(x_out, d_size=out_size)
+        
+        return last_x_cls, x_out, attn_weights
+        
+    def forward(self, x):
+        """
+        Basic forward for training image classification.
+        """
+        last_cls_tokens, x_out, _ = self.basic_forward(x)
         x_out = self.head(x_out) # [B, K, Hp, Wp]
         x_logits = self.gwr_pooling_top_k(x_out)
-        
+        cls_logits = last_cls_tokens.mean(-1) # [B, K]
         return cls_logits, x_logits
 
     def get_parameters_group(self):
@@ -336,60 +357,70 @@ class MCTAdapterCam(MCTAdapter):
         return cams
 
     @torch.no_grad()
-    def get_cls2pat(self, tokens, attn_weights):
-        """
-        Input: 
-            tokens: patch tokens from the last backbone layer
-            attn_weights: attention weights from L layers -> L x B x d x (Cls+Np) x (Cls+Np)
-        Output: 
-            Refined class activation maps -> B x Cls x Hp x Wp
-        """
-        B, nc, Hp, Wp = tokens.shape
-        attn_weights = torch.mean(torch.stack(attn_weights), dim=2).detach() # L x B x (Cls+Np) x (Cls+Np)
-        
-        attn_maps = attn_weights[-self.cls_ind:].mean(0)         # B x (Cls+Np) x (Cls+Np)
-        cls2pat = attn_maps[:, :nc, nc:].reshape([B, nc, Hp, Wp]) # B x Cls x Hp x Wp
-        return cls2pat
-
+    def forward_with_pesudo_label(self, x):
+        b = x.shape[0]
+        cls_logits, x_out, _ = self.basic_forward(x)
+        x_out = self.head(x_out) # [B, K, Hp, Wp]
+        pseudo_label = torch.ones(b, self.num_classes).to(x.device)
+        pseudo_label[cls_logits < 0] = 0
+        return pseudo_label
+    
     @torch.no_grad()
-    def forward(self, x, return_attn=False, return_cls=False, use_cls_guide=False):
+    def forward(self, x, return_type='cam', use_cls_guide=False):
+        """
+        One can choose return_type as:
+            'cam': return cam for testing
+            'all': whole attention map
+            'cls_token': the class token
+            'cls2cls': class-to-class attention map
+            'cls2pat': class-to-patch attention map
+            'pat2cls': patch-to-class attention map
+            'pat2pat': patch-to-patch attention map
+        """
         b, _, h, w = x.shape
-        feat_dict = self.forward_features(x)
-        attn_weights = torch.mean(torch.stack(feat_dict['attn']), dim=2).detach()
+        nc = self.num_classes
+        last_cls_tokens, x_out, attn_weights = self.basic_forward(x)
+        x_out = self.head(x_out) # [B, K, Hp, Wp]
         
-        if return_attn:
-            return attn_weights
-        
-        patch_tokens = self.reshape_patch_tokens(feat_dict['x_vit'], h, w)
+        # attn_weights: L, B, N', N'
+        attn_weights = torch.mean(
+            torch.stack(attn_weights), dim=2).detach()
 
-        x_out = [patch_tokens]
-        out_size = patch_tokens.shape[2:]
-        for feat in feat_dict['x_branch']:
-            feat = F.interpolate(
-                feat, size=out_size, mode="bilinear", align_corners=False)
-            x_out.append(feat)
-        # concat spatial and patch tokens
-        x_out = torch.cat(x_out, dim=1)
-        x_out = self.channel_reduction(x_out)
-        x_out = self.head(x_out)  # B x K x Hp x Wp
-        
-        last_cls_tokens = feat_dict['x_cls'] # [B, K, C]
         cls_logits = last_cls_tokens.mean(-1) # [B, K]
         
         if use_cls_guide:
-            cls_guidance = torch.ones(b, self.num_classes).to(x.device)
+            cls_guidance = torch.ones(b, nc).to(x.device)
             cls_guidance[cls_logits <= 0] = self.bg_score
             cls_guidance = cls_guidance.unsqueeze(-1).unsqueeze(-1)
             x_out = cls_guidance * x_out
         
         outputs = self.get_cam(x_out, attn_weights)
-
-        if return_cls:
-            pseudo_label = torch.ones(b, self.num_classes).to(x.device)
-            pseudo_label[cls_logits < 0] = 0
-            return pseudo_label, outputs
         
-        return outputs
+        hp = h // self.patch_embed.patch_size[0]
+        wp = w // self.patch_embed.patch_size[1]
+        
+        if return_type == 'all':
+            return attn_weights
+        
+        elif return_type == 'cls2cls':
+            cls2cls = attn_weights[:, :, :nc, :nc]
+            return cls2cls
+        
+        elif return_type == 'cls2pat':
+            cls2pat = attn_weights[:, :, :nc, nc:].reshape([-1, b, nc, hp, wp])
+            return cls2pat
+        
+        elif return_type == 'pat2cls':
+            pass
+        
+        elif return_type == 'pat2pat':
+            pass
+        
+        elif return_type == 'cls_token':
+            return last_cls_tokens
+        
+        else:
+            return outputs
 
 
 @register_model

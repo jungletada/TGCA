@@ -30,8 +30,9 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
 
 
 def get_args_parser():
-    parser = argparse.ArgumentParser('Generating attention maps', add_help=False)
-   
+    parser = argparse.ArgumentParser('Analyze attention maps', add_help=False)
+    parser.add_argument("--task", default='sum_attention_weights', type=str)
+    
     parser.add_argument("--num_workers", default=2, type=int)
     parser.add_argument('--work_space', default='results_voc/mcta', type=str, help='work space')
     parser.add_argument('--model', default='mcta', type=str, metavar='MODEL',
@@ -86,7 +87,7 @@ def flip_cam(cam_list):
     return cam_list
 
 
-def draw_heat_map(attn_maps, args, img_name, n_dim=2):
+def draw_heat_map(attn_maps, args, img_name, task, n_dim=2):
     """Draw heat maps from attention maps.
 
     Args:
@@ -96,7 +97,7 @@ def draw_heat_map(attn_maps, args, img_name, n_dim=2):
         n_dim (int): The number of dimensions of the attention maps (2D or 3D).
     """
     
-    cmap = "mako"
+    cmap = "RdBu_r"
     if n_dim == 3:
         for layer in range(attn_maps.shape[0]):
             plt.figure(figsize=(20, 20))
@@ -110,10 +111,10 @@ def draw_heat_map(attn_maps, args, img_name, n_dim=2):
         plt.figure(figsize=(20, 20))
         sns.heatmap(attn_maps, cmap=cmap, cbar=False, square=True)
         plt.axis("off")
-        output_path = os.path.join(args.attn_dir, f"{img_name}_attnsum.png")
+        output_path = os.path.join(args.attn_dir, f"{img_name}_{task}.png")
         plt.savefig(output_path, bbox_inches='tight', pad_inches=0.)
         plt.close()
-    
+
     else:
         raise NotImplementedError
 
@@ -171,7 +172,7 @@ def calculate_class_score(all_cls_tokens, cls_label):
     return f1_score_layer
 
    
-def _eval_tokens(model, dataset, args):
+def _visualize_attention(model, dataset, args):
     data_loader = DataLoader(
         dataset,
         shuffle=False,
@@ -181,10 +182,8 @@ def _eval_tokens(model, dataset, args):
     column_names = list(range(1, 12 + 1))
 
     with open(args.csv_path, mode="w", newline="", encoding="utf-8") as file:
-        
         writer = csv.writer(file)
         writer.writerow(column_names)
-        
         with torch.no_grad():
             model.cuda()
             model.eval()
@@ -194,27 +193,43 @@ def _eval_tokens(model, dataset, args):
                 size = pack['size']        # image size->Torch.tensor [2]
                 inputs = pack['img'][0]
                 valid_cat = torch.nonzero(label)[:, 0] # get validate class->[#val_cls]
-                
-                output_dict = model.forward_eval(inputs[0].cuda(non_blocking=True)) # img[0]->[(2, 3, H', W')]
-                all_cls_tokens = output_dict['all_cls']
-                all_patch_tokens = output_dict['all_patches']
 
-                results = calculate_cosine_similarity(outputs_block=all_cls_tokens)
-                results = calculate_class_score(all_cls_tokens, label.cuda())
-                rounded_values = [round(item.item(), 3) for item in results]
-                writer.writerow(rounded_values)
+                # output_dict = model.forward(inputs[0].cuda(non_blocking=True))
+                # all_cls_tokens = output_dict['all_cls']
+                # all_patch_tokens = output_dict['all_patches']
 
-                # outputs = [model.forward(img[0].cuda(non_blocking=True)) # img[0]->[(2, 3, H', W')]
-                #         for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
+                # results = calculate_cosine_similarity(outputs_block=all_cls_tokens)
+                # results = calculate_class_score(all_cls_tokens, label.cuda())
+                # rounded_values = [round(item.item(), 3) for item in results]
+                # writer.writerow(rounded_values)
+                task = 'cls_token'
+                outputs = []
+                for img in pack['img']:
+                    inputs = img[0].cuda(non_blocking=True)
+                    output = model.forward(inputs, return_type=task)
+                    outputs.append(output)
                 # attn_maps = outputs[0][:, 0, :, :].cpu().numpy()
                 # attn_maps = np.sum(attn_maps, axis=0) # sum over all layer
-                # draw_heat_map(attn_maps, args, img_name, n_dim=3)
+                # draw_heat_map(attn_maps, args, img_name, task=task, n_dim=2)
+                cls_token = F.relu(outputs[0][0, :, :].mean(dim=-1, keepdim=True))
+                cls_x_cls = cls_token @ cls_token.T
+                gt_cls_x_cls = label.unsqueeze(-1) @ label.unsqueeze(0)
+                draw_heat_map(cls_x_cls.cpu().numpy(), args, img_name, task=task, n_dim=2)
+                draw_heat_map(gt_cls_x_cls.cpu().numpy(), args, img_name, task=f'{task}_gt', n_dim=2)
                 # Generate heatmaps for each layer's attention map
                 if iter_ % (len(dataset) // 20) == 0:
                     print("%d " % ((5*iter_+1) // (len(dataset) // 20)), end='')
-                    
 
-def _eval_attentions(model, dataset, args):
+
+def analysis_per_layer_result(args):
+    data_frame = pd.read_csv(args.csv_path, header=0)
+    print(data_frame)
+    column_means = data_frame.iloc[1:].astype(float).mean()
+    for i in column_means:
+        print(i)
+ 
+
+def _eval_attention_scores(model, dataset, args):
     data_loader = DataLoader(
         dataset,
         shuffle=False,
@@ -223,9 +238,8 @@ def _eval_attentions(model, dataset, args):
             
     column_names = list(range(1, 12 + 1))
     nc = args.num_classes
-
-    with open(args.csv_path, mode="w", newline="", encoding="utf-8") as file:
         
+    with open(args.csv_path, mode="w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
         writer.writerow(column_names)
         all_cls_attn = []
@@ -251,7 +265,7 @@ def _eval_attentions(model, dataset, args):
 
                 if iter_ % (len(dataset) // 20) == 0:
                     print("%d" % ((5*iter_+1) // (len(dataset) // 20)), end='')
-
+                    
         # Convert list of arrays to 2D numpy array
         cls_attn = np.array(all_cls_attn).mean(axis=0) # num_imges, L
         pat_attn = np.array(all_pat_attn).mean(axis=0) # num_imges, L
@@ -260,13 +274,64 @@ def _eval_attentions(model, dataset, args):
         writer.writerow(pat_attn)
 
 
-def analysis_per_layer_result(args):
-    data_frame = pd.read_csv(args.csv_path, header=0)
-    print(data_frame)
-    column_means = data_frame.iloc[1:].astype(float).mean()
-    for i in column_means:
-        print(i)
+def _eval_attention_activation(model, dataset, args):
+    data_loader = DataLoader(
+        dataset,
+        shuffle=False,
+        num_workers=args.num_workers,
+        pin_memory=True)
+            
+    column_names = list(range(1, 12 + 1))
+    nc = args.num_classes
+        
+    with open(args.csv_path, mode="w", newline="", encoding="utf-8") as file:
+        # writer = csv.writer(file)
+        # writer.writerow(column_names)
+        all_cls_attn = []
+        all_pat_attn = []
+        with torch.no_grad():
+            model.cuda()
+            model.eval()
+            for iter_, pack in enumerate(tqdm(data_loader)):
+                img_name = pack['name'][0] # Img_id->str
+                label = pack['label'][0]   # image-level label->Torch.Tensor [1]
+                size = pack['size']        # image size->Torch.tensor [2]
+                
+                idx_label = torch.nonzero(label, as_tuple=True)[0].tolist()
+                outputs = [model(img[0].cuda(non_blocking=True), return_attn=True) # img[0]->[(2, 3, H', W')]
+                                for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
+                attn_maps = outputs[0][:, 0, :, :] # L x (Cls+Np) x (Cls+Np), we choose non-flipped image.
+                L, N, _ = attn_maps.shape
+                x2cls, x2pat = attn_maps.split((nc, N-nc), dim=-1)
+                
+                #print(img_name, idx_cls, idx_label)
+                if iter_ % (len(dataset) // 20) == 0:
+                    print("%d" % ((5*iter_+1) // (len(dataset) // 20)), end='')
+                    
+        # # Convert list of arrays to 2D numpy array
+        # cls_attn = np.array(all_cls_attn).mean(axis=0) # num_imges, L
+        # pat_attn = np.array(all_pat_attn).mean(axis=0) # num_imges, L
 
+        # writer.writerow(cls_attn)
+        # writer.writerow(pat_attn)
+        
+        
+def get_sum_of_atttention_weights(attn_maps, nc):
+        """
+        attn_maps: (L, N, N), where L: number of layers, N: (number of classes + number of patches)
+        
+        """
+        all_cls_attn = []
+        all_pat_attn = []
+        L, N, _ = attn_maps.shape
+        x2cls, x2pat = attn_maps.split((nc, N-nc), dim=-1)
+
+        sum_cls = x2cls.sum(dim=-1).mean(dim=-1).cpu().numpy()
+        sum_pat = x2pat.sum(dim=-1).mean(dim=-1).cpu().numpy()
+        all_cls_attn.append(sum_cls)
+        all_pat_attn.append(sum_pat)
+        return all_cls_attn, all_pat_attn
+    
 
 if __name__ == '__main__':
     args = get_args_parser()
@@ -297,7 +362,8 @@ if __name__ == '__main__':
     print(f'Using {args.checkpoint} for analysis.')
 
     print('[ ', end='')
-    _eval_attentions(model, dataset, args)
+    _visualize_attention(model, dataset, args)
     print(']')
+    # _eval_attention_activation(model, dataset, args)
     
     torch.cuda.empty_cache()

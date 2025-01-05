@@ -23,7 +23,7 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
 def get_args_parser():
     parser = argparse.ArgumentParser('Generating attention maps', add_help=False)
     # Model parameters
-    parser.add_argument("--num_workers", default=2, type=int)
+    parser.add_argument("--num_workers", default=4, type=int)
     parser.add_argument('--model', default='deit_small_mctgformer', type=str, metavar='MODEL',
                         help='Name of model to train')
     parser.add_argument('--checkpoint', default='', help='checkpoint for generating maps')
@@ -108,16 +108,12 @@ def combine_images(results, h_splits, w_splits):
     return combined
 
 
-def split_image_test(inputs_flip, model, args):
-    inputs_flip = resize_input_minbound(
-        inputs_flip.cuda(non_blocking=True),
-        min_size=args.min_size)
-
-    _, _, h, w = inputs_flip.shape
+def split_image_test(inputs, model, args):
+    _, _, h, w = inputs.shape
     def split_length(length):
         if length > args.min_size:
-            base_length = length // 4
-            parts = [base_length] * 3  
+            base_length = length // 3
+            parts = [base_length] * 2  
             parts.append(length - sum(parts))
             return parts
         else:
@@ -125,13 +121,13 @@ def split_image_test(inputs_flip, model, args):
 
     h_splits = split_length(h)
     w_splits = split_length(w)
-
     cropped_outputs = []
+    
     h_start = 0
     for h_part in h_splits:
         w_start = 0
         for w_part in w_splits:
-            cropped = inputs_flip[:, :, h_start:h_start + h_part, w_start:w_start + w_part]
+            cropped = inputs[:, :, h_start:h_start + h_part, w_start:w_start + w_part]
             crop_size = cropped.shape[2:]
             cropped_result = model(cropped)
             cropped_result = F.interpolate(
@@ -149,19 +145,26 @@ def split_image_test(inputs_flip, model, args):
     return combined
 
 
-def multi_scale_test(model, pack, args):
+def multi_scale_test(model, images, args):
     """
     
     """
     output_cam_list = []
-    for img in pack['img']:
-        inputs_flip = img[0]
+    for image in images:
+        inputs_flip = image[0]
         _h, _w = inputs_flip.shape[2:]
         if max(_h, _w) <= args.min_size:
-            cam = simple_resize_test(inputs_flip, model, args=args)
+            inputs = resize_input_minbound(
+                x=inputs_flip.cuda(non_blocking=True),
+                min_size=args.min_size)
+            cam = model(inputs)
         else:
-            cam = split_image_test(inputs_flip, model, args=args)
+            inputs = resize_input_minbound(
+                x=inputs_flip.cuda(non_blocking=True),
+                min_size=args.min_size)
+            cam = split_image_test(inputs, model, args=args)
         output_cam_list.append(cam)
+        
     return output_cam_list
 
 
@@ -202,7 +205,7 @@ def _work_trainset(process_id, model, dataset, args):
                             for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
                 else:
                     raise e
-            # outputs = multi_scale_test(model, pack, args)
+            # outputs = multi_scale_test(model, pack['img'], args)
             #=================== high resolution cam list ===================#
             upsample_cam_list = [# upsample all multi-scale CAMs
                     F.interpolate(cam, size, mode='bilinear', align_corners=False)

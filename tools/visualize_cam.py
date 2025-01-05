@@ -58,8 +58,8 @@ def get_args_parser():
     
     args = parser.parse_args()
     return args
-                                                                                                                        
-        
+                                                                                                                 
+
 def normalize_cam(cam_mask):
     for i in range(cam_mask.size(0)):
         channel = cam_mask[i]
@@ -83,7 +83,7 @@ def flip_cam(cam_list):
 def _work(process_id, model, dataset, args):
     databin = dataset[process_id]
     n_gpus = torch.cuda.device_count()
-    
+
     data_loader = DataLoader(
         databin,
         shuffle=False,
@@ -142,7 +142,7 @@ if __name__ == '__main__':
     from datasets_cam import build_dataset
     # change to multi-scale dataset
     if args.dataset == 'VOC12':
-        args.dataset = 'VOC12MS' 
+        args.dataset = 'VOC12MS'
     elif args.dataset == 'COCO':
         args.dataset = 'COCOMS'
     else:
