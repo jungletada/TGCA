@@ -67,7 +67,6 @@ class VOC12ClsDataset(VOC12ImageDataset):
 
 
 class VOC12ClsDatasetMSF(VOC12ClsDataset):
-
     def __init__(self, img_name_list_path, voc12_root, scales, inter_transform=None, unit=1):
         super().__init__(img_name_list_path, voc12_root, transform=None)
         self.scales = scales

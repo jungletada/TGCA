@@ -20,20 +20,20 @@ from misc.dcrf import DenseCRF
 
 crf_inference = DenseCRF(
     iter_max=10,
-    pos_xy_std=1,
-    pos_w=1,
-    bi_xy_std=121,
-    bi_rgb_std=5,
-    bi_w=4,
+    pos_xy_std=3,
+    pos_w=3,
+    bi_xy_std=45,
+    bi_rgb_std=3,
+    bi_w=3,
 )
-    
-    
+
+
 def logfile(args, msg):
     with open(args.log_file, "a", encoding="utf-8") as f:
         f.write(msg + '\n')
     print(msg)
-    
-    
+
+
 def run_eval(dataset, args):
     num_images = len(dataset)
     chunk_size = 12000   # for memory efficient
@@ -155,15 +155,12 @@ def make_cam_crf(process_id, dataset, args):
         mask.save(osp.join(args.crf_cam_dir, filename + '.png'))
         
         # cams = np.stack(list(cam_dict.values()), axis=0) # (#val_cls, H, W)
-        
-        # bg_score_h = np.power(1 - np.max(cams, axis=0, keepdims=True), 1.1)
+        # bg_score_h = np.power(1 - np.max(cams, axis=0, keepdims=True), 1.5)
         # cams_h = np.concatenate((bg_score_h, cams), axis=0)
-        
         # bg_score_l = np.power(1 - np.max(cams, axis=0, keepdims=True), 1)
         # cams_l = np.concatenate((bg_score_l, cams), axis=0)
-        
-        # prob_h = post_processor(image, cams_h)
-        # prob_l = post_processor(image, cams_l)
+        # prob_h = crf_inference(image, cams_h)
+        # prob_l = crf_inference(image, cams_l)
         
         # keys = np.stack(tuple(cam_dict.keys())) + 1
         # keys = np.pad(keys, (1, 0), mode='constant')
@@ -199,7 +196,7 @@ if __name__ == '__main__':
                         help='log dir to save the results')
     parser.add_argument('--curve_threshold', action='store_true', help='whether to use a range of thresholds')
     parser.add_argument('--threshold', default=0.45, type=float, help='threshold for evaluation as background')
-    parser.add_argument('--low_thres', default=43, type=int, help='low threshold for evaluation as background')
+    parser.add_argument('--low_thres', default=44, type=int, help='low threshold for evaluation as background')
     parser.add_argument('--high_thres', default=50, type=int, help='high threshold for evaluation as background')
     parser.add_argument('--alpha', default=1.15, type=float, help='use alpha to set background')
     parser.add_argument('--eval_nprocs', default=8, type=int, help='use nprocs processess.')
@@ -217,7 +214,7 @@ if __name__ == '__main__':
         dataset = VOCSegmentationLabelDataset(
             data_dir=args.voc12_root,
             id_list_file=args.id_list)
-        args.low_thres, args.high_thres = 44, 55
+        # args.low_thres, args.high_thres = 44, 55
 
     elif args.dataset == 'COCO':
         dataset = COCOSegmentationLabelDataset(

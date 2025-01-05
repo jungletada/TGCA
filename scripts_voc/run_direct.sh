@@ -2,9 +2,6 @@
 GPU=0,1
 NODES=2
 
-SEGDIR=cam_mask_val
-CRFDIR=crf_mask_val
-
 DATASET=VOC12
 DATACONFIG=data/VOCdevkit/VOC2012/ImageLists
 TRAINAUGID=${DATACONFIG}/train_aug_id.txt
@@ -15,9 +12,11 @@ INPUTSIZE=448
 MODELNAME=mcta
 WORKDIR=results_voc/mcta
 
+SEGDIR=cam_mask_val
+CRFDIR=crf_mask_val
+
 CUDA_VISIBLE_DEVICES=${GPU}
 
-<<<<<<< HEAD
 # # ============= Make Class Activation Maps of Model ============= #
 # python make_cam.py \
 #     --dataset ${DATASET} \
@@ -27,20 +26,8 @@ CUDA_VISIBLE_DEVICES=${GPU}
 #     --input_size ${INPUTSIZE} \
 #     --cam_out_dir ${SEGDIR} \
 #     --scales 1.0,0.75,1.25 \
-#     --checkpoint results_voc/mcta/mcta_best.pth \
-=======
-# ============= Make Class Activation Maps of Model ============= #
-python make_cam.py \
-    --dataset ${DATASET} \
-    --model ${MODELNAME} \
-    --work_space ${WORKDIR} \
-    --train_list ${VALID} \
-    --input_size ${INPUTSIZE} \
-    --cam_out_dir ${SEGDIR} \
-    --scales 1.0,0.5,0.75,1.25,1.5 \
-    --checkpoint ${WORKDIR}/mcta_best.pth \
->>>>>>> 2f7ab046cf1e909ae270875a2e1eed2f335e3f5e
-      
+#     --checkpoint results_voc/mcta/mcta-deit-small-voc-7458.pth \
+
 # # ============= Evaluate Class Activation Maps No CRF =============#
 # python eval_cam_crf.py \
 #     --dataset ${DATASET} \
@@ -56,11 +43,7 @@ python eval_cam_crf.py \
     --work_space ${WORKDIR} \
     --eval_cam_dir ${SEGDIR} \
     --crf_cam_dir ${CRFDIR} \
-<<<<<<< HEAD
-    --alpha 1.0 \
-=======
-    --alpha 1.1 \
->>>>>>> 2f7ab046cf1e909ae270875a2e1eed2f335e3f5e
+    --alpha 1.2 \
     --id_list ${VALID} \
 
 #============= Evaluate =============#

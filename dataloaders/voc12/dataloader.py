@@ -41,29 +41,6 @@ def decode_int_filename(int_filename):
     return s[:4] + '_' + s[4:]
 
 
-def load_image_label_from_xml(img_name, voc12_root):
-    from xml.dom import minidom
-
-    elem_list = minidom.parse(os.path.join(
-        voc12_root, 
-        ANNOT_FOLDER_NAME, 
-        decode_int_filename(img_name) + '.xml')).getElementsByTagName('name')
-
-    multi_cls_lab = np.zeros((N_CAT), np.float32)
-
-    for elem in elem_list:
-        cat_name = elem.firstChild.data
-        if cat_name in CAT_LIST:
-            cat_num = CAT_NAME_TO_NUM[cat_name]
-            multi_cls_lab[cat_num] = 1.0
-
-    return multi_cls_lab
-
-
-def load_image_label_list_from_xml(img_name_list, voc12_root):
-    return [load_image_label_from_xml(img_name, voc12_root) for img_name in img_name_list]
-
-
 def load_image_label_list_from_npy(img_name_list, voc12_root):
     cls_labels_path = os.path.join(voc12_root, LABEL_FOLDER_NAME, 'cls_labels.npy')
     cls_labels_dict = np.load(cls_labels_path, allow_pickle=True).item()
@@ -169,7 +146,6 @@ class VOC12ClassificationDataset(VOC12ImageDataset):
     def __getitem__(self, idx):
         out = super().__getitem__(idx)
         out['label'] = torch.from_numpy(self.label_list[idx])
-
         return out
 
 
@@ -365,8 +341,8 @@ class VOCSegmentationLabelDataset(Dataset):
         label = np.asarray(Image.open(label_path), dtype=np.int32)
         label[label==255] = -1
         return {"image": image, "label": label}
-    
-    
+
+
 if __name__ == "__main__":
     import matplotlib
     import matplotlib.pyplot as plt

@@ -318,7 +318,7 @@ class MCTAdapter(MCTViT):
 
 class MCTAdapterCam(MCTAdapter):
     """Class Activation Map variant of MCTA for visualization purposes."""
-    def __init__(self, *args, cls_ind=4, bg_score=0.2, **kwargs):
+    def __init__(self, *args, cls_ind=4, bg_score=0.4, **kwargs):
         """fuse_layers: The attention of the last L layers to fuse"""
         super().__init__(*args, **kwargs)
         self.cls_ind = cls_ind # fusion layer for mixing class-to-patch
@@ -355,18 +355,9 @@ class MCTAdapterCam(MCTAdapter):
             ).reshape(b, nc, hp, wp)
 
         return cams
-
-    @torch.no_grad()
-    def forward_with_pesudo_label(self, x):
-        b = x.shape[0]
-        cls_logits, x_out, _ = self.basic_forward(x)
-        x_out = self.head(x_out) # [B, K, Hp, Wp]
-        pseudo_label = torch.ones(b, self.num_classes).to(x.device)
-        pseudo_label[cls_logits < 0] = 0
-        return pseudo_label
     
     @torch.no_grad()
-    def forward(self, x, return_type='cam', use_cls_guide=False):
+    def forward(self, x, use_cls_guide=False):
         """
         One can choose return_type as:
             'cam': return cam for testing
@@ -395,7 +386,91 @@ class MCTAdapterCam(MCTAdapter):
             x_out = cls_guidance * x_out
         
         outputs = self.get_cam(x_out, attn_weights)
+        return outputs
+    
+        # hp = h // self.patch_embed.patch_size[0]
+        # wp = w // self.patch_embed.patch_size[1]
         
+        # if return_type == 'all':
+        #     return attn_weights
+        
+        # elif return_type == 'cls2cls':
+        #     cls2cls = attn_weights[:, :, :nc, :nc]
+        #     return cls2cls
+        
+        # elif return_type == 'cls2pat':
+        #     cls2pat = attn_weights[:, :, :nc, nc:].reshape([-1, b, nc, hp, wp])
+        #     return cls2pat
+        
+        # elif return_type == 'pat2cls':
+        #     pass
+        
+        # elif return_type == 'pat2pat':
+        #     pass
+        
+        # elif return_type == 'cls_token':
+        #     return last_cls_tokens
+        
+        # else:
+        #     return outputs
+
+    @torch.no_grad()
+    def forward_with_label(self, x, use_cls_guide=False):
+        b, _, h, w = x.shape
+        nc = self.num_classes
+        last_cls_tokens, x_out, attn_weights = self.basic_forward(x)
+        x_out = self.head(x_out) # [B, K, Hp, Wp]
+        
+        # attn_weights: L, B, N', N'
+        attn_weights = torch.mean(
+            torch.stack(attn_weights), dim=2).detach()
+
+        cls_logits = last_cls_tokens.mean(-1) # [B, K]
+        x_logits = self.gwr_pooling_top_k(x_out)
+        
+        
+        cls_label = torch.ones(b, nc).to(x.device)
+        cls_label[cls_logits <= 0] = 0
+        
+        patch_label = torch.ones(b, nc).to(x.device)
+        patch_label[x_logits <= 0] = 0
+        
+        # if use_cls_guide:
+        #     cls_guidance = torch.ones(b, nc).to(x.device)
+        #     cls_guidance[cls_logits <= 0] = self.bg_score
+        #     cls_guidance[x_logits <= 0] = self.bg_score
+        #     cls_guidance = cls_guidance.unsqueeze(-1).unsqueeze(-1)
+        #     x_out = cls_guidance * x_out
+            
+        outputs = self.get_cam(x_out, attn_weights)
+        return cls_label, patch_label, outputs
+
+    def forward_ablation(self, x, return_type='cam'):
+        """
+        One can choose return_type as:
+            'cam': return cam for testing
+            'all': whole attention map
+            'cls_token': the class token
+            'cls2cls': class-to-class attention map
+            'cls2pat': class-to-patch attention map
+            'pat2cls': patch-to-class attention map
+            'pat2pat': patch-to-patch attention map
+        """
+        b, _, h, w = x.shape
+        nc = self.num_classes
+        last_cls_tokens, x_out, attn_weights = self.basic_forward(x)
+        # x_out = self.head(x_out) # [B, K, Hp, Wp]
+        # cls_logits = last_cls_tokens.mean(-1) # [B, K]
+        # attn_weights: L, B, N', N'
+        attn_weights = torch.mean(
+            torch.stack(attn_weights), dim=2).detach()
+
+        # if use_cls_guide:
+        #     cls_guidance = torch.ones(b, nc).to(x.device)
+        #     cls_guidance[cls_logits <= 0] = self.bg_score
+        #     cls_guidance = cls_guidance.unsqueeze(-1).unsqueeze(-1)
+        #     x_out = cls_guidance * x_out
+    
         hp = h // self.patch_embed.patch_size[0]
         wp = w // self.patch_embed.patch_size[1]
         
@@ -418,11 +493,8 @@ class MCTAdapterCam(MCTAdapter):
         
         elif return_type == 'cls_token':
             return last_cls_tokens
+
         
-        else:
-            return outputs
-
-
 @register_model
 def mcta(pretrained=False, **kwargs):
     """Create a MCTA model instance.

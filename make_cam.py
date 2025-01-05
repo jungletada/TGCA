@@ -12,7 +12,7 @@ cudnn.enabled = True
 import warnings
 warnings.filterwarnings("ignore")
 
-from misc import torchutils
+from misc import torchutils, imutils
 from utils import create_cam_model, parse_scales
 from models.adapter_modules import resize_input_minbound
 
@@ -52,7 +52,7 @@ def get_args_parser():
     # generating attention maps
     parser.add_argument('--layer-index', type=int, default=3, 
                         help='extract attention maps from the last layers')
-    parser.add_argument("--scales", type=parse_scales, default=(1.0,),
+    parser.add_argument("--scales", type=parse_scales, default=(1.0, ),
                         help="Multi-scale inferences")
     parser.add_argument("--cam_out_dir", default="cam", type=str)
     
@@ -168,7 +168,7 @@ def multi_scale_test(model, images, args):
     return output_cam_list
 
 
-def _work_trainset(process_id, model, dataset, args):
+def _work_trainset_psa(process_id, model, dataset, args):
     databin = dataset[process_id]
     n_gpus = torch.cuda.device_count()
     data_loader = DataLoader(
@@ -205,7 +205,6 @@ def _work_trainset(process_id, model, dataset, args):
                             for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
                 else:
                     raise e
-            # outputs = multi_scale_test(model, pack['img'], args)
             #=================== high resolution cam list ===================#
             upsample_cam_list = [# upsample all multi-scale CAMs
                     F.interpolate(cam, size, mode='bilinear', align_corners=False)
@@ -227,6 +226,69 @@ def _work_trainset(process_id, model, dataset, args):
                 print(f"{(5*iter_+1) // (len(databin) // 20)} ", end='')
 
 
+def _work_trainset_irn(process_id, model, dataset, args):
+    databin = dataset[process_id]
+    n_gpus = torch.cuda.device_count()
+    data_loader = DataLoader(
+        databin,
+        shuffle=False,
+        num_workers=args.num_workers // n_gpus,
+        pin_memory=True)
+
+    with torch.no_grad(), cuda.device(process_id):
+        model.cuda()
+        model.eval()
+        for iter_, pack in enumerate(tqdm(data_loader, position=process_id, desc=f'[PID{process_id}]')):
+            img_name = pack['name'][0] # Img_id->str
+            label = pack['label'][0]   # image-level label->Torch.Tensor [1]
+            size = pack['size']        # image size->Torch.tensor [2]
+            valid_cat = torch.nonzero(label)[:, 0] # get validate class->[#val_cls]
+            strided_size = imutils.get_strided_size(size, 4)# floor(W'/4 x H'/4)
+            
+            if valid_cat.shape[0] == 0: # No validate category
+                np.save(osp.join(args.cam_out_dir, img_name + '.npy'), dict())
+                continue
+            try:
+                outputs = []
+                for img in pack['img']:
+                    out = model(resize_input_minbound(
+                            x=img[0].cuda(non_blocking=True),
+                            min_size=args.min_size)) # img[0]->[(2, 3, H', W')]
+                    outputs.append(out)
+            except RuntimeError as e:
+                if "out of memory" in str(e):
+                    out = model(resize_input_minbound(
+                            x=img[0].cuda(non_blocking=True),
+                            min_size=int(0.5 * args.min_size))) # img[0]->[(2, 3, H', W')]
+                    outputs.append(out)
+                else:
+                    raise e
+            #========== strided cam list ====================================================#
+            strided_cam_list = [# upsample all multi-scale CAMs to strided_size: (W'/4 x H'/4)
+                F.interpolate(cam, strided_size, mode='bilinear', align_corners=False)
+                for cam in outputs]
+            strided_cam_list = flip_cam(strided_cam_list)
+            strided_cam = torch.sum(torch.stack(strided_cam_list), 0) # (20, W'/4, H'/4)
+            #======== high resolution cam list ===============================================#
+            highres_cam_list = [# upsample all multi-scale CAMs to strided_up_size->floor(W^, H^)
+                F.interpolate(cam, size, mode='bilinear', align_corners=False)
+                for cam in outputs] # ->[(2, 20, W, H)
+            highres_cam_list = flip_cam(highres_cam_list)
+            highres_cam = torch.sum(torch.stack(highres_cam_list, 0), 0) # (20, W, H)
+
+            strided_cam = strided_cam[valid_cat]
+            strided_cam = normalize_cam(strided_cam)
+            
+            highres_cam = highres_cam[valid_cat]
+            highres_cam = normalize_cam(highres_cam)
+            
+            cam_dict = {"keys": valid_cat, "cam": strided_cam.cpu(), "high_res": highres_cam.cpu().numpy()}
+            np.save(osp.join(f"{args.cam_out_dir}_irn", img_name + '.npy'), cam_dict) 
+            
+            if process_id == n_gpus - 1 and iter % (len(databin) // 20) == 0:
+                print("%d " % ((5*iter+1)//(len(databin) // 20)), end='')
+
+
 def _work_testset(process_id, model, dataset, args):
     databin = dataset[process_id]
     n_gpus = torch.cuda.device_count()
@@ -236,46 +298,52 @@ def _work_testset(process_id, model, dataset, args):
         num_workers=args.num_workers // n_gpus,
         pin_memory=True)
     
-    bg_score = 0.5
     with torch.no_grad(), cuda.device(process_id):
         model.cuda()
         model.eval()
         for iter_, pack in enumerate(tqdm(data_loader, position=process_id, desc=f'[PID{process_id}]')):
             img_name = pack['name'][0] # Img_id->str
             size = pack['size']        # image size->Torch.tensor [2]
-            pseudo_labels, outputs = [], []
+            cls_labels, patch_labels, outputs = [], [], []
             
-            if os.path.exists(osp.join(args.cam_out_dir, img_name + '.npy')):
-                continue
-
+            # if os.path.exists(osp.join(args.cam_out_dir, img_name + '.npy')):
+            #     continue
             try:
                 for img in pack['img']:
-                    pseudo_label, output_cam = model(
-                        resize_input_minbound(x=img[0].cuda(non_blocking=True), min_size=args.min_size),
-                        return_cls=True,
-                        bg_score=bg_score) # img[0]->[(2, 3, H', W')]
-                    pseudo_labels.append(pseudo_label)
+                    cls_label, patch_label, output_cam = model.forward_with_label(
+                        resize_input_minbound(
+                            x=img[0].cuda(non_blocking=True),
+                            min_size=args.min_size),
+                        ) # img[0]->[(2, 3, H', W')]
+                    cls_labels.append(cls_label)
+                    patch_labels.append(patch_label)
                     outputs.append(output_cam)
                     
             except RuntimeError as e:
                 print(e)
                 if "out of memory" in str(e):
                     for img in pack['img']:
-                        pseudo_label, output_cam = model(
+                        cls_label, patch_label, output_cam = model.forward_with_label(
                             resize_input_minbound(
                                 x=img[0].cuda(non_blocking=True), 
-                                min_size=int(args.min_size//2)),
-                            return_cls=True,
-                            bg_score=bg_score) # img[0]->[(2, 3, H', W')]
-                        pseudo_labels.append(pseudo_label)
+                                min_size=int(args.min_size * 0.5)),
+                            ) # img[0]->[(2, 3, H', W')]
+                        cls_labels.append(cls_label)
+                        patch_labels.append(patch_label)
                         outputs.append(output_cam)
                 else:
                     raise e
             # print(f'{img_name}, {pseudo_label[0][0]} {patch_label[0][0]}')
             
-            pseudo_label = pseudo_labels[0] # choose the first scale
-            pseudo_label = pseudo_label[0] * pseudo_label[1] # combine flip results
-            valid_cat = torch.nonzero(pseudo_label)[:, 0]
+            cls_label = cls_labels[0]     # choose the first scale
+            patch_label = patch_labels[0] # choose the first scale
+            result_label = cls_label[0] * cls_label[1] * patch_label[0] * patch_label[1] # combine flip results
+            # pseudo_labels = cls_labels + patch_labels
+            # result_label = pseudo_labels[0]
+            # # for all rest tensors we do 'and' operation
+            # for label in pseudo_labels[1:]:
+            #     result_label = torch.bitwise_and(result_label, label)
+            valid_cat = torch.nonzero(result_label)[:, 0]
             
             if valid_cat.shape[0] == 0: # No validate category
                 np.save(osp.join(args.cam_out_dir, img_name + '.npy'), dict())
@@ -334,7 +402,15 @@ if __name__ == '__main__':
     n_gpus = torch.cuda.device_count()
     dataset = torchutils.split_dataset(dataset, n_gpus)
     
-    function = _work_trainset if 'train' in args.train_list else _work_testset
+    cam_type = 'psa'
+    if 'train' in args.train_list:
+        if cam_type == 'psa':
+            function = _work_trainset_psa
+        else:
+            function = _work_trainset_irn
+    else: 
+        function = _work_testset
+        
     print(f'Using function {function}')
     
     print('[ ', end='')
