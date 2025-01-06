@@ -36,7 +36,7 @@ class MCTAdapter(MCTViT):
         self.num_patches = self.Hp * self.Wp
         self.spatial_dims = [self.embed_dim] * self.stages
 
-        self.dilations = [4, 3, 2, 1]  # [4, 3, 2, 1]
+        self.dilations = [1, 1, 1, 1]  # [4, 3, 2, 1]
         self.num_knn = [18, 15, 12, 9] # [18, 15, 12, 9]
         self.spatial_scales = [16, 16, 32, 64]
 
@@ -318,10 +318,11 @@ class MCTAdapter(MCTViT):
 
 class MCTAdapterCam(MCTAdapter):
     """Class Activation Map variant of MCTA for visualization purposes."""
-    def __init__(self, *args, cls_ind=4, bg_score=0.4, **kwargs):
+    def __init__(self, *args, cls_ind=4, att_ind=8, bg_score=0.4, **kwargs):
         """fuse_layers: The attention of the last L layers to fuse"""
         super().__init__(*args, **kwargs)
         self.cls_ind = cls_ind # fusion layer for mixing class-to-patch
+        self.att_ind = att_ind
         self.bg_score = bg_score
 
     @torch.no_grad()
@@ -340,14 +341,14 @@ class MCTAdapterCam(MCTAdapter):
             cams = F.relu(cams)         # With ReLU Activation
 
         else:
-            attn_maps = attn_weights[-self.cls_ind:].mean(0)         # B x (K+Np) x (K+Np)
+            attn_maps = attn_weights[-self.cls_ind:].mean(0) # B x (K+Np) x (K+Np)
             cls2pat = attn_maps[:, :nc, nc:].reshape([b, nc, hp, wp]) # B x K x Hp x Wp
             patch_cam = tokens.detach().clone()   # B x K x Hp x Wp
             patch_cam = F.relu(patch_cam)         # With ReLU Activation
             cams = torch.pow(cls2pat * patch_cam, 1/2)
 
         # Apply pat2pat affinity refinement
-        pat2pat = attn_weights[:, :, nc:, nc:] #  L x B x Np x Np
+        pat2pat = attn_weights[-self.att_ind:, :, nc:, nc:] #  L x B x Np x Np
         pat2pat = torch.sum(pat2pat, dim=0)      # B x Np x Np
         cams = torch.matmul(
                 pat2pat.unsqueeze(1),    # B x 1 x Np x Np
@@ -427,7 +428,6 @@ class MCTAdapterCam(MCTAdapter):
 
         cls_logits = last_cls_tokens.mean(-1) # [B, K]
         x_logits = self.gwr_pooling_top_k(x_out)
-        
         
         cls_label = torch.ones(b, nc).to(x.device)
         cls_label[cls_logits <= 0] = 0

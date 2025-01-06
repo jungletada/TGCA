@@ -43,7 +43,7 @@ class MCTformerPlus(VisionTransformer):
 
         patch_pos_embed = nn.functional.interpolate(
                 patch_pos_embed.reshape(1, int(math.sqrt(N)), int(math.sqrt(N)), dim).permute(0, 3, 1, 2),
-                scale_factor=(w0 / math.sqrt(N), h0 / math.sqrt(N)),
+                size=(w0, h0),
                 mode='bicubic')
 
         assert int(w0) == patch_pos_embed.shape[-2] and int(h0) == patch_pos_embed.shape[-1]
@@ -63,7 +63,6 @@ class MCTformerPlus(VisionTransformer):
         cls_tokens = cls_tokens + self.pos_embed_cls
 
         x = torch.cat((cls_tokens, x), dim=1)
-
         x = self.pos_drop(x)
         attn_weights = []
         all_x_cls = []
@@ -74,7 +73,15 @@ class MCTformerPlus(VisionTransformer):
             all_x_cls.append(x[:, :self.num_classes])
             
         return x[:, 0:self.num_classes], x[:, self.num_classes:], attn_weights, all_x_cls
-        
+    
+    def gwrp(self, x_patch):
+        x_patch_flattened = x_patch.view(x_patch.shape[0], x_patch.shape[1], -1).permute(0, 2, 1)
+        sorted_patch_token, indices = torch.sort(x_patch_flattened, -2, descending=True)
+        weights = torch.logspace(start=0, end=x_patch_flattened.size(-2) - 1,
+                                  steps=x_patch_flattened.size(-2), base=self.decay_parameter).cuda()
+        x_patch_logits = torch.sum(sorted_patch_token * weights.unsqueeze(0).unsqueeze(-1), dim=-2) / weights.sum()
+        return x_patch_logits
+
     def forward(self, x):
         w, h = x.shape[2:]
         x_cls, x_patch, _, all_x_cls = self.forward_features(x)
@@ -113,14 +120,15 @@ class MCTformerPlusCam(MCTformerPlus):
         """
         super().__init__(decay_parameter, input_size, *args, **kwargs)
         self.n_layers = 3
-        
+    
+    @torch.no_grad()
     def get_cam(self, x_patch, attn_weights):
         feature_map = x_patch.detach().clone()  # B * C * 14 * 14
         feature_map = F.relu(feature_map)
         n, c, h, w = feature_map.shape
         
-        cls2pat = attn_weights[-self.n_layers:].mean(0)[:, 0:self.num_classes, self.num_classes:].reshape([
-            n, c, h, w])
+        cls2pat = attn_weights[-self.n_layers:].mean(0)\
+            [:, 0:self.num_classes, self.num_classes:].reshape([n, c, h, w])
         patch_attn = attn_weights[:, :, self.num_classes:, self.num_classes:]
 
         cams = cls2pat * feature_map  # B * C * 14 * 14
@@ -134,6 +142,7 @@ class MCTformerPlusCam(MCTformerPlus):
         ).reshape(B, self.num_classes, hp, wp)
         return cams
     
+    @torch.no_grad()
     def get_cls2pat(self, x_patch, attn_weights):
         feature_map = x_patch.detach().clone()  # B * C * 14 * 14
         feature_map = F.relu(feature_map)
@@ -141,14 +150,42 @@ class MCTformerPlusCam(MCTformerPlus):
         cls2pat = attn_weights[-self.n_layers:].mean(0)[:, 0:self.num_classes, self.num_classes:].reshape([
             n, c, h, w])
         return cls2pat
+    
+    @torch.no_grad()
+    def forward_with_label(self, x):
+        b, _, w, h = x.shape
+        x_cls_last, x_patch, attn_weights, _ = self.forward_features(x)
+        cls_logits = x_cls_last.mean(-1) # [B, K]
+        n, p, c = x_patch.shape
+        if w != h:
+            w0 = w // self.patch_embed.patch_size[0]
+            h0 = h // self.patch_embed.patch_size[0]
+            x_patch = torch.reshape(x_patch, [n, w0, h0, c])
+        else:
+            x_patch = torch.reshape(x_patch, [n, int(p ** 0.5), int(p ** 0.5), c])
         
+        x_patch = x_patch.permute([0, 3, 1, 2]).contiguous()
+        x_patch = self.head(x_patch)
+
+        attn_weights = torch.mean(
+            torch.stack(attn_weights), dim=2).detach()
+        
+        cls_label = torch.ones(b, self.num_classes).to(x.device)
+        cls_label[cls_logits <= 0] = 0
+
+        x_logits = self.gwrp(x_patch)
+        patch_label = torch.ones(b, self.num_classes).to(x.device)
+        patch_label[x_logits <= 0] = 0
+        outputs = self.get_cam(x_patch, attn_weights)
+
+        return cls_label, patch_label, outputs
+    
+    @torch.no_grad()
     def forward(self, x, return_attn=False, return_token=False):
         w, h = x.shape[2:]
         x_cls_last, x_patch, attn_weights, class_embeddings = self.forward_features(x)
-        
         # 12 * B * H * N * N -> 12 * B * N * N
         attn_weights = torch.mean(torch.stack(attn_weights), dim=2)
-        
         if return_attn:
             return attn_weights
         if return_token:
