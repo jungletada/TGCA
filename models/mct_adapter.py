@@ -7,9 +7,8 @@ import torch.nn.functional as F
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
 
-from models.adapter_modules import DownConv, SemanticAttnModule
-from models.adapter_modules import SpatialPriorGNN, nchw2nlc, nlc2nchw
-from models.mct_vit import MCTViT, Block, _cfg
+from models.mct_vit import MCTViT, _cfg
+from models.adapter_modules import DownConv, SemanticAttnModule, SpatialPriorGNN
 
 
 __all__ = ['mcta']
@@ -36,7 +35,7 @@ class MCTAdapter(MCTViT):
         self.num_patches = self.Hp * self.Wp
         self.spatial_dims = [self.embed_dim] * self.stages
 
-        self.dilations = [1, 1, 1, 1]  # [4, 3, 2, 1]
+        self.dilations = [4, 3, 2, 1]  # [4, 3, 2, 1]
         self.num_knn = [18, 15, 12, 9] # [18, 15, 12, 9]
         self.spatial_scales = [16, 16, 32, 64]
 
@@ -56,12 +55,6 @@ class MCTAdapter(MCTViT):
         self.decay_parameter = decay_parameter
         self.spatial_sizes = [(math.ceil(img_size[0] / scale), math.ceil(img_size[1] / scale))
                               for scale in self.spatial_scales]
-        self.sptial_pos_embed = [nn.Parameter(
-            torch.zeros(1, self.spatial_dims[i], self.spatial_sizes[i][0], self.spatial_sizes[i][1]))
-                for i in range(self.stages)]
-        
-        for i in range(self.stages):
-            trunc_normal_(self.sptial_pos_embed[i], std=.02)
             
         self.cls_token = nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim))
         self.pos_embed_cls = nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim))
@@ -103,14 +96,7 @@ class MCTAdapter(MCTViT):
             nn.Conv2d(self.embed_dim * 5, fuse_dim, 1),
             nn.BatchNorm2d(fuse_dim),
             nn.GELU())
-        
-        # self.fuse_block = Block(
-        #     dim=self.embed_dim,
-        #     num_heads=self.num_heads,
-        #     mlp_ratio=4,
-        #     drop_path=self.dpr[-1],
-        #     num_classes=self.num_classes)
-        
+
         self.head = nn.Conv2d(
             fuse_dim, self.num_classes, kernel_size=3, stride=1, padding=1)
  
@@ -130,21 +116,6 @@ class MCTAdapter(MCTViT):
             align_corners=False)
         patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
         return patch_pos_embed
-
-    def interpolate_spatial_pos_encoding(self, x_spatial):
-        """
-        Interpolate position encoding for spatial tokens
-        """
-        # out_sizes = [((H+1)//scale, (W+1)//scale) for scale in self.spatial_scales]
-        spatial_pos_embed = []
-        for i in range(self.stages):
-            spatial_pos_embed.append(
-                F.interpolate(
-                    self.sptial_pos_embed[i],
-                    size=x_spatial[i].shape[2:],
-                    mode='bilinear',
-                    align_corners=False))
-        return spatial_pos_embed
         
     def build_class_tokens(self, x):
         """
@@ -212,13 +183,8 @@ class MCTAdapter(MCTViT):
         if not self.training:
             pos_embed_pat = self.interpolate_pos_encoding(x, token_size=token_size)
             x = x + pos_embed_pat
-            sptial_pos_embed = self.interpolate_spatial_pos_encoding(x_branc)
-            for i in range(self.stages):
-                x_branc[i] += sptial_pos_embed[i].to(x.device)
         else:
             x = x + self.pos_embed_pat
-            for i in range(self.stages):
-                x_branc[i] += self.sptial_pos_embed[i].to(x.device)
 
         nn_cls_tokens = self.cls_token.expand(b, -1, -1) + self.pos_embed_cls
         cls_tokens = self.build_class_tokens(x_branc) + nn_cls_tokens

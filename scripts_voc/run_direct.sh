@@ -9,8 +9,8 @@ TRAINID=${DATACONFIG}/train_id.txt
 VALID=${DATACONFIG}/val_id.txt
 
 INPUTSIZE=448
-MODELNAME=mctformerplus
-WORKDIR=results_voc/mctformerplus
+MODELNAME=mcta
+WORKDIR=results_voc/mcta
 
 SEGDIR=cam_mask_val
 CRFDIR=crf_mask_val
@@ -26,7 +26,7 @@ python make_cam.py \
     --input_size ${INPUTSIZE} \
     --cam_out_dir ${SEGDIR} \
     --scales 1.0,0.75,1.25 \
-    --checkpoint results_voc/mctformerplus/mctformerplus_6887.pth \
+    --checkpoint results_voc/mcta/mcta-deit-small-voc-7370.pth \
 
 # ============= Evaluate Class Activation Maps No CRF =============#
 python eval_cam_crf.py \
