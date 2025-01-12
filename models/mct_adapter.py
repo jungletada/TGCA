@@ -35,9 +35,9 @@ class MCTAdapter(MCTViT):
         self.num_patches = self.Hp * self.Wp
         self.spatial_dims = [self.embed_dim] * self.stages
 
-        self.dilations = [4, 3, 2, 1]  # [4, 3, 2, 1]
-        self.num_knn = [18, 15, 12, 9] # [18, 15, 12, 9]
-        self.spatial_scales = [16, 16, 32, 64]
+        self.dilations = (1, 1, 1, 1)  # [4, 3, 2, 1]
+        self.num_knn = (18, 15, 12, 9) # [18, 15, 12, 9]
+        self.spatial_scales = (16, 16, 32, 64)
 
         self.spatial_strides = [
             self.spatial_scales[i+1] // self.spatial_scales[i]
