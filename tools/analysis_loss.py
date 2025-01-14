@@ -2,8 +2,8 @@ import re
 import pandas as pd
 
 # Load and read the file content
-modelname = 'msgformer_448'
-file_path = f'results_voc/{modelname}/train_cam_VOC12.log'
+modelname = 'mcta'
+file_path = 'results_voc/mcta/log_dir/train-20250105-1639-VOC12.log'
 with open(file_path, 'r') as file:
     log_data = file.readlines()
 
