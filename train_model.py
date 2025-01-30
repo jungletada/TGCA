@@ -307,12 +307,12 @@ def main(args):
     linear_scaled_lr = args.lr * args.batch_per_gpu * dist.get_world_size() / 512.0
     args.lr = linear_scaled_lr
 
-    # optimizer = create_optimizer(args, model)
-    param_groups = model.get_parameters_group()
-    optimizer = torch.optim.AdamW(
-        [{'params':param_groups[0], 'lr':args.lr},
-         {'params':param_groups[1], 'lr':5 * args.lr}],
-         betas=(0.9, 0.999), eps=1e-08, weight_decay=0.01,)
+    optimizer = create_optimizer(args, model)
+    # param_groups = model.get_parameters_group()
+    # optimizer = torch.optim.AdamW(
+    #     [{'params':param_groups[0], 'lr':args.lr},
+    #      {'params':param_groups[1], 'lr':5 * args.lr}],
+    #      betas=(0.9, 0.999), eps=1e-08, weight_decay=0.01,)
     
     loss_scaler = NativeScaler()
 

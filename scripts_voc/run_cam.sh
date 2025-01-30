@@ -1,6 +1,6 @@
 #!/bin/bash
-GPU=0,1
-NODES=2
+GPU=0
+NODES=1
 
 DATASET=VOC12
 DATACONFIG=data/VOCdevkit/VOC2012/ImageLists
@@ -24,9 +24,9 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --model ${MODELNAME} \
     --train_list ${TRAINAUGID} \
     --work_space ${WORKDIR} \
-    --epoch 30 \
+    --epoch 26 \
     --lr 1e-3 \
-    --batch_per_gpu 19 \
+    --batch_per_gpu 40 \
     
 # ============= Make Class Activation Maps of Model ============= #
 python make_cam.py \
