@@ -12,9 +12,8 @@ INPUTSIZE=448
 MODELNAME=mcta
 WORKDIR=results_voc/mcta
 
-SEGDIR=cam_mask_train
-CRFDIR=crf_mask_train
-
+SEGTRAINDIR=cam_mask_train
+SEGVALDIR=cam_mask_val
 CUDA_VISIBLE_DEVICES=${GPU}
 
 #============= Train Model ============= #
@@ -25,7 +24,8 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --model ${MODELNAME} \
     --train_list ${TRAINAUGID} \
     --work_space ${WORKDIR} \
-    --epoch 26 \
+    --epoch 30 \
+    --lr 1e-3 \
     --batch_per_gpu 19 \
     
 # ============= Make Class Activation Maps of Model ============= #
@@ -33,7 +33,7 @@ python make_cam.py \
     --dataset ${DATASET} \
     --model ${MODELNAME} \
     --work_space ${WORKDIR} \
-    --cam_out_dir ${SEGDIR} \
+    --cam_out_dir ${SEGTRAINDIR} \
     --train_list ${TRAINID} \
     --input_size ${INPUTSIZE} \
     --checkpoint results_voc/mcta/mcta_best.pth \
@@ -43,21 +43,24 @@ python eval_cam_crf.py \
     --dataset ${DATASET} \
     --work_space ${WORKDIR} \
     --id_list ${TRAINID} \
-    --eval_cam_dir ${SEGDIR} \
+    --eval_cam_dir ${SEGTRAINDIR} \
     --curve_threshold \
 
-# # ============= Evaluate Class Activation Maps =============#
+# # ============= Make Class Activation Maps of Model ============= #
+# python make_cam.py \
+#     --dataset ${DATASET} \
+#     --model ${MODELNAME} \
+#     --work_space ${WORKDIR} \
+#     --train_list ${VALID} \
+#     --input_size ${INPUTSIZE} \
+#     --cam_out_dir ${SEGVALDIR} \
+#     --scales 1.0,0.75,1.25 \
+#     --checkpoint results_voc/mcta/mcta-deit-small-voc-7370.pth \
+
+# # ============= Evaluate Class Activation Maps No CRF =============#
 # python eval_cam_crf.py \
-#     --use_crf \
 #     --dataset ${DATASET} \
 #     --work_space ${WORKDIR} \
-#     --id_list ${TRAINID} \
-#     --eval_cam_dir ${SEGDIR} \
-#     --crf_cam_dir ${CRFDIR} \
-#     --alpha 1.2 \
-
-# #============= Evaluate =============#
-# python steps_voc/eval_sem_seg.py \
-#     --work_space ${WORKDIR} \
-#     --seg_out_dir ${CRFDIR} \
-#     --infer_list ${TRAINID} \
+#     --eval_cam_dir ${SEGVALDIR} \
+#     --id_list ${VALID} \
+#     --curve_threshold \

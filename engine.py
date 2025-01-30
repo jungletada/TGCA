@@ -52,6 +52,14 @@ def train_one_epoch_multioutputs(args, model, data_loader, optimizer, device,
         set_training_mode: Boolean to set training mode.
         rank: Rank of the current process (for distributed training).
     """
+    
+    def get_cls_weight_linear(cls_weight_init, epoch, warmup_epochs, total_epochs):
+        if epoch <= warmup_epochs:
+            return cls_weight_init
+        current_epoch = epoch - warmup_epochs
+        c_total_epochs = total_epochs - warmup_epochs
+        return cls_weight_init - (cls_weight_init - 1.0) * (current_epoch / c_total_epochs)
+    
     print_freq = 10
     model.train(set_training_mode)
     criterion = nn.MultiLabelSoftMarginLoss()
@@ -72,8 +80,10 @@ def train_one_epoch_multioutputs(args, model, data_loader, optimizer, device,
             
             patch_loss = criterion(outputs[1], targets)
             metric_logger.update(pat_loss=patch_loss.item())
-            
-            total_loss = args.cls_weight * cls_loss + patch_loss
+
+            cls_weight = get_cls_weight_linear(
+                args.cls_weight, epoch, args.warmup_epochs-1, args.epochs - 1)
+            total_loss = cls_weight * cls_loss + patch_loss
             
         loss_value = total_loss.item()
         if not math.isfinite(loss_value):

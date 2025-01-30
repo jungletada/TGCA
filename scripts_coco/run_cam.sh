@@ -1,6 +1,6 @@
 #!/bin/bash
-GPU=0
-NODES=1
+GPU=0,1
+NODES=2
 DATASET=COCO
 DATACONFIG=data/MSCOCO/ImageLists
 
@@ -9,8 +9,8 @@ VALID=${DATACONFIG}/val_id.txt
 
 INPUTSIZE=448
 
-SEGDIR=cam_mask_train
-CRFDIR=crf_mask_train
+SEGTRAINDIR=cam_mask_train
+SEGVALDIR=cam_mask_val
 
 MODELNAME=mcta
 WORKDIR=results_coco/mcta
@@ -25,16 +25,17 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --model ${MODELNAME} \
     --train_list ${TRAINID} \
     --work_space ${WORKDIR} \
-    --epoch 35 \
+    --epoch 40 \
     --warmup-epochs 10 \
-    --batch_per_gpu 40 \
+    --batch_per_gpu 20 \
+    --lr 1e-4 \
     
 # ============= Make Class Activation Maps of Model=============#
 python make_cam.py \
     --dataset ${DATASET} \
     --model ${MODELNAME} \
     --work_space ${WORKDIR} \
-    --cam_out_dir ${SEGDIR} \
+    --cam_out_dir ${SEGTRAINDIR} \
     --train_list ${TRAINID} \
     --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
     # --checkpoint results_coco/mcta/mcta-deit-small-coco-4627.pth \
@@ -43,6 +44,7 @@ python make_cam.py \
 python eval_cam_crf.py \
     --dataset ${DATASET} \
     --work_space ${WORKDIR} \
-    --eval_cam_dir ${SEGDIR} \
+    --eval_cam_dir ${SEGTRAINDIR} \
     --id_list ${TRAINID} \
     --curve_threshold \
+

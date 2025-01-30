@@ -22,6 +22,7 @@ sys.path.append(".")
 from misc import torchutils
 from utils import create_cam_model
 from models.adapter_modules import resize_input_minbound
+from tools.cam_utils import normalize_cam, flip_cam
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -37,7 +38,7 @@ def get_args_parser():
     parser.add_argument('--work_space', default='results_voc/mcta', type=str, help='work space')
     parser.add_argument('--model', default='mcta', type=str, metavar='MODEL',
                         help='Name of model to train')
-    parser.add_argument('--checkpoint', default='results_voc/mcta/mcta-deit-small-voc-7458.pth',
+    parser.add_argument('--checkpoint', default='results_voc/mcta/mcta-deit-small-voc-7390.pth',
                         help='checkpoint for generating maps')
     parser.add_argument('--csv_path', default='attention_map_score.csv', type=str,
                         help='evaluation csv for cosine similarity.')
@@ -65,27 +66,6 @@ def get_args_parser():
     parser.add_argument("--log_dir", default="log_dir", type=str)
     return parser.parse_args()
                                                                                                                         
-        
-def normalize_cam(cam_mask):
-    """Normalize the CAM mask."""
-    for i in range(cam_mask.size(0)):
-        channel = cam_mask[i]
-        min_val = torch.min(channel)
-        max_val = torch.max(channel)
-        cam_mask[i] = (channel - min_val) / (max_val - min_val + 1e-8)
-    
-    return cam_mask
-
-
-def flip_cam(cam_list):
-    """Flip cam with scales in the given cam_list."""
-    for i, cam_scale in enumerate(cam_list):
-        group1, group2 = cam_scale[0], cam_scale[1]
-        group2_flipped = torch.flip(group2, dims=[2])
-        cam_list[i] = torch.stack([group1, group2_flipped])  
-    cam_list = [torch.sum(cam, dim=0) for cam in cam_list]
-    return cam_list
-
 
 def draw_heat_map(attn_maps, args, img_name, task, n_dim=2):
     """Draw heat maps from attention maps.
@@ -97,7 +77,7 @@ def draw_heat_map(attn_maps, args, img_name, task, n_dim=2):
         n_dim (int): The number of dimensions of the attention maps (2D or 3D).
     """
     
-    cmap = "RdBu_r"
+    cmap = "RdBu"
     if n_dim == 3:
         for layer in range(attn_maps.shape[0]):
             plt.figure(figsize=(20, 20))
@@ -202,20 +182,20 @@ def _visualize_attention(model, dataset, args):
                 # results = calculate_class_score(all_cls_tokens, label.cuda())
                 # rounded_values = [round(item.item(), 3) for item in results]
                 # writer.writerow(rounded_values)
-                task = 'cls_token'
+                task = 'all'
                 outputs = []
                 for img in pack['img']:
                     inputs = img[0].cuda(non_blocking=True)
-                    output = model.forward(inputs, return_type=task)
+                    output = model.forward_ablation(inputs, return_type=task)
                     outputs.append(output)
-                # attn_maps = outputs[0][:, 0, :, :].cpu().numpy()
-                # attn_maps = np.sum(attn_maps, axis=0) # sum over all layer
-                # draw_heat_map(attn_maps, args, img_name, task=task, n_dim=2)
-                cls_token = F.relu(outputs[0][0, :, :].mean(dim=-1, keepdim=True))
-                cls_x_cls = cls_token @ cls_token.T
-                gt_cls_x_cls = label.unsqueeze(-1) @ label.unsqueeze(0)
-                draw_heat_map(cls_x_cls.cpu().numpy(), args, img_name, task=task, n_dim=2)
-                draw_heat_map(gt_cls_x_cls.cpu().numpy(), args, img_name, task=f'{task}_gt', n_dim=2)
+                attn_maps = outputs[0][:, 0, :, :].cpu().numpy()
+                attn_maps = np.sum(attn_maps, axis=0) # sum over all layer
+                draw_heat_map(attn_maps, args, img_name, task=task, n_dim=2)
+                # cls_token = F.relu(outputs[0][0, :, :].mean(dim=-1, keepdim=True))
+                # cls_x_cls = cls_token @ cls_token.T
+                # gt_cls_x_cls = label.unsqueeze(-1) @ label.unsqueeze(0)
+                # draw_heat_map(cls_x_cls.cpu().numpy(), args, img_name, task=task, n_dim=2)
+                # draw_heat_map(gt_cls_x_cls.cpu().numpy(), args, img_name, task=f'{task}_gt', n_dim=2)
                 # Generate heatmaps for each layer's attention map
                 if iter_ % (len(dataset) // 20) == 0:
                     print("%d " % ((5*iter_+1) // (len(dataset) // 20)), end='')
@@ -317,20 +297,20 @@ def _eval_attention_activation(model, dataset, args):
         
         
 def get_sum_of_atttention_weights(attn_maps, nc):
-        """
-        attn_maps: (L, N, N), where L: number of layers, N: (number of classes + number of patches)
-        
-        """
-        all_cls_attn = []
-        all_pat_attn = []
-        L, N, _ = attn_maps.shape
-        x2cls, x2pat = attn_maps.split((nc, N-nc), dim=-1)
+    """
+    attn_maps: (L, N, N), where L: number of layers, N: (number of classes + number of patches)
+    
+    """
+    all_cls_attn = []
+    all_pat_attn = []
+    L, N, _ = attn_maps.shape
+    x2cls, x2pat = attn_maps.split((nc, N-nc), dim=-1)
 
-        sum_cls = x2cls.sum(dim=-1).mean(dim=-1).cpu().numpy()
-        sum_pat = x2pat.sum(dim=-1).mean(dim=-1).cpu().numpy()
-        all_cls_attn.append(sum_cls)
-        all_pat_attn.append(sum_pat)
-        return all_cls_attn, all_pat_attn
+    sum_cls = x2cls.sum(dim=-1).mean(dim=-1).cpu().numpy()
+    sum_pat = x2pat.sum(dim=-1).mean(dim=-1).cpu().numpy()
+    all_cls_attn.append(sum_cls)
+    all_pat_attn.append(sum_pat)
+    return all_cls_attn, all_pat_attn
     
 
 if __name__ == '__main__':

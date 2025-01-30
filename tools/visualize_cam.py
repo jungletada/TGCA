@@ -18,7 +18,8 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-CAT_LIST = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair','cow', 'diningtable', 'dog', 'horse',
+CAT_LIST = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 
+            'cat', 'chair','cow', 'diningtable', 'dog', 'horse',
             'motorbike', 'person', 'pottedplant','sheep', 'sofa', 'train','tvmonitor']
 
 
@@ -29,7 +30,7 @@ def get_args_parser():
     parser.add_argument('--model', default='deit_small_mctgformer', type=str, metavar='MODEL',
                         help='Name of model to train')
     parser.add_argument('--checkpoint', default='', help='checkpoint for generating maps')
-    parser.add_argument('--input_size', default=224, type=int, help='images input size')
+    parser.add_argument('--input_size', default=448, type=int, help='images input size')
     parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
                         help='Dropout rate (default: 0.)')
     parser.add_argument('--drop-path', type=float, default=0.1, metavar='PCT',
@@ -136,7 +137,7 @@ def _work(process_id, model, dataset, args):
           
 if __name__ == '__main__':
     args = get_args_parser()
-    args.vis_cam_dir = os.path.join(args.work_space, args.vis_cam_dir) 
+    args.vis_cam_dir = os.path.join(args.work_space, args.vis_cam_dir)
     os.makedirs(args.vis_cam_dir, exist_ok=True)
     
     from datasets_cam import build_dataset

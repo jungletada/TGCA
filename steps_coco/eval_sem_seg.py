@@ -25,7 +25,7 @@ def run(args):
     
     dataset = COCOSegmentationLabelDataset(
         data_dir=args.mscoco_root,
-        id_list_file=args.infer_list,
+        id_list_file=args.id_list,
         annotation_dir='MaskSets')
     
     num_images = len(dataset)
@@ -83,7 +83,7 @@ if __name__ == '__main__':
     parser.add_argument("--work_space", default="results_coco/mcta", type=str)
     parser.add_argument("--mscoco_root", default='data/MSCOCO', type=str,help="Path to MSCOCO")
     parser.add_argument('--seg_out_dir', default='pseudo_mask', help='pseudo_mask directory')
-    parser.add_argument('--infer_list', default='val_id.txt', help='list file path')
+    parser.add_argument('--id_list', default='val_id.txt', help='list file path')
     args = parser.parse_args()
     args.seg_out_dir = osp.join(args.work_space, args.seg_out_dir)
     run(args=args)

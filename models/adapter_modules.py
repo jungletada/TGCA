@@ -19,7 +19,7 @@ def nchw2nlc(x):
     return x  
     
 
-def resize_input_minbound(x, min_size=336):
+def resize_input_minbound(x, min_size=448):
     """
         Wrapper Around resize input
     """
@@ -55,6 +55,25 @@ def resize_input_maxbound(x, max_size=448):
     
     resized_x = F.interpolate(x, size=(new_H, new_W), mode='bilinear', align_corners=False)
     return resized_x
+
+
+def split_weighted_softmax(attn, nc, weights=(1, 1)):
+    """
+    Applies weighted softmax separately to class and patch attention scores.
+    
+    Args:
+        attn (torch.Tensor): Input attention tensor
+        nc (int): Number of classes to split on
+        weights (tuple): Weights for class and patch attention (default: (1,1))
+    
+    Returns:
+        torch.Tensor: Weighted softmax attention scores
+    """
+    attn_cls, attn_pat = torch.split(attn, [nc, attn.shape[-1] - nc], dim=-1)
+    attn_cls = attn_cls.softmax(dim=-1) * weights[0]
+    attn_pat = attn_pat.softmax(dim=-1) * weights[1]
+    attn = torch.cat((attn_cls, attn_pat), dim=-1)
+    return attn
 
 
 class DownConv(nn.Module):
@@ -221,6 +240,7 @@ class SpatialPriorModule(nn.Module):
 
 
 class SpatialPriorGNN(nn.Module):
+
     def __init__(self,
                  inplanes=96,
                  embed_dim=384,
@@ -334,7 +354,7 @@ class CrossAttention(nn.Module):
     """
     Cross-Attention for spatial-backbone tokening mixing
     """
-    def __init__(self, query_dim, key_dim, num_classes=20, num_heads=8, qkv_bias=False, 
+    def __init__(self, query_dim, key_dim, num_classes=20, num_heads=8, qkv_bias=False,
                  qk_scale=None, attn_drop=0., proj_drop=0., mask_ratio=0.3):
         super().__init__()
         self.num_heads = num_heads
@@ -350,35 +370,31 @@ class CrossAttention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, query_dim)
         self.proj_drop = nn.Dropout(proj_drop)
-        self.Cls = num_classes
+        self.nc = num_classes
 
     def forward(self, input_query, input_key):
         B, Nt, _ = input_query.shape
         N = input_key.shape[1]
         # Concat class tokens to query
-        cls_tokens = self.proj_cls(input_key[:, :self.Cls, :])
+        cls_tokens = self.proj_cls(input_key[:, :self.nc, :])
         input_query = self.proj_q(input_query)
         input_query = torch.cat((cls_tokens, input_query), dim=1)
         q = input_query.reshape(
-            B, (self.Cls+Nt), self.num_heads, self.head_dim).permute(0, 2, 1, 3)
+            B, (self.nc+Nt), self.num_heads, self.head_dim).permute(0, 2, 1, 3)
        
         kv = self.proj_kv(input_key).reshape(
             B, N, 2, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
         k, v = kv[0], kv[1] # B x Nd x (Cls+N) x d
         attn = (q @ k.transpose(-2, -1)) * self.scale  # B x Nd x (Cls+Nt) x (Cls+N)
-        #== Split class and patch tokens ============================================#               
-        attn_cls, attn_pat = torch.split(attn, [self.Cls, N-self.Cls], dim=-1)
-        attn_pat = attn_pat.softmax(dim=-1)
-        attn_cls = attn_cls.softmax(dim=-1)
-        attn = torch.cat((attn_cls, attn_pat), dim=-1)
+        attn = split_weighted_softmax(attn, self.nc)
         #======================================================================#     
         attn = self.attn_drop(attn)
         x = (attn @ v).transpose(1, 2).reshape( # B x Nd x (Cls+Nt) x d
-            B, (self.Cls+Nt), -1)               # B x (Cls+Nt) x Ct
+            B, (self.nc+Nt), -1)               # B x (Cls+Nt) x Ct
         x = self.proj(x)
         x = self.proj_drop(x)
         
-        x = x[:, self.Cls:, :]
+        x = x[:, self.nc:, :]
         return x
 
 
@@ -417,8 +433,7 @@ class SemanticAttnModule(nn.Module):
             mask_ratio=0.,
             qkv_bias=True,
             qk_scale=None,
-            norm_layer=nn.LayerNorm,
-            reallocate=False):
+            norm_layer=nn.LayerNorm):
         super().__init__()
         self.norm1 = norm_layer(query_dim)
         self.norm2 = norm_layer(key_dim)
@@ -444,19 +459,6 @@ class SemanticAttnModule(nn.Module):
             in_features=self.dim,
             hidden_features=self.dim * 4,
             out_features=self.dim)
-        
-        # self.reallocate = reallocate
-        # if reallocate:
-        #     self.gnn_cls2pat = Grapher(
-        #         in_channels=self.nc * num_heads,
-        #         kernel_size=9,
-        #         dilation=1,
-        #         groups=num_heads)
-        #     self.gnn_pat2cls = Grapher(
-        #         in_channels=self.nc * num_heads,
-        #         kernel_size=9,
-        #         dilation=1,
-        #         groups=num_heads)
 
     def forward_attention_gnn(self, input_query, input_key, token_size, spatial_size):
         """
@@ -475,29 +477,7 @@ class SemanticAttnModule(nn.Module):
         # k[:, :, :self.nc, :] = q[:, :, :self.nc, :] # Attn_{qq}
         attn = (q @ k.transpose(-2, -1)) * self.scale  # B x Nd x (Cls+Ni) x (Cls+N)
         #===============================================================#
-        attn_cls, attn_pat = torch.split(attn, [self.nc, N], dim=-1)
-        
-        # if self.reallocate:
-        #     cls2cls, pat2cls = torch.split(attn_cls, [self.nc, Ni], dim=-2)
-        #     pat2cls = pat2cls.permute(0, 2, 1, 3).reshape(
-        #         B, -1, self.num_heads * self.nc).contiguous()
-        #     pat2cls = nlc2nchw(pat2cls, d_size=spatial_size)
-        #     pat2cls = self.gnn_pat2cls(pat2cls)
-        #     pat2cls = nchw2nlc(pat2cls).reshape(
-        #         B, -1, self.num_heads, self.nc).permute(0, 2, 1, 3).contiguous()
-        #     attn_cls = torch.cat((cls2cls, pat2cls), dim=-2)
-            
-        #     cls2pat, pat2pat = torch.split(attn_pat, [self.nc, Ni], dim=-2)
-        #     cls2pat = cls2pat.reshape(
-        #         B, self.num_heads * self.nc, token_size[0], token_size[1]).contiguous()
-        #     cls2pat = self.gnn_cls2pat(cls2pat)
-        #     cls2pat = cls2pat.reshape(
-        #         B, self.num_heads, self.nc, -1).contiguous()
-        #     attn_pat = torch.cat((cls2pat, pat2pat), dim=-2)
-            
-        attn_pat = attn_pat.softmax(dim=-1)
-        attn_cls = attn_cls.softmax(dim=-1)
-        attn = torch.cat((attn_cls, attn_pat), dim=-1)
+        attn = split_weighted_softmax(attn, self.nc)
         # attn = attn.softmax(dim=-1) # traditional softmax
         #===============================================================#
         attn = self.attn_drop(attn)

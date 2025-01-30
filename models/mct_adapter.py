@@ -42,8 +42,8 @@ class MCTAdapter(MCTViT):
         self.spatial_strides = [
             self.spatial_scales[i+1] // self.spatial_scales[i]
             for i in range(len(self.spatial_scales)-1)]
-        
         spt_strides=[self.spatial_scales[0]//4] + self.spatial_strides
+
         self.spatial_prior = SpatialPriorGNN(
             inplanes=96,
             embed_dim=self.embed_dim,
@@ -151,18 +151,14 @@ class MCTAdapter(MCTViT):
         N = Hp * Wp
         flatten_x = x.view(B, C, -1).permute(0, 2, 1)  # B x (Hp x Wp) x K
         sorted_x, _ = torch.sort(flatten_x, dim=-2, descending=True)
-        # Create weights for Top-K values (set to 1)
         top_k_weights = torch.ones(K, device=x.device)  # Weight of 1 for Top-K values
-        # Create weights for the remaining values
         remaining_weights = torch.logspace(
             start=K, end=N-1, steps=N-K, base=self.decay_parameter, device=x.device)
-        # Combine the Top-K and remaining weights
         all_weights = torch.cat((top_k_weights, remaining_weights), dim=0)
-        # Broadcast weights to match the dimensions of sorted_x
+        # all_weights = torch.logspace(
+        #     start=0, end=N-1, steps=N, base=self.decay_parameter, device=x.device)
         weights = all_weights.unsqueeze(0).unsqueeze(-1)  # Shape: 1 x N x 1
-        # Apply the weights to sorted_x and compute the weighted sum
         out = torch.sum(sorted_x * weights, dim=-2) / weights.sum()
-
         return out
 
     def forward_features(self, x):
@@ -271,7 +267,7 @@ class MCTAdapter(MCTViT):
             list: A list containing two lists of parameters.
         """
         groups = [[], []]
-        adapters = ['spatial_prior', 'spatial_fuse', 'proj_cls_embed', 'down_convs', 
+        adapters = ['spatial_prior', 'spatial_fuse', 'proj_cls_embed', 'down_convs',
                     'channel_reduction', 'weights', 'head']
         for name, params in self.named_parameters():
             if any(adapter in name for adapter in adapters):
@@ -284,11 +280,11 @@ class MCTAdapter(MCTViT):
 
 class MCTAdapterCam(MCTAdapter):
     """Class Activation Map variant of MCTA for visualization purposes."""
-    def __init__(self, *args, cls_ind=1, att_ind=12, bg_score=0.4, **kwargs):
+    def __init__(self, *args, cls_ind=3, att_ind=12, bg_score=0.4, **kwargs):
         """fuse_layers: The attention of the last L layers to fuse"""
         super().__init__(*args, **kwargs)
-        self.cls_ind = cls_ind # fusion layer for mixing class-to-patch
-        self.att_ind = att_ind
+        self.cls_ind = cls_ind # fused layer for mixing class-to-patch
+        self.att_ind = att_ind # fused layer for mixing patch-to-patch
         self.bg_score = bg_score
 
     @torch.no_grad()
@@ -313,7 +309,7 @@ class MCTAdapterCam(MCTAdapter):
             patch_cam = F.relu(patch_cam)         # With ReLU Activation
             cams = torch.pow(cls2pat * patch_cam, 1/2)
 
-        # Apply pat2pat affinity refinement
+        # Apply pat2pat affinity refinement 
         pat2pat = attn_weights[-self.att_ind:, :, nc:, nc:] #  L x B x Np x Np
         pat2pat = torch.sum(pat2pat, dim=0)      # B x Np x Np
         cams = torch.matmul(
@@ -452,10 +448,12 @@ class MCTAdapterCam(MCTAdapter):
             return cls2pat
         
         elif return_type == 'pat2cls':
-            pass
+            cls2pat = attn_weights[:, :, nc:, :nc].reshape([-1, b, hp, wp, nc])
+            return cls2pat
         
         elif return_type == 'pat2pat':
-            pass
+            cls2pat = attn_weights[:, :, nc:, nc:]
+            return cls2pat
         
         elif return_type == 'cls_token':
             return last_cls_tokens

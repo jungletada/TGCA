@@ -1,9 +1,12 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from functools import partial
 
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
+from models.adapter_modules import split_weighted_softmax
+
 
 def _cfg(url='', **kwargs):
     return {
@@ -14,6 +17,7 @@ def _cfg(url='', **kwargs):
         'first_conv': 'patch_embed.proj', 'classifier': 'head',
         **kwargs
     }
+
 
 default_cfgs = {
     'vit_tiny_patch16_224': _cfg(
@@ -89,11 +93,13 @@ class Attention(nn.Module):
         q, k, v = qkv[0], qkv[1], qkv[2]
         # d for each head, Nd heads in total. --> B x Nd x N x d for {q, k, v}.
         attn = (q @ k.transpose(-2, -1)) * self.scale  # B x Nd x N x N
-        #======================================================================#
-        attn_cls, attn_pat = torch.split(attn, [self.nc, N-self.nc], dim=-1)
-        attn_pat = attn_pat.softmax(dim=-1)
-        attn_cls = attn_cls.softmax(dim=-1)
-        attn = torch.cat((attn_cls, attn_pat), dim=-1)
+        # #======================================================================#
+        # attn_cls, attn_pat = torch.split(attn, [self.nc, N-self.nc], dim=-1)
+        # attn_cls = attn_cls.softmax(dim=-1)
+        # attn_pat = attn_pat.softmax(dim=-1)
+        # attn = torch.cat((attn_cls, attn_pat), dim=-1)
+        attn = split_weighted_softmax(attn, self.nc)
+        
         # attn = attn.softmax(dim=-1) # change to vanilla Softmax
         #======================================================================#
         weights = attn

@@ -196,7 +196,7 @@ if __name__ == '__main__':
                         help='log dir to save the results')
     parser.add_argument('--curve_threshold', action='store_true', help='whether to use a range of thresholds')
     parser.add_argument('--threshold', default=0.45, type=float, help='threshold for evaluation as background')
-    parser.add_argument('--low_thres', default=44, type=int, help='low threshold for evaluation as background')
+    parser.add_argument('--low_thres', default=42, type=int, help='low threshold for evaluation as background')
     parser.add_argument('--high_thres', default=55, type=int, help='high threshold for evaluation as background')
     parser.add_argument('--alpha', default=1.15, type=float, help='use alpha to set background')
     parser.add_argument('--eval_nprocs', default=8, type=int, help='use nprocs processess.')

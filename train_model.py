@@ -70,12 +70,11 @@ def get_args_parser():
                         help='SGD momentum (default: 0.9)')
     parser.add_argument('--weight-decay', type=float, default=0.05,
                         help='weight decay (default: 0.05)')
-    
     # Learning rate schedule parameters
     parser.add_argument('--sched', default='cosine', type=str, metavar='SCHEDULER',
                         help='LR scheduler (default: "cosine"')
-    parser.add_argument('--lr', type=float, default=1e-3, metavar='LR',
-                        help='learning rate')
+    parser.add_argument('--lr', type=float, default=5e-4, metavar='LR',
+                        help='learning rate (default: 5e-4)')
     parser.add_argument('--lr-noise', type=float, nargs='+', default=None, metavar='pct, pct',
                         help='learning rate noise on/off epoch percentages')
     parser.add_argument('--lr-noise-pct', type=float, default=0.67, metavar='PERCENT',
@@ -83,11 +82,11 @@ def get_args_parser():
     parser.add_argument('--lr-noise-std', type=float, default=1.0, metavar='STDDEV',
                         help='learning rate noise std-dev (default: 1.0)')
     parser.add_argument('--warmup-lr', type=float, default=1e-6, metavar='LR',
-                        help='warmup learning rate')
-    parser.add_argument('--min-lr', type=float, default=1e-6, metavar='LR',
-                        help='lower lr bound for cyclic schedulers that hit 0')
+                        help='warmup learning rate (default: 1e-6)')
+    parser.add_argument('--min-lr', type=float, default=1e-5, metavar='LR',
+                        help='lower lr bound for cyclic schedulers that hit 0 (1e-5)')
 
-    parser.add_argument('--decay-epochs', type=float, default=10, metavar='N',
+    parser.add_argument('--decay-epochs', type=float, default=30, metavar='N',
                         help='epoch interval to decay LR')
     parser.add_argument('--warmup-epochs', type=int, default=5, metavar='N',
                         help='epochs to warmup LR, if scheduler supports')
@@ -97,12 +96,13 @@ def get_args_parser():
                         help='patience epochs for Plateau LR scheduler (default: 10')
     parser.add_argument('--decay-rate', '--dr', type=float, default=0.1, metavar='RATE',
                         help='LR decay rate (default: 0.1)')
-    
+
     # Augmentation parameters
     parser.add_argument('--color-jitter', type=float, default=0.4, metavar='PCT',
                         help='Color jitter factor (default: 0.4)')
     parser.add_argument('--aa', type=str, default='rand-m9-mstd0.5-inc1', metavar='NAME',
-                        help='Use Auto Augment policy. "v0" or "original". (default: rand-m9-mstd0.5-inc1)')
+                        help='Use AutoAugment policy. "v0" or "original". ' + 
+                             '(default: rand-m9-mstd0.5-inc1)')
     parser.add_argument('--smoothing', type=float, default=0.1, help='Label smoothing (default: 0.1)')
     parser.add_argument('--train-interpolation', type=str, default='bicubic',
                         help='Training interpolation (random, bilinear, bicubic default: "bicubic")')
@@ -122,7 +122,7 @@ def get_args_parser():
                         help='Do not random erase first (clean) augmentation split')
 
     # * Finetuning params
-    parser.add_argument('--finetune', 
+    parser.add_argument('--finetune',
                         default='https://dl.fbaipublicfiles.com/deit/deit_small_patch16_224-cd65a155.pth', 
                         help='finetune from checkpoint')
     parser.add_argument('--resume', action='store_true', default=False, help='resume from checkpoint')
@@ -307,7 +307,13 @@ def main(args):
     linear_scaled_lr = args.lr * args.batch_per_gpu * dist.get_world_size() / 512.0
     args.lr = linear_scaled_lr
 
-    optimizer = create_optimizer(args, model)
+    # optimizer = create_optimizer(args, model)
+    param_groups = model.get_parameters_group()
+    optimizer = torch.optim.AdamW(
+        [{'params':param_groups[0], 'lr':args.lr},
+         {'params':param_groups[1], 'lr':5 * args.lr}],
+         betas=(0.9, 0.999), eps=1e-08, weight_decay=0.01,)
+    
     loss_scaler = NativeScaler()
 
     if args.resume:
