@@ -29,23 +29,23 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --lr 1e-3 \
     --batch_per_gpu 19 \
     
-# # ============= Make Class Activation Maps of Model ============= #
-# python make_cam.py \
-#     --dataset ${DATASET} \
-#     --model ${MODELNAME} \
-#     --work_space ${WORKDIR} \
-#     --cam_out_dir ${SEGTRAINDIR} \
-#     --train_list ${TRAINID} \
-#     --input_size ${INPUTSIZE} \
-#     --checkpoint results_voc/mcta/mcta_best.pth \
+# ============= Make Class Activation Maps of Model ============= #
+python make_cam.py \
+    --dataset ${DATASET} \
+    --model ${MODELNAME} \
+    --work_space ${WORKDIR} \
+    --cam_out_dir ${SEGTRAINDIR} \
+    --train_list ${TRAINID} \
+    --input_size ${INPUTSIZE} \
+    --checkpoint results_voc/mcta/mcta-deit-small-voc-7390.pth \
 
-# # ============= Evaluate Class Activation Maps without CRF =============#
-# python eval_cam_crf.py \
-#     --dataset ${DATASET} \
-#     --work_space ${WORKDIR} \
-#     --id_list ${TRAINID} \
-#     --eval_cam_dir ${SEGTRAINDIR} \
-#     --curve_threshold \
+# ============= Evaluate Class Activation Maps without CRF =============#
+python eval_cam_crf.py \
+    --dataset ${DATASET} \
+    --work_space ${WORKDIR} \
+    --id_list ${TRAINID} \
+    --eval_cam_dir ${SEGTRAINDIR} \
+    --curve_threshold \
 
 # # # ============= Make Class Activation Maps of Model ============= #
 # # python make_cam.py \

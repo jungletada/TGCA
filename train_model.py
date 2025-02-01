@@ -312,7 +312,7 @@ def main(args):
     if args.resume:
         ckpt = os.path.join(args.work_space, f'{args.model}_best.pth')
         checkpoint = torch.load(ckpt, map_location='cpu')
-        model.load_state_dict(checkpoint['model'], strict=True)
+        model.load_state_dict(checkpoint['model'], strict=False)
         # args.start_epoch = checkpoint['epoch']
         # optimizer.load_state_dict(checkpoint['optimizer'])
 

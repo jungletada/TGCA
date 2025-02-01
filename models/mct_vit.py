@@ -75,8 +75,7 @@ class Attention(nn.Module):
     Base Attention for DeiT.
     """
     def __init__(self, dim, num_heads=6, qkv_bias=False, qk_scale=None,
-                 attn_drop=0., proj_drop=0., split_weights=(1, 1),
-                 num_classes=20, knn=9, dilation=1):
+                 attn_drop=0., proj_drop=0., split_weights=(1, 1),num_classes=20):
         super().__init__()
         self.nc = num_classes
         self.n_heads = num_heads
@@ -88,19 +87,19 @@ class Attention(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
         self.weights = split_weights
 
-        self.align_grapher = Grapher(
-            in_channels=num_classes * num_heads,
-            kernel_size=knn,
-            dilation=dilation,
-            groups=num_heads)
-        self.zero_w = nn.Conv2d(num_classes * num_heads, num_classes * num_heads, 1)
-        self.initialize_weights()
+        # self.align_grapher = Grapher(
+        #     in_channels=num_classes * num_heads,
+        #     kernel_size=knn,
+        #     dilation=dilation,
+        #     groups=num_heads)
+    #     self.zero_w = nn.Conv2d(num_classes * num_heads, num_classes * num_heads, 1)
+    #     self.initialize_weights()
 
-    def initialize_weights(self):
-        # 初始化 zero_w 使得所有权重和 bias 为 0
-        nn.init.constant_(self.zero_w.weight, 0)
-        if self.zero_w.bias is not None:
-            nn.init.constant_(self.zero_w.bias, 0)
+    # def initialize_weights(self):
+    #     # 初始化 zero_w 使得所有权重和 bias 为 0
+    #     nn.init.constant_(self.zero_w.weight, 0)
+    #     if self.zero_w.bias is not None:
+    #         nn.init.constant_(self.zero_w.bias, 0)
             
     def forward(self, x, d_size):
         B, N, C = x.shape  # Here N = #patches + #class-tokens
@@ -111,13 +110,13 @@ class Attention(nn.Module):
         attn = (q @ k.transpose(-2, -1)) * self.scale  # B x Nd x N x N
         
         attn_cls, attn_pat = torch.split(attn, [self.nc, attn.shape[-1] - self.nc], dim=-1)
-        # cls-to-patch feature realign
-        cls2pat, pat2pat = torch.split(attn_pat, [self.nc, attn.shape[-1] - self.nc], dim=-2)
-        cls2pat = cls2pat.reshape(B, self.n_heads * self.nc, d_size[0], d_size[1])
-        cls2pat_m = self.align_grapher(cls2pat)
-        cls2pat = cls2pat + self.zero_w(cls2pat_m)
-        cls2pat = cls2pat.reshape(B, self.n_heads, self.nc, -1)
-        attn_pat = torch.cat((cls2pat, pat2pat), dim=-2)
+        # # cls-to-patch feature realign
+        # cls2pat, pat2pat = torch.split(attn_pat, [self.nc, attn.shape[-1] - self.nc], dim=-2)
+        # cls2pat = cls2pat.reshape(B, self.n_heads * self.nc, d_size[0], d_size[1])
+        # cls2pat_m = self.align_grapher(cls2pat)
+        # cls2pat = cls2pat + self.zero_w(cls2pat_m)
+        # cls2pat = cls2pat.reshape(B, self.n_heads, self.nc, -1)
+        # attn_pat = torch.cat((cls2pat, pat2pat), dim=-2)
         
         # split weight softmax
         attn_cls = attn_cls.softmax(dim=-1) * self.weights[0]
