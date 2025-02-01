@@ -64,7 +64,7 @@ def get_args_parser():
                         help='Optimizer Epsilon (default: 1e-8)')
     parser.add_argument('--opt-betas', default=None, type=float, nargs='+', metavar='BETA',
                         help='Optimizer Betas (default: None, use opt default)')
-    parser.add_argument('--clip-grad', type=float, default=None, metavar='NORM',
+    parser.add_argument('--clip-grad', type=float, default=1.0, metavar='NORM',
                         help='Clip gradient norm (default: None, no clipping)')
     parser.add_argument('--momentum', type=float, default=0.9, metavar='M',
                         help='SGD momentum (default: 0.9)')
@@ -83,7 +83,7 @@ def get_args_parser():
                         help='learning rate noise std-dev (default: 1.0)')
     parser.add_argument('--warmup-lr', type=float, default=1e-6, metavar='LR',
                         help='warmup learning rate (default: 1e-6)')
-    parser.add_argument('--min-lr', type=float, default=1e-5, metavar='LR',
+    parser.add_argument('--min-lr', type=float, default=1e-6, metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0 (1e-5)')
 
     parser.add_argument('--decay-epochs', type=float, default=30, metavar='N',
@@ -200,7 +200,6 @@ def load_model_weight(args, model):
     else: 
         checkpoint = torch.load(args.finetune, map_location='cpu')
         num_extra_tokens = model.pos_embed.shape[-2] - model_npatches
-        
     try: 
         checkpoint_model = checkpoint['model']
     except KeyError:  # Specify the exception type
@@ -308,20 +307,14 @@ def main(args):
     args.lr = linear_scaled_lr
 
     optimizer = create_optimizer(args, model)
-    # param_groups = model.get_parameters_group()
-    # optimizer = torch.optim.AdamW(
-    #     [{'params':param_groups[0], 'lr':args.lr},
-    #      {'params':param_groups[1], 'lr':5 * args.lr}],
-    #      betas=(0.9, 0.999), eps=1e-08, weight_decay=0.01,)
-    
     loss_scaler = NativeScaler()
 
     if args.resume:
-        ckpt = os.path.join(args.work_space, f'{args.model}_last_ckpt.pth')
+        ckpt = os.path.join(args.work_space, f'{args.model}_best.pth')
         checkpoint = torch.load(ckpt, map_location='cpu')
         model.load_state_dict(checkpoint['model'], strict=True)
-        args.start_epoch = checkpoint['epoch']
-        optimizer.load_state_dict(checkpoint['optimizer'])
+        # args.start_epoch = checkpoint['epoch']
+        # optimizer.load_state_dict(checkpoint['optimizer'])
 
     lr_scheduler, _ = create_scheduler(args, optimizer)
     max_accuracy = 0.0

@@ -25,10 +25,10 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --model ${MODELNAME} \
     --train_list ${TRAINID} \
     --work_space ${WORKDIR} \
-    --epoch 40 \
+    --epoch 35 \
     --warmup-epochs 10 \
-    --batch_per_gpu 20 \
-    --lr 1e-4 \
+    --batch_per_gpu 21 \
+    --lr 1e-3 \
     
 # ============= Make Class Activation Maps of Model=============#
 python make_cam.py \

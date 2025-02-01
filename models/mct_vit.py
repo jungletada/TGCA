@@ -5,7 +5,7 @@ from functools import partial
 
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-from models.adapter_modules import split_weighted_softmax
+from models.adapter_modules import Mlp, Grapher
 
 
 def _cfg(url='', **kwargs):
@@ -50,24 +50,24 @@ default_cfgs = {
 }
 
 
-class Mlp(nn.Module):
-    def __init__(self, in_features, hidden_features=None, 
-                 out_features=None, act_layer=nn.GELU, drop=0.):
-        super().__init__()
-        out_features = out_features or in_features
-        hidden_features = hidden_features or in_features
-        self.fc1 = nn.Linear(in_features, hidden_features)
-        self.act = act_layer()
-        self.fc2 = nn.Linear(hidden_features, out_features)
-        self.drop = nn.Dropout(drop)
+# class Mlp(nn.Module):
+#     def __init__(self, in_features, hidden_features=None, 
+#                  out_features=None, act_layer=nn.GELU, drop=0.):
+#         super().__init__()
+#         out_features = out_features or in_features
+#         hidden_features = hidden_features or in_features
+#         self.fc1 = nn.Linear(in_features, hidden_features)
+#         self.act = act_layer()
+#         self.fc2 = nn.Linear(hidden_features, out_features)
+#         self.drop = nn.Dropout(drop)
 
-    def forward(self, x):
-        x = self.fc1(x)
-        x = self.act(x)
-        x = self.drop(x)
-        x = self.fc2(x)
-        x = self.drop(x)
-        return x
+#     def forward(self, x):
+#         x = self.fc1(x)
+#         x = self.act(x)
+#         x = self.drop(x)
+#         x = self.fc2(x)
+#         x = self.drop(x)
+#         return x
 
 
 class Attention(nn.Module):
@@ -75,7 +75,8 @@ class Attention(nn.Module):
     Base Attention for DeiT.
     """
     def __init__(self, dim, num_heads=6, qkv_bias=False, qk_scale=None,
-                 attn_drop=0., proj_drop=0., num_classes=20):
+                 attn_drop=0., proj_drop=0., split_weights=(1, 1),
+                 num_classes=20, knn=9, dilation=1):
         super().__init__()
         self.nc = num_classes
         self.n_heads = num_heads
@@ -85,22 +86,45 @@ class Attention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
+        self.weights = split_weights
 
-    def forward(self, x):
+        self.align_grapher = Grapher(
+            in_channels=num_classes * num_heads,
+            kernel_size=knn,
+            dilation=dilation,
+            groups=num_heads)
+        self.zero_w = nn.Conv2d(num_classes * num_heads, num_classes * num_heads, 1)
+        self.initialize_weights()
+
+    def initialize_weights(self):
+        # 初始化 zero_w 使得所有权重和 bias 为 0
+        nn.init.constant_(self.zero_w.weight, 0)
+        if self.zero_w.bias is not None:
+            nn.init.constant_(self.zero_w.bias, 0)
+            
+    def forward(self, x, d_size):
         B, N, C = x.shape  # Here N = #patches + #class-tokens
         qkv = self.qkv(x).reshape(
             B, N, 3, self.n_heads, C // self.n_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]
         # d for each head, Nd heads in total. --> B x Nd x N x d for {q, k, v}.
         attn = (q @ k.transpose(-2, -1)) * self.scale  # B x Nd x N x N
-        # #======================================================================#
-        # attn_cls, attn_pat = torch.split(attn, [self.nc, N-self.nc], dim=-1)
-        # attn_cls = attn_cls.softmax(dim=-1)
-        # attn_pat = attn_pat.softmax(dim=-1)
-        # attn = torch.cat((attn_cls, attn_pat), dim=-1)
-        attn = split_weighted_softmax(attn, self.nc)
         
+        attn_cls, attn_pat = torch.split(attn, [self.nc, attn.shape[-1] - self.nc], dim=-1)
+        # cls-to-patch feature realign
+        cls2pat, pat2pat = torch.split(attn_pat, [self.nc, attn.shape[-1] - self.nc], dim=-2)
+        cls2pat = cls2pat.reshape(B, self.n_heads * self.nc, d_size[0], d_size[1])
+        cls2pat_m = self.align_grapher(cls2pat)
+        cls2pat = cls2pat + self.zero_w(cls2pat_m)
+        cls2pat = cls2pat.reshape(B, self.n_heads, self.nc, -1)
+        attn_pat = torch.cat((cls2pat, pat2pat), dim=-2)
+        
+        # split weight softmax
+        attn_cls = attn_cls.softmax(dim=-1) * self.weights[0]
+        attn_pat = attn_pat.softmax(dim=-1) * self.weights[1]
+        attn = torch.cat((attn_cls, attn_pat), dim=-1)
         # attn = attn.softmax(dim=-1) # change to vanilla Softmax
+
         #======================================================================#
         weights = attn
         attn = self.attn_drop(attn)
@@ -133,8 +157,8 @@ class Block(nn.Module):
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
-    def forward(self, x):
-        o, weights = self.attn(self.norm1(x))
+    def forward(self, x, d_size):
+        o, weights = self.attn(self.norm1(x), d_size)
         x = x + self.drop_path(o)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x, weights

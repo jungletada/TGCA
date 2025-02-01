@@ -14,25 +14,6 @@ from typing import Iterable
 import torch.nn.functional as F
 import torch.distributed as dist
 from sklearn.metrics import average_precision_score
-# import seaborn as sns
-
-
-def focal_binary_cross_entropy(inputs, targets, gamma=0.9):
-    """
-        Borrowed from https://www.kaggle.com/code/thedrcat/focal-multilabel-loss-in-pytorch-explained
-        Reference: https://pytorch.org/docs/stable/_modules/torch/nn/functional.html#multilabel_soft_margin_loss
-        Input: 
-            inputs: (B,K) where B is the batch size and K is the number of classes.
-            targets: (B,K), label targets must have the same shape as the input.
-        Output: 
-            Loss: scalar. (B).
-    """
-    p = torch.sigmoid(inputs)
-    p = torch.where(targets >= 0.5, p, 1 - p)
-    loss = -((1 - p) ** gamma) * \
-        (targets * F.logsigmoid(inputs) + (1 - targets) * F.logsigmoid(-inputs))
-    ret = loss.mean()
-    return ret
 
 
 def train_one_epoch_multioutputs(args, model, data_loader, optimizer, device, 
@@ -83,7 +64,7 @@ def train_one_epoch_multioutputs(args, model, data_loader, optimizer, device,
 
             # cls_weight = get_cls_weight_linear(
             #     args.cls_weight, epoch, args.warmup_epochs-1, args.epochs - 1)
-            total_loss = args.cls_weight * cls_loss + patch_loss
+            total_loss = 3.0 * cls_loss + patch_loss
             
         loss_value = total_loss.item()
         if not math.isfinite(loss_value):

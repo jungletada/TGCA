@@ -192,7 +192,7 @@ class MCTAdapter(MCTViT):
         #-------------------  Modify block for ablation study -------------------#
         for i in range(self.stages):
             for j in range(self.stage_indices[i], self.stage_indices[i+1]):
-                x, weights_j = self.blocks[j](x)
+                x, weights_j = self.blocks[j](x, token_size)
                 attn_weights.append(weights_j)
 
             cls_stru, x_branc[i] = self.spatial_fuse[i](

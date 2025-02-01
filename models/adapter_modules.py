@@ -57,25 +57,6 @@ def resize_input_maxbound(x, max_size=448):
     return resized_x
 
 
-def split_weighted_softmax(attn, nc, weights=(1, 1)):
-    """
-    Applies weighted softmax separately to class and patch attention scores.
-    
-    Args:
-        attn (torch.Tensor): Input attention tensor
-        nc (int): Number of classes to split on
-        weights (tuple): Weights for class and patch attention (default: (1,1))
-    
-    Returns:
-        torch.Tensor: Weighted softmax attention scores
-    """
-    attn_cls, attn_pat = torch.split(attn, [nc, attn.shape[-1] - nc], dim=-1)
-    attn_cls = attn_cls.softmax(dim=-1) * weights[0]
-    attn_pat = attn_pat.softmax(dim=-1) * weights[1]
-    attn = torch.cat((attn_cls, attn_pat), dim=-1)
-    return attn
-
-
 class DownConv(nn.Module):
     """
     Downsampling Convolutional Layer with optional normalization and activation.
@@ -98,149 +79,152 @@ class DownConv(nn.Module):
         return x
 
 
-class TopKMaxPooling(nn.Module):
-    """
-        Top-K Maxpooling
-        Input: B x C x H x W
-        Return: B x C
-    """
+# class TopKMaxPooling(nn.Module):
+#     """
+#         Top-K Maxpooling
+#         Input: B x C x H x W
+#         Return: B x C
+#     """
 
-    def __init__(self, kmax=1.0):
-        super(TopKMaxPooling, self).__init__()
-        self.kmax = kmax
+#     def __init__(self, kmax=1.0):
+#         super(TopKMaxPooling, self).__init__()
+#         self.kmax = kmax
 
-    @staticmethod
-    def get_positive_k(k, n):
-        if k <= 0:
-            return 0
-        elif k < 1:
-            return round(k * n)
-        elif k > n:
-            return int(n)
-        else:
-            return int(k)
+#     @staticmethod
+#     def get_positive_k(k, n):
+#         if k <= 0:
+#             return 0
+#         elif k < 1:
+#             return round(k * n)
+#         elif k > n:
+#             return int(n)
+#         else:
+#             return int(k)
 
-    def forward(self, input):
-        batch_size = input.size(0)
-        num_channels = input.size(1)
-        h = input.size(2)
-        w = input.size(3)
-        n = h * w  # number of regions
-        num_kmax = self.get_positive_k(self.kmax, n)
-        sorted, _ = torch.sort(input.view(batch_size, num_channels, n), dim=2, descending=True)
-        region_max = sorted.narrow(dim=2, start=0, length=num_kmax) # B x C x K
-        output = region_max.sum(2).div_(num_kmax)   # B x C
-        return output.view(batch_size, num_channels)
+#     def forward(self, input):
+#         batch_size = input.size(0)
+#         num_channels = input.size(1)
+#         h = input.size(2)
+#         w = input.size(3)
+#         n = h * w  # number of regions
+#         num_kmax = self.get_positive_k(self.kmax, n)
+#         sorted, _ = torch.sort(input.view(batch_size, num_channels, n), dim=2, descending=True)
+#         region_max = sorted.narrow(dim=2, start=0, length=num_kmax) # B x C x K
+#         output = region_max.sum(2).div_(num_kmax)   # B x C
+#         return output.view(batch_size, num_channels)
 
-    def __repr__(self):
-        return self.__class__.__name__ + ' (kmax=' + str(self.kmax) + ')'
-
-
-class GraphConvolution(nn.Module):
-    """
-    Graph Convolution Layer for processing graph-structured data.
-    This layer applies a convolution operation on the nodes of a graph.
-    """
-    def __init__(self, dim):
-        super(GraphConvolution, self).__init__()
-        self.relu = nn.LeakyReLU(0.2)
-        self.weight = nn.Conv1d(dim, dim, 1)
-
-    def forward(self, adj, nodes):
-        """
-            adj->B x Cls x Cls
-            nodes->B x (Cg+Ct) x Cls
-        """
-        nodes = torch.matmul(nodes, adj)
-        nodes = self.relu(nodes)
-        nodes = self.weight(nodes)
-        nodes = self.relu(nodes)
-        return nodes
+#     def __repr__(self):
+#         return self.__class__.__name__ + ' (kmax=' + str(self.kmax) + ')'
 
 
-class SpatialPriorModule(nn.Module):
-    """
-    Spatial Prior Module for processing spatial features.
-    This module applies a series of convolutional layers to downsample the input image.
-    """
-    def __init__(self, 
-                 inplanes=96, 
-                 spt_strides=[4, 2, 2, 1],
-                 embed_dims=[384, 384, 384, 384],
-                 norm_layer=nn.BatchNorm2d,
-                 act_layer=nn.GELU):
-        super().__init__()
-        self.stem = nn.Sequential(*[ # downsample by 4
-            nn.Conv2d(3, inplanes, kernel_size=3, stride=2, padding=1, bias=False),
-            norm_layer(inplanes),
-            act_layer(),
-            nn.Conv2d(inplanes, inplanes, kernel_size=3, stride=1, padding=1, bias=False),
-            norm_layer(inplanes),
-            act_layer(),
-            nn.Conv2d(inplanes, inplanes, kernel_size=3, stride=1, padding=1, bias=False),
-            norm_layer(inplanes),
-            act_layer(),
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        ])
+# class GraphConvolution(nn.Module):
+#     """
+#     Graph Convolution Layer for processing graph-structured data.
+#     This layer applies a convolution operation on the nodes of a graph.
+#     """
+#     def __init__(self, dim):
+#         super(GraphConvolution, self).__init__()
+#         self.relu = nn.LeakyReLU(0.2)
+#         self.weight = nn.Conv1d(dim, dim, 1)
 
-        if spt_strides[0] == 4:
-            self.conv2 = nn.Sequential(*[
-                nn.Conv2d(inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
-                norm_layer(2 * inplanes),
-                nn.Conv2d(2 * inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
-                norm_layer(2 * inplanes),
-                act_layer(),
-            ])
-        elif spt_strides[0] == 2:
-            self.conv2 = nn.Sequential(*[ 
-                nn.Conv2d(inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
-                norm_layer(2 * inplanes),
-                act_layer(),
-            ])
+#     def forward(self, adj, nodes):
+#         """
+#             adj->B x Cls x Cls
+#             nodes->B x (Cg+Ct) x Cls
+#         """
+#         nodes = torch.matmul(nodes, adj)
+#         nodes = self.relu(nodes)
+#         nodes = self.weight(nodes)
+#         nodes = self.relu(nodes)
+#         return nodes
+
+
+# class SpatialPriorModule(nn.Module):
+#     """
+#     Spatial Prior Module for processing spatial features.
+#     This module applies a series of convolutional layers to downsample the input image.
+#     """
+#     def __init__(self, 
+#                  inplanes=96, 
+#                  spt_strides=[4, 2, 2, 1],
+#                  embed_dims=[384, 384, 384, 384],
+#                  norm_layer=nn.BatchNorm2d,
+#                  act_layer=nn.GELU):
+#         super().__init__()
+#         self.stem = nn.Sequential(*[ # downsample by 4
+#             nn.Conv2d(3, inplanes, kernel_size=3, stride=2, padding=1, bias=False),
+#             norm_layer(inplanes),
+#             act_layer(),
+#             nn.Conv2d(inplanes, inplanes, kernel_size=3, stride=1, padding=1, bias=False),
+#             norm_layer(inplanes),
+#             act_layer(),
+#             nn.Conv2d(inplanes, inplanes, kernel_size=3, stride=1, padding=1, bias=False),
+#             norm_layer(inplanes),
+#             act_layer(),
+#             nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+#         ])
+
+#         if spt_strides[0] == 4:
+#             self.conv2 = nn.Sequential(*[
+#                 nn.Conv2d(inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
+#                 norm_layer(2 * inplanes),
+#                 nn.Conv2d(2 * inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
+#                 norm_layer(2 * inplanes),
+#                 act_layer(),
+#             ])
+#         elif spt_strides[0] == 2:
+#             self.conv2 = nn.Sequential(*[ 
+#                 nn.Conv2d(inplanes, 2 * inplanes, kernel_size=3, stride=2, padding=1, bias=False),
+#                 norm_layer(2 * inplanes),
+#                 act_layer(),
+#             ])
      
-        else: raise NotImplementedError
+#         else: raise NotImplementedError
 
-        self.conv3 = nn.Sequential(*[
-            nn.Conv2d(2 * inplanes, 4 * inplanes, kernel_size=3, stride=spt_strides[1], padding=1, bias=False),
-            norm_layer(4 * inplanes),
-            act_layer()])
+#         self.conv3 = nn.Sequential(*[
+#             nn.Conv2d(2 * inplanes, 4 * inplanes, kernel_size=3, stride=spt_strides[1], padding=1, bias=False),
+#             norm_layer(4 * inplanes),
+#             act_layer()])
         
-        self.conv4 = nn.Sequential(*[
-            nn.Conv2d(4 * inplanes, 4 * inplanes, kernel_size=3, stride=spt_strides[2], padding=1, bias=False),
-            norm_layer(4 * inplanes),
-            act_layer(),
-        ])
+#         self.conv4 = nn.Sequential(*[
+#             nn.Conv2d(4 * inplanes, 4 * inplanes, kernel_size=3, stride=spt_strides[2], padding=1, bias=False),
+#             norm_layer(4 * inplanes),
+#             act_layer(),
+#         ])
 
-        self.conv5 = nn.Sequential(*[
-            nn.Conv2d(4 * inplanes, 8 * inplanes, kernel_size=3, stride=spt_strides[3], padding=1, bias=False),
-            norm_layer(8 * inplanes),
-            act_layer(),
-        ])
+#         self.conv5 = nn.Sequential(*[
+#             nn.Conv2d(4 * inplanes, 8 * inplanes, kernel_size=3, stride=spt_strides[3], padding=1, bias=False),
+#             norm_layer(8 * inplanes),
+#             act_layer(),
+#         ])
         
-        # self.fc1 = nn.Conv2d(inplanes, embed_dims[0], kernel_size=1, stride=1, padding=0, bias=True)
-        self.fc2 = nn.Conv2d(2 * inplanes, embed_dims[0], kernel_size=1, stride=1, padding=0, bias=True)
-        self.fc3 = nn.Conv2d(4 * inplanes, embed_dims[1], kernel_size=1, stride=1, padding=0, bias=True)
-        self.fc4 = nn.Conv2d(4 * inplanes, embed_dims[2], kernel_size=1, stride=1, padding=0, bias=True)
-        self.fc5 = nn.Conv2d(8 * inplanes, embed_dims[3], kernel_size=1, stride=1, padding=0, bias=True)
+#         # self.fc1 = nn.Conv2d(inplanes, embed_dims[0], kernel_size=1, stride=1, padding=0, bias=True)
+#         self.fc2 = nn.Conv2d(2 * inplanes, embed_dims[0], kernel_size=1, stride=1, padding=0, bias=True)
+#         self.fc3 = nn.Conv2d(4 * inplanes, embed_dims[1], kernel_size=1, stride=1, padding=0, bias=True)
+#         self.fc4 = nn.Conv2d(4 * inplanes, embed_dims[2], kernel_size=1, stride=1, padding=0, bias=True)
+#         self.fc5 = nn.Conv2d(8 * inplanes, embed_dims[3], kernel_size=1, stride=1, padding=0, bias=True)
 
-    def forward(self, x):
-        c1 = self.stem(x)
-        c2 = self.conv2(c1)
-        c3 = self.conv3(c2)
-        c4 = self.conv4(c3)
-        c5 = self.conv5(c4)
+#     def forward(self, x):
+#         c1 = self.stem(x)
+#         c2 = self.conv2(c1)
+#         c3 = self.conv3(c2)
+#         c4 = self.conv4(c3)
+#         c5 = self.conv5(c4)
         
-        # c1 = self.fc1(c1) # 4s
-        c2 = self.fc2(c2) # 8s
-        c3 = self.fc3(c3) # 16s
-        c4 = self.fc4(c4) # 32s
-        c5 = self.fc5(c5) # 64s
+#         # c1 = self.fc1(c1) # 4s
+#         c2 = self.fc2(c2) # 8s
+#         c3 = self.fc3(c3) # 16s
+#         c4 = self.fc4(c4) # 32s
+#         c5 = self.fc5(c5) # 64s
     
-        return [c2, c3, c4, c5]
+#         return [c2, c3, c4, c5]
 
 
 class SpatialPriorGNN(nn.Module):
-
+    """
+    Spatial Prior Grapher module for spatial prior processing with multi-scale feature extraction.
+    Combines convolutional layers and graph operations to process spatial features at different scales.
+    """
     def __init__(self,
                  inplanes=96,
                  embed_dim=384,
@@ -386,7 +370,11 @@ class CrossAttention(nn.Module):
             B, N, 2, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
         k, v = kv[0], kv[1] # B x Nd x (Cls+N) x d
         attn = (q @ k.transpose(-2, -1)) * self.scale  # B x Nd x (Cls+Nt) x (Cls+N)
-        attn = split_weighted_softmax(attn, self.nc)
+
+        attn_cls, attn_pat = torch.split(attn, [self.nc, attn.shape[-1] - self.nc], dim=-1)
+        attn_cls = attn_cls.softmax(dim=-1) * self.weights[0]
+        attn_pat = attn_pat.softmax(dim=-1) * self.weights[1]
+        attn = torch.cat((attn_cls, attn_pat), dim=-1)
         #======================================================================#     
         attn = self.attn_drop(attn)
         x = (attn @ v).transpose(1, 2).reshape( # B x Nd x (Cls+Nt) x d
@@ -398,7 +386,10 @@ class CrossAttention(nn.Module):
         return x
 
 
-class MLP(nn.Module):
+class Mlp(nn.Module):
+    """
+    Multi-layer perceptron module with configurable hidden dimensions and dropout.
+    """
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
         super().__init__()
         out_features = out_features or in_features
@@ -446,7 +437,7 @@ class SemanticAttnModule(nn.Module):
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.nc = num_classes
         self.mask_ratio = mask_ratio
-
+        self.weights = (1.0, 1.0)
         self.proj_q = nn.Linear(query_dim, self.dim, bias=qkv_bias)
         self.proj_kv = nn.Linear(key_dim, self.dim * 2, bias=qkv_bias)
         self.proj_cls = nn.Linear(key_dim, self.dim, bias=qkv_bias)
@@ -455,7 +446,7 @@ class SemanticAttnModule(nn.Module):
         self.proj = nn.Linear(self.dim, query_dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
-        self.mlp = MLP(
+        self.mlp = Mlp(
             in_features=self.dim,
             hidden_features=self.dim * 4,
             out_features=self.dim)
@@ -477,7 +468,10 @@ class SemanticAttnModule(nn.Module):
         # k[:, :, :self.nc, :] = q[:, :, :self.nc, :] # Attn_{qq}
         attn = (q @ k.transpose(-2, -1)) * self.scale  # B x Nd x (Cls+Ni) x (Cls+N)
         #===============================================================#
-        attn = split_weighted_softmax(attn, self.nc)
+        attn_cls, attn_pat = torch.split(attn, [self.nc, attn.shape[-1] - self.nc], dim=-1)
+        attn_cls = attn_cls.softmax(dim=-1) * self.weights[0]
+        attn_pat = attn_pat.softmax(dim=-1) * self.weights[1]
+        attn = torch.cat((attn_cls, attn_pat), dim=-1)
         # attn = attn.softmax(dim=-1) # traditional softmax
         #===============================================================#
         attn = self.attn_drop(attn)
