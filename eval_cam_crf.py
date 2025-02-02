@@ -57,7 +57,6 @@ def run_eval(dataset, args):
             # bg_score = np.power(1 - np.max(cams, axis=0, keepdims=True), 1.4)
             # cams = np.concatenate((bg_score, cams), axis=0)
             # prob = crf_inference(image, cams, t=10, scale_factor=1, labels=cams.shape[0])
-            
             cls_labels = np.argmax(prob, axis=0)
             keys = (torch.stack(tuple(cam_dict.keys())) + 1).numpy()
             keys = np.pad(keys, (1, 0), mode='constant')

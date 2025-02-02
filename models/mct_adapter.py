@@ -298,17 +298,13 @@ class MCTAdapterCam(MCTAdapter):
         """
         b, nc, hp, wp = tokens.shape
 
-        if self.cls_ind == 0:
-            cams = tokens.detach().clone()   # B x K x Hp x Wp
-            cams = F.relu(cams)         # With ReLU Activation
+        patch_cam = tokens.detach().clone()   # B x K x Hp x Wp
+        patch_cam = F.relu(patch_cam)         # With ReLU Activation
 
-        else:
-            attn_maps = attn_weights[-self.cls_ind:].mean(0) # B x (K+Np) x (K+Np)
-            cls2pat = attn_maps[:, :nc, nc:].reshape([b, nc, hp, wp]) # B x K x Hp x Wp
-            patch_cam = tokens.detach().clone()   # B x K x Hp x Wp
-            patch_cam = F.relu(patch_cam)         # With ReLU Activation
-            cams = torch.pow(cls2pat * patch_cam, 1/2)
-
+        attn_maps = attn_weights[-self.cls_ind:].mean(0) # B x (K+Np) x (K+Np)
+        cls2pat = attn_maps[:, :nc, nc:].reshape([b, nc, hp, wp]) # B x K x Hp x Wp
+        cams = torch.pow(cls2pat * patch_cam, 1/2)
+        
         # Apply pat2pat affinity refinement 
         pat2pat = attn_weights[-self.att_ind:, :, nc:, nc:] #  L x B x Np x Np
         pat2pat = torch.sum(pat2pat, dim=0)      # B x Np x Np
@@ -350,32 +346,6 @@ class MCTAdapterCam(MCTAdapter):
         
         outputs = self.get_cam(x_out, attn_weights)
         return outputs
-    
-        # hp = h // self.patch_embed.patch_size[0]
-        # wp = w // self.patch_embed.patch_size[1]
-        
-        # if return_type == 'all':
-        #     return attn_weights
-        
-        # elif return_type == 'cls2cls':
-        #     cls2cls = attn_weights[:, :, :nc, :nc]
-        #     return cls2cls
-        
-        # elif return_type == 'cls2pat':
-        #     cls2pat = attn_weights[:, :, :nc, nc:].reshape([-1, b, nc, hp, wp])
-        #     return cls2pat
-        
-        # elif return_type == 'pat2cls':
-        #     pass
-        
-        # elif return_type == 'pat2pat':
-        #     pass
-        
-        # elif return_type == 'cls_token':
-        #     return last_cls_tokens
-        
-        # else:
-        #     return outputs
 
     @torch.no_grad()
     def forward_with_label(self, x, use_cls_guide=False):

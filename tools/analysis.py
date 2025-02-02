@@ -35,10 +35,10 @@ def get_args_parser():
     parser.add_argument("--task", default='sum_attention_weights', type=str)
     
     parser.add_argument("--num_workers", default=2, type=int)
-    parser.add_argument('--work_space', default='results_voc/mcta', type=str, help='work space')
-    parser.add_argument('--model', default='mcta', type=str, metavar='MODEL',
+    parser.add_argument('--work_space', default='results_voc/mctformerplus', type=str, help='work space')
+    parser.add_argument('--model', default='mctformerplus', type=str, metavar='MODEL',
                         help='Name of model to train')
-    parser.add_argument('--checkpoint', default='results_voc/mcta/mcta-deit-small-voc-7390.pth',
+    parser.add_argument('--checkpoint', default='results_voc/mctformerplus/mctformerplus_6887.pth',
                         help='checkpoint for generating maps')
     parser.add_argument('--csv_path', default='attention_map_score.csv', type=str,
                         help='evaluation csv for cosine similarity.')
@@ -77,7 +77,7 @@ def draw_heat_map(attn_maps, args, img_name, task, n_dim=2):
         n_dim (int): The number of dimensions of the attention maps (2D or 3D).
     """
     
-    cmap = "RdBu"
+    cmap = "gnuplot2"
     if n_dim == 3:
         for layer in range(attn_maps.shape[0]):
             plt.figure(figsize=(20, 20))

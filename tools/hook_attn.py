@@ -97,9 +97,7 @@ def _work(process_id, model, dataset, args):
             img_name = pack['name'][0] # Img_id->str
             label = pack['label'][0]   # image-level label->Torch.Tensor [1]
             size = pack['size']        # image size->Torch.tensor [2]
-            
             valid_cat = torch.nonzero(label)[:, 0] # get validate class->[#val_cls]
-            
             try:
                 outputs = [model(
                     resize_input_minbound(

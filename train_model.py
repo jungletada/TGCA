@@ -131,7 +131,8 @@ def get_args_parser():
     parser.add_argument('--dataset', default='', type=str, help='name of dataset')
     parser.add_argument('--voc12_root', default='data/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
     parser.add_argument("--coco_root", default='data/MSCOCO', type=str, help="Path to MSCOCO")
-    parser.add_argument("--train_list", default="train_aug_id.txt", type=str, help='train_id.txt or train_aug_id.txt')
+    parser.add_argument("--train_list", default="train_aug_id.txt", type=str, 
+                        help='train_id.txt or train_aug_id.txt')
     parser.add_argument('--checkpoint', default='', help='checkpoint for generating maps')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')

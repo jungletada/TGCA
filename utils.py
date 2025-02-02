@@ -178,8 +178,7 @@ def create_cam_model(args):
     elif 'mcta' in args.model.lower():
         model = mcta_cam(
             num_classes=args.num_classes,
-            input_size=args.input_size,
-            )
+            input_size=args.input_size,)
         
     elif 'mctformerplus' in args.model.lower():
         model = MCTformerPlusCam(

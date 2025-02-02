@@ -1,4 +1,5 @@
 import os
+import sys
 import cv2
 import torch
 import imageio
@@ -12,8 +13,11 @@ from torch.utils.data import DataLoader
 from torch.backends import cudnn
 cudnn.enabled = True
 import matplotlib.pyplot as plt
+
+sys.path.append(".")
 from misc import torchutils
 from utils import create_cam_model
+
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -27,9 +31,17 @@ def get_args_parser():
     parser = argparse.ArgumentParser('Generating attention maps', add_help=False)
     # Model parameters
     parser.add_argument("--num_workers", default=12, type=int)
-    parser.add_argument('--model', default='deit_small_mctgformer', type=str, metavar='MODEL',
+
+    parser.add_argument('--work_space', default='results_voc/mcta', type=str, help='work space')
+    parser.add_argument('--model', default='mcta', type=str, metavar='MODEL',
                         help='Name of model to train')
-    parser.add_argument('--checkpoint', default='', help='checkpoint for generating maps')
+    parser.add_argument('--checkpoint', default='results_voc/mcta/mcta-deit-small-voc-7458.pth',
+                        help='model checkpoint path')
+    # parser.add_argument('--work_space', default='results_voc/mctformerplus', type=str, help='work space')
+    # parser.add_argument('--model', default='mctformerplus', type=str, metavar='MODEL',
+    #                     help='Name of model to train')
+    # parser.add_argument('--checkpoint', default='results_voc/mctformerplus/mctformerplus_6887.pth', 
+    #                     help='model checkpoint path')
     parser.add_argument('--input_size', default=448, type=int, help='images input size')
     parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
                         help='Dropout rate (default: 0.)')
@@ -37,12 +49,11 @@ def get_args_parser():
                         help='Drop path rate (default: 0.1)')
 
     # Dataset parameters
-    parser.add_argument('--dataset', default='', type=str, help='name of dataset')
-    parser.add_argument('--work_space', default='results_voc/your_model', type=str, help='work space')
-    parser.add_argument('--voc12_root', default='datasets/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
-    parser.add_argument("--coco_root", default='datasets/MSCOCO', type=str, help="Path to MSCOCO")
-    parser.add_argument("--train_list", default="configs/voc12/train_aug_id.txt", type=str, 
-                        help='[configs/coco/train_id.txt] or [configs/voc12/train_aug_id.txt]')
+    parser.add_argument('--dataset', default='VOC12', type=str, help='name of dataset')
+    parser.add_argument("--train_list", default="data/VOCdevkit/VOC2012/ImageLists/train_id.txt", type=str, 
+                        help='train list path')
+    parser.add_argument('--voc12_root', default='data/VOCdevkit/VOC2012', type=str, help='VOC12 dataset path')
+    parser.add_argument("--coco_root", default='data/MSCOCO', type=str, help="Path to MSCOCO")
     
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
@@ -51,14 +62,11 @@ def get_args_parser():
     parser.add_argument('--no-pin-mem', action='store_false', dest='pin_mem',help='')
     parser.set_defaults(pin_mem=True)
 
-    # generating attention maps
-    parser.add_argument('--fuse_layer', type=int, default=3, help='extract attention maps from the last layers')
+    # generating CAMs
     parser.add_argument("--scales", default=(1.0, 0.75, 1.25), help="Multi-scale inferences")
-    parser.add_argument("--vis_cam_dir", default="vis_cam", type=str)
+    parser.add_argument("--vis_cam_dir", default="gt_cam_dir", type=str)
     
-    
-    args = parser.parse_args()
-    return args
+    return parser.parse_args()
                                                                                                                  
 
 def normalize_cam(cam_mask):
@@ -80,8 +88,48 @@ def flip_cam(cam_list):
     cam_list = [torch.sum(cam, dim=0) for cam in cam_list]
     return cam_list
 
-     
-def _work(process_id, model, dataset, args):
+
+def draw_ground_truth_voc(cls, img_name, args):
+    label = cv2.imread(
+                os.path.join(args.voc12_root, 'SegmentationClassAug', img_name + '.png'),
+                cv2.IMREAD_UNCHANGED)
+    label[label == 255] = 0
+    one_hot_label = np.eye(args.num_classes + 1, dtype=np.uint8)[label]  # Shape: (H, W, 21)
+    normalized = cv2.normalize(one_hot_label[:,:, cls + 1], None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    heatmap = cv2.applyColorMap(normalized, cv2.COLORMAP_JET)
+    return heatmap
+
+
+def draw_cam_voc(args, upsample_cam, valid_cat, img_name):
+    alpha = 0.4  # transparentcy
+    if img_name in ['2007_001709', '2011_003121', '2011_003216', '2010_001922']:
+        for i, cls in enumerate(valid_cat):
+            cam = upsample_cam[i]
+            img_cls_name = osp.join(args.vis_cam_dir, img_name + f'_{CAT_LIST[cls]}.jpg')
+            cam_normalized = cv2.normalize(cam, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+            # heatmap = cv2.applyColorMap(cam_normalized, cv2.COLORMAP_JET)
+            base_img = cv2.imread(os.path.join(args.voc12_root, 'JPEGImages', img_name + '.jpg'))
+            heatmap = draw_ground_truth_voc(cls, img_name, args)
+            overlay = cv2.addWeighted(base_img, 1 - alpha, heatmap, alpha, 0)
+            cv2.imwrite(img_cls_name, overlay)
+
+
+def draw_cam_coco(args, upsample_cam, valid_cat, img_name):
+    alpha = 0.4  # transparentcy
+    cam_dict = {}
+    for i, cls in enumerate(valid_cat):
+        cam_dict[cls] = upsample_cam[i]
+        img_cls_name = osp.join(args.vis_cam_dir, img_name + f'_cls-{cls}.jpg')
+        # Convert heatmap value from [0, 1] to [0, 255]
+        cam_normalized = cv2.normalize(cam_dict[cls], None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+        # Apply Color Map
+        heatmap = cv2.applyColorMap(cam_normalized, cv2.COLORMAP_JET)
+        base_img = cv2.imread(os.path.join(args.coco_root, 'train2014', img_name + '.jpg'))
+        overlay = cv2.addWeighted(base_img, 1 - alpha, heatmap, alpha, 0)
+        cv2.imwrite(img_cls_name, overlay)
+
+
+def _work(process_id, model, dataset, args, draw_cam):
     databin = dataset[process_id]
     n_gpus = torch.cuda.device_count()
 
@@ -99,7 +147,6 @@ def _work(process_id, model, dataset, args):
             size = pack['size']        # image size->Torch.tensor [2]
             outputs = [model.forward(img[0].cuda(non_blocking=True)) # img[0]->[(2, 3, H', W')]
                        for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
-            
             #========================== high resolution cam list ==========================#
             upsample_cam_list = [ # upsample all multi-scale CAMs
                 F.interpolate(cam, size, mode='bilinear', align_corners=False)
@@ -109,28 +156,17 @@ def _work(process_id, model, dataset, args):
             
             valid_cat = torch.nonzero(label)[:, 0] # get validate class->[#val_cls]
             if valid_cat.shape[0] == 0: # No validate category
-                np.save(osp.join(args.vis_cam_dir, img_name.replace('jpg', 'npy')),
-                        dict())
+                np.save(
+                    osp.join(args.vis_cam_dir, img_name.replace('jpg', 'npy')),
+                    dict())
                 continue
             
             upsample_cam = upsample_cam[valid_cat]
             upsample_cam = normalize_cam(upsample_cam)
             
-            cam_dict = {}
             upsample_cam = upsample_cam.cpu().numpy()
-            
-            for i, cls in enumerate(valid_cat):
-                cam_dict[cls] = upsample_cam[i]
-                img_cls_name = osp.join(args.vis_cam_dir, img_name + f'_{CAT_LIST[cls]}.jpg')
-                # Convert heatmap value from [0, 1] to [0, 255]
-                cam_normalized = cv2.normalize(cam_dict[cls], None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-                # Apply Color Map
-                heatmap = cv2.applyColorMap(cam_normalized, cv2.COLORMAP_JET)
-                alpha = 0.5  # transparentcy
-                base_img = cv2.imread(os.path.join(args.voc12_root, 'JPEGImages', img_name + '.jpg'))
-                overlay = cv2.addWeighted(base_img, 1 - alpha, heatmap, alpha, 0)
-                cv2.imwrite(img_cls_name, overlay)
-            
+            draw_cam(args, upsample_cam, valid_cat, img_name)
+
             if process_id == n_gpus - 1 and iter_ % (len(databin) // 20) == 0:
                 print("%d " % ((5*iter_+1)//(len(databin) // 20)), end='')
                 
@@ -144,8 +180,10 @@ if __name__ == '__main__':
     # change to multi-scale dataset
     if args.dataset == 'VOC12':
         args.dataset = 'VOC12MS'
+        draw_cam = draw_cam_voc
     elif args.dataset == 'COCO':
         args.dataset = 'COCOMS'
+        draw_cam = draw_cam_coco
     else:
         raise NotImplementedError
     
@@ -164,6 +202,6 @@ if __name__ == '__main__':
     n_gpus = torch.cuda.device_count()
     dataset = torchutils.split_dataset(dataset, n_gpus)
     
-    multiprocessing.spawn(_work, nprocs=n_gpus, args=(model, dataset, args), join=True)
+    multiprocessing.spawn(_work, nprocs=n_gpus, args=(model, dataset, args, draw_cam), join=True)
    
     torch.cuda.empty_cache()

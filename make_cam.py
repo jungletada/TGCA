@@ -146,9 +146,6 @@ def split_image_test(inputs, model, args):
 
 
 def multi_scale_test(model, images, args):
-    """
-    
-    """
     output_cam_list = []
     for image in images:
         inputs_flip = image[0]

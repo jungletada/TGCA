@@ -125,15 +125,14 @@ class MCTformerPlusCam(MCTformerPlus):
     def get_cam(self, x_patch, attn_weights):
         feature_map = x_patch.detach().clone()  # B * C * 14 * 14
         feature_map = F.relu(feature_map)
-        n, c, h, w = feature_map.shape
         
+        n, c, h, w = feature_map.shape
         cls2pat = attn_weights[-self.n_layers:].mean(0)\
             [:, 0:self.num_classes, self.num_classes:].reshape([n, c, h, w])
-        patch_attn = attn_weights[:, :, self.num_classes:, self.num_classes:]
-
         cams = cls2pat * feature_map  # B * C * 14 * 14
         cams = torch.sqrt(cams)
         
+        patch_attn = attn_weights[:, :, self.num_classes:, self.num_classes:]
         patch_attn = torch.sum(patch_attn, dim=0) # B x Np x Np
         B, _, hp, wp = cams.shape
         cams = torch.matmul(
@@ -191,6 +190,38 @@ class MCTformerPlusCam(MCTformerPlus):
         if return_token:
             return class_embeddings
 
+        n, p, c = x_patch.shape
+        if w != h:
+            w0 = w // self.patch_embed.patch_size[0]
+            h0 = h // self.patch_embed.patch_size[0]
+            x_patch = torch.reshape(x_patch, [n, w0, h0, c])
+        else:
+            x_patch = torch.reshape(x_patch, [n, int(p ** 0.5), int(p ** 0.5), c])
+        
+        x_patch = x_patch.permute([0, 3, 1, 2]).contiguous()
+        x_patch = self.head(x_patch)
+        outputs = self.get_cam(x_patch, attn_weights)
+        return outputs
+    
+    @torch.no_grad()
+    def forward_ablation(self, x, return_type='all'):
+        """
+        One can choose return_type as:
+            'cam': return cam for testing
+            'all': whole attention map
+            'cls_token': the class token
+            'cls2cls': class-to-class attention map
+            'cls2pat': class-to-patch attention map
+            'pat2cls': patch-to-class attention map
+            'pat2pat': patch-to-patch attention map
+        """
+        b, _, w, h = x.shape
+        x_cls_last, x_patch, attn_weights, class_embeddings = self.forward_features(x)
+        # 12 * B * H * N * N -> 12 * B * N * N
+        attn_weights = torch.mean(torch.stack(attn_weights), dim=2)
+        if return_type == 'all':
+            return attn_weights
+        
         n, p, c = x_patch.shape
         if w != h:
             w0 = w // self.patch_embed.patch_size[0]
