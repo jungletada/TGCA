@@ -130,7 +130,7 @@ def train_one_epoch_basic(
 
 
 def train_one_epoch_mctformerplus(
-        args,model,data_loader,optimizer, device,epoch, loss_scaler, 
+        args, model,data_loader,optimizer, device,epoch, loss_scaler, 
         clip_grad, set_training_mode=True):
     model.train(set_training_mode)
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -163,7 +163,7 @@ def train_one_epoch_mctformerplus(
                 torch.mean(torch.sum(regularizer_loss * targets.unsqueeze(-1), dim=-2), dim=-1) / (
                             torch.sum(targets, dim=-1) + 1e-8))
             metric_logger.update(attn_loss=regularizer_loss.item())
-            loss = loss + args.cls_weight * regularizer_loss
+            loss = loss + regularizer_loss
             
             ploss = F.multilabel_soft_margin_loss(patch_outputs, targets)
             metric_logger.update(pat_loss=ploss.item())

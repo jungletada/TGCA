@@ -2,6 +2,7 @@ import math
 import torch
 import torch.nn as nn
 from functools import partial
+# 
 from models.vit import VisionTransformer, _cfg
 from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, to_2tuple
@@ -94,9 +95,6 @@ class MCTformerV2(VisionTransformer):
 
 
 class MCTformerV2Cam(MCTformerV2):
-    """
-    
-    """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         
@@ -147,6 +145,15 @@ class MCTformerV2Cam(MCTformerV2):
         return cams
 
 
+def convert_weights_update(checkpoint, num_classes=80):
+    # print(checkpoint.keys())
+    pos_embed = checkpoint["pos_embed"]
+    checkpoint["pos_embed_cls"] = pos_embed[:, :num_classes, :]
+    checkpoint["pos_embed_pat"] = pos_embed[:, num_classes:, :]
+    del checkpoint["pos_embed"]
+    return checkpoint
+
+
 @register_model
 def deit_small_MCTformerV2(pretrained=False, **kwargs):
     model = MCTformerV2(
@@ -169,3 +176,12 @@ def deit_small_MCTformerV2(pretrained=False, **kwargs):
         model_dict.update(pretrained_dict)
         model.load_state_dict(model_dict)
     return model
+
+if __name__ == '__main__':
+    # checkpoint = torch.load('checkpoints/MCTformerV2_coco.pth')['model']
+    # updated = convert_weights_update(checkpoint, num_classes=80)
+    # torch.save(updated, 'checkpoints/MCTformerV2_coco_update.pth')
+
+    model = MCTformerV2(input_size=224)
+    model_dict = torch.load('checkpoints/MCTformerV2_coco_update.pth', map_location='cpu')
+    model.load_state_dict(model_dict)

@@ -12,8 +12,8 @@ INPUTSIZE=448
 SEGTRAINDIR=cam_mask_train
 SEGVALDIR=cam_mask_val
 
-MODELNAME=mcta
-WORKDIR=results_coco/mcta
+MODELNAME=mctformerplus
+WORKDIR=results_coco/${MODELNAME}
 
 CUDA_VISIBLE_DEVICES=${GPU}
 
@@ -25,10 +25,10 @@ torchrun --nproc_per_node=${NODES} --nnodes=1 \
     --model ${MODELNAME} \
     --train_list ${TRAINID} \
     --work_space ${WORKDIR} \
-    --epoch 35 \
-    --warmup-epochs 10 \
-    --batch_per_gpu 21 \
-    --lr 1e-3 \
+    --epoch 45 \
+    --warmup-epochs 5 \
+    --batch_per_gpu 16 \
+    --lr 5e-4 \
     
 # ============= Make Class Activation Maps of Model=============#
 python make_cam.py \
