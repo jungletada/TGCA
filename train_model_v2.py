@@ -1,61 +1,45 @@
+
 import os
-import math
+import time
+import random
+import numpy as np
 import argparse
 import datetime
-import time
 import json
-import random
-import pprint
-import torch
 import logging
-import numpy as np
-import torch.nn as nn
+from pathlib import Path
+import torch
+import torch.backends.cudnn as cudnn
 import torch.nn.functional as F
-
 from timm.models import create_model
 from timm.scheduler import create_scheduler
 from timm.optim import create_optimizer
 from timm.utils import NativeScaler
-import torch.distributed as dist
-from torch.utils.data.distributed import DistributedSampler
 
 import utils
 from engine import evaluate
-from engine import train_one_epoch_mctformerplus, \
-    train_one_epoch_multioutputs
+from engine import train_one_epoch, train_one_epoch_multioutputs
 from datasets_cam import build_dataset
 
 import models.srmct
 import models.mct_adapter
 import models.mctformer_plus
-from models.tool import torchutils
-import warnings
-warnings.filterwarnings("ignore")
 
 
 def get_args_parser():
     parser = argparse.ArgumentParser('DeiT training and evaluation script', add_help=False)
-    parser.add_argument('--batch_per_gpu', default=16, type=int)
-    parser.add_argument('--epochs', default=30, type=int)
-    parser.add_argument('--seed', default=None, type=int)
-    parser.add_argument("--work_space", default="results/mcta", type=str)
-    parser.add_argument('--log_dir', default='log_dir', type=str, help='log dir to save the results')
-    # ddp settings
-    parser.add_argument('--rank', default=0, type=int, help='rank of current process')
-    parser.add_argument('--gpu_id', default=0, type=int, help="which gpu to use")
-    parser.add_argument("--local_rank", type=int, help='rank in current node')
-    parser.add_argument('--device', default='cuda',help='device id (i.e. 0 or 0,1 or cpu)')
+    parser.add_argument('--batch_size', default=32, type=int)
+    parser.add_argument('--epochs', default=45, type=int)
 
     # Model parameters
-    parser.add_argument('--model', default=None, type=str, metavar='MODEL',
+    parser.add_argument('--model', default='mctformerplus', type=str, metavar='MODEL',
                         help='Name of model to train')
-    parser.add_argument('--input_size', default=448, type=int, help='images input size')
+    parser.add_argument('--input-size', default=448, type=int, help='images input size')
+
     parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
                         help='Dropout rate (default: 0.)')
     parser.add_argument('--drop-path', type=float, default=0.1, metavar='PCT',
                         help='Drop path rate (default: 0.1)')
-    parser.add_argument('--cls_weight', type=float, default=3.0,
-                        help='weight for class output loss')
 
     # Optimizer parameters
     parser.add_argument('--opt', default='adamw', type=str, metavar='OPTIMIZER',
@@ -64,7 +48,7 @@ def get_args_parser():
                         help='Optimizer Epsilon (default: 1e-8)')
     parser.add_argument('--opt-betas', default=None, type=float, nargs='+', metavar='BETA',
                         help='Optimizer Betas (default: None, use opt default)')
-    parser.add_argument('--clip-grad', type=float, default=1.0, metavar='NORM',
+    parser.add_argument('--clip-grad', type=float, default=None, metavar='NORM',
                         help='Clip gradient norm (default: None, no clipping)')
     parser.add_argument('--momentum', type=float, default=0.9, metavar='M',
                         help='SGD momentum (default: 0.9)')
@@ -101,8 +85,8 @@ def get_args_parser():
     parser.add_argument('--color-jitter', type=float, default=0.4, metavar='PCT',
                         help='Color jitter factor (default: 0.4)')
     parser.add_argument('--aa', type=str, default='rand-m9-mstd0.5-inc1', metavar='NAME',
-                        help='Use AutoAugment policy. "v0" or "original". ' + 
-                             '(default: rand-m9-mstd0.5-inc1)')
+                        help='Use AutoAugment policy. "v0" or "original". " + \
+                             "(default: rand-m9-mstd0.5-inc1)'),
     parser.add_argument('--smoothing', type=float, default=0.1, help='Label smoothing (default: 0.1)')
     parser.add_argument('--train-interpolation', type=str, default='bicubic',
                         help='Training interpolation (random, bilinear, bicubic default: "bicubic")')
@@ -122,10 +106,23 @@ def get_args_parser():
                         help='Do not random erase first (clean) augmentation split')
 
     # * Finetuning params
-    parser.add_argument('--finetune',
-                        default='https://dl.fbaipublicfiles.com/deit/deit_small_patch16_224-cd65a155.pth', 
+    parser.add_argument('--finetune', default='https://dl.fbaipublicfiles.com/deit/deit_small_patch16_224-cd65a155.pth', 
                         help='finetune from checkpoint')
-    parser.add_argument('--resume', action='store_true', default=False, help='resume from checkpoint')
+    parser.add_argument('--device', default='cuda',
+                        help='device to use for training / testing')
+    parser.add_argument('--resume', default='', help='resume from checkpoint')
+    parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
+                        help='start epoch')
+    parser.add_argument('--eval', action='store_true', help='Perform evaluation only')
+    parser.add_argument('--num_workers', default=10, type=int)
+    parser.add_argument('--pin-mem', action='store_true',
+                        help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
+    parser.add_argument('--no-pin-mem', action='store_false', dest='pin_mem',
+                        help='')
+    parser.set_defaults(pin_mem=True)
+
+    parser.add_argument("--work_space", default="results/mcta", type=str)
+    parser.add_argument('--log_dir', default='log_dir', type=str, help='log dir to save the results')
 
     # Dataset parameters
     parser.add_argument('--dataset', default='', type=str, help='name of dataset')
@@ -134,54 +131,12 @@ def get_args_parser():
     parser.add_argument("--train_list", default="train_aug_id.txt", type=str, 
                         help='train_id.txt or train_aug_id.txt')
     parser.add_argument('--checkpoint', default='', help='checkpoint for generating maps')
-    parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
-                        help='start epoch')
-    parser.add_argument('--eval', action='store_true', help='Perform evaluation only')
-    parser.add_argument('--num_workers', default=10, type=int)
-    parser.add_argument('--pin-mem', action='store_true',
-                        help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
-    parser.add_argument('--no-pin-mem', action='store_false', dest='pin_mem', help='')
-    parser.set_defaults(pin_mem=True)
+
+    parser.add_argument('--seed', default=0, type=int)
 
     return parser
 
 
-def same_seeds(seed):
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-      torch.cuda.manual_seed(seed)
-      torch.cuda.manual_seed_all(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-    
-    if seed == 0:
-        torch.backends.cudnn.benchmark = False
-        torch.backends.cudnn.deterministic = True
-
-
-def init_distributed_mode(args):
-    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
-        args.rank = int(os.environ["RANK"])
-        args.world_size = int(os.environ['WORLD_SIZE'])
-        args.local_rank = int(os.environ['LOCAL_RANK'])
-    else:
-        print('Not using distributed mode')
-        args.distributed = False
-        return
-
-    args.distributed = True
-    args.dist_url = 'env://'
-    
-    args.dist_backend = 'nccl'
-    print(f'| distributed init (rank {args.rank}): {args.dist_url}', flush=True)
-    dist.init_process_group(
-        backend=args.dist_backend,
-        init_method=args.dist_url,
-        world_size=args.world_size,
-        rank=args.rank)
-    dist.barrier()
-
-   
 def load_model_weight(args, model):
     """Load model weights from a checkpoint or URL.
 
@@ -243,145 +198,108 @@ def load_model_weight(args, model):
 
 
 def main(args):
-    """
-    Main function to train and evaluate the model.
-
-    Args:
-        args: Command line arguments containing model configuration and training parameters.
-    """
-    session_name = 'Training for Classification'
-    init_distributed_mode(args)
     device = torch.device(args.device)
-    torch.cuda.set_device(args.local_rank)
-    if args.seed is None:
-        args.seed = random.randint(0, 3410)
-    same_seeds(args.seed)
-    # Train and Validation for image classification
+    seed = args.seed
+    # cudnn.benchmark = True
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.enabled = False
+
     dataset_train, args.nb_classes = build_dataset(
         is_train=True, make_cam=False, args=args)
+    
     dataset_val, _ = build_dataset(
         is_train=False, make_cam=False, args=args)
-    sampler_train = DistributedSampler(dataset_train)
-    
+
+    sampler_train = torch.utils.data.RandomSampler(dataset_train)
+    sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train,
         sampler=sampler_train,
-        batch_size=args.batch_per_gpu,
+        batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
-        drop_last=True)
-
-    sampler_val = DistributedSampler(dataset_val)
+        drop_last=True,
+    )
 
     data_loader_val = torch.utils.data.DataLoader(
-        dataset_val, 
-        sampler=sampler_val,
-        batch_size=int(2 * args.batch_per_gpu),
+        dataset_val, sampler=sampler_val,
+        batch_size=int(2 * args.batch_size),
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
-        drop_last=False)
-    
+        drop_last=False
+    )
+
+    print(f"Creating model: {args.model}")
+
     model = create_model(
         args.model,
         pretrained=False,
         num_classes=args.nb_classes,
         drop_rate=args.drop,
         drop_path_rate=args.drop_path,
-        input_size=args.input_size)
-
-    best_ckpt_name = f'{args.model}_best.pth'
-    utils.data_mkdir(args.work_space)
-    args.log_dir = os.path.join(args.work_space, args.log_dir)
-    utils.data_mkdir(args.log_dir)
-    time = datetime.datetime.now().strftime("%Y%m%d-%H%M")
-    utils.logger_info(logger_name=session_name, log_path=os.path.join(
-                      args.log_dir, f'train-{time}-{args.dataset}.log'))
-    logger = logging.getLogger(session_name)
+        drop_block_rate=None,
+        input_size=args.input_size
+    )
 
     if args.finetune:
         checkpoint_model = load_model_weight(args, model)
         model.load_state_dict(checkpoint_model, strict=False)
 
+    model.to(device)
+
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-    linear_scaled_lr = args.lr * args.batch_per_gpu * dist.get_world_size() / 512.0
+    
+    linear_scaled_lr = args.lr * args.batch_size * utils.get_world_size() / 512.0
     args.lr = linear_scaled_lr
-
     optimizer = create_optimizer(args, model)
     loss_scaler = NativeScaler()
-
-    # if args.resume:
-    #     ckpt = os.path.join(args.work_space, f'{args.model}_best.pth')
-    #     checkpoint = torch.load(ckpt, map_location='cpu')
-    #     model.load_state_dict(checkpoint['model'], strict=False)
-        # args.start_epoch = checkpoint['epoch']
-        # optimizer.load_state_dict(checkpoint['optimizer'])
-
     lr_scheduler, _ = create_scheduler(args, optimizer)
-    max_accuracy = 0.0
-    if dist.get_rank() == 0:
-        logger.info(
-            "Model:%s\n"
-            "Number of parameters: %d\n"
-            "Checkpoint saved as %s\n"
-            "Arguments: %s",
-            model, n_parameters, best_ckpt_name, vars(args)
-        )
-
-    model.to(device)
-    if args.world_size > 1:
-        model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
-    model = nn.parallel.DistributedDataParallel(
-        model, find_unused_parameters=True, device_ids=[args.local_rank])
+    work_space = Path(args.work_space)
+    session_name = 'Classification Training'
+    time = datetime.datetime.now().strftime("%Y%m%d-%H%M")
+    utils.logger_info(logger_name=session_name, log_path=os.path.join(
+                      args.log_dir, f'train-{time}-{args.dataset}.log'))
+    logger = logging.getLogger(session_name)
+    logger.info(args)
+    logger.info('number of params:', n_parameters)
     
-    if "mctformerplus" in args.model:
-        train_one_epoch = train_one_epoch_mctformerplus
-    else:
-        train_one_epoch = train_one_epoch_multioutputs
-    
-    torch.autograd.set_detect_anomaly(True)
-
     for epoch in range(args.start_epoch, args.epochs):
-        data_loader_train.sampler.set_epoch(epoch)
-
         train_stats = train_one_epoch(
-            args=args,
-            model=model,
-            data_loader=data_loader_train,
-            optimizer=optimizer,
-            device=device,
-            epoch=epoch,
-            loss_scaler=loss_scaler,
-            clip_grad=args.clip_grad)
+            model, 
+            data_loader_train,
+            optimizer, 
+            device, 
+            epoch, 
+            loss_scaler,
+            args.clip_grad,
+            args=args)
 
         lr_scheduler.step(epoch)
-        
-        test_stats = evaluate(
-            model=model,
-            data_loader=data_loader_val,
-            device=device)
-
-        if test_stats["mAP"] > max_accuracy:
-            torch.save({'model': model.module.state_dict()},
-                       os.path.join(args.work_space, f'{args.model}_best.pth'))
-
-        max_accuracy = max(max_accuracy, test_stats["mAP"])
+        test_stats = evaluate(data_loader_val, model, device)
+        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
+                     **{f'test_{k}': v for k, v in test_stats.items()},
+                     'epoch': epoch}
 
         if utils.is_main_process():
-            log_stats = {'epoch': epoch,
-                     **{f'train_{k}': v for k, v in train_stats.items()},
-                     **{f'test_{k}': v for k, v in test_stats.items()}}
-            logger.info(
-                f'mAP on the {len(dataset_val)} test images: {test_stats["mAP"] * 100:.1f}%\n' +
-                f'Max mAP: {max_accuracy * 100:.2f}%\n' + json.dumps(log_stats)
-            )
-        torch.save({'model': model.module.state_dict(), 'epoch': epoch, 'optimizer': optimizer.state_dict()},
-                   os.path.join(args.work_space, f'{args.model}_last_ckpt.pth'))
+            logger.info(json.dumps(log_stats))
+
+    torch.save({'model': model.state_dict()}, work_space / f'{args.model}_final.pth')
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        'DeiT training and evaluation script', 
-        parents=[get_args_parser()])
+    parser = argparse.ArgumentParser('DeiT training and evaluation script', parents=[get_args_parser()])
     args = parser.parse_args()
+    args.log_dir = os.path.join(args.work_space, args.log_dir)
+    Path(args.work_space).mkdir(parents=True, exist_ok=True)
+    Path(args.log_dir).mkdir(parents=True, exist_ok=True)
+    
     main(args)

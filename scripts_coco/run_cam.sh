@@ -1,6 +1,6 @@
 #!/bin/bash
-GPU=0,1
-NODES=2
+GPU=0
+NODES=1
 DATASET=COCO
 DATACONFIG=data/MSCOCO/ImageLists
 
@@ -17,18 +17,16 @@ WORKDIR=results_coco/${MODELNAME}
 
 CUDA_VISIBLE_DEVICES=${GPU}
 
-# ============= Train Model ===============#
-OMP_NUM_THREADS=${NODES} \
-torchrun --nproc_per_node=${NODES} --nnodes=1 \
-    train_model.py \
-    --dataset ${DATASET} \
-    --model ${MODELNAME} \
-    --train_list ${TRAINID} \
-    --work_space ${WORKDIR} \
-    --epoch 45 \
-    --warmup-epochs 5 \
-    --batch_per_gpu 16 \
-    --lr 5e-4 \
+# # ============= Train Model ===============#
+# OMP_NUM_THREADS=${NODES} \
+# torchrun --nproc_per_node=${NODES} --nnodes=1 \
+#     train_model_v2.py \
+#     --dataset ${DATASET} \
+#     --model ${MODELNAME} \
+#     --train_list ${TRAINID} \
+#     --work_space ${WORKDIR} \
+#     --epoch 45 \
+#     --batch_size 32 \
     
 # ============= Make Class Activation Maps of Model=============#
 python make_cam.py \
@@ -37,7 +35,7 @@ python make_cam.py \
     --work_space ${WORKDIR} \
     --cam_out_dir ${SEGTRAINDIR} \
     --train_list ${TRAINID} \
-    --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
+    --checkpoint ${WORKDIR}/${MODELNAME}_final.pth \
     # --checkpoint results_coco/mcta/mcta-deit-small-coco-4627.pth \
     
 # ============= Evaluate Class Activation Maps =============#

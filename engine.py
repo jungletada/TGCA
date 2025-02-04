@@ -16,8 +16,8 @@ import torch.distributed as dist
 from sklearn.metrics import average_precision_score
 
 
-def train_one_epoch_multioutputs(args, model, data_loader, optimizer, device, 
-    epoch, loss_scaler, clip_grad, set_training_mode=True, rank=0):
+def train_one_epoch_multioutputs(model, data_loader, optimizer, device, 
+    epoch, loss_scaler, clip_grad, set_training_mode=True, rank=0, args=None):
     """
     Train the model for one epoch with multiple outputs.
 
@@ -33,20 +33,10 @@ def train_one_epoch_multioutputs(args, model, data_loader, optimizer, device,
         set_training_mode: Boolean to set training mode.
         rank: Rank of the current process (for distributed training).
     """
-    
-    def get_cls_weight_linear(cls_weight_init, epoch, warmup_epochs, total_epochs):
-        if epoch <= warmup_epochs:
-            return cls_weight_init
-        current_epoch = epoch - warmup_epochs
-        c_total_epochs = total_epochs - warmup_epochs
-        return cls_weight_init - (cls_weight_init - 1.0) * (current_epoch / c_total_epochs)
-    
-    print_freq = 10
     model.train(set_training_mode)
-    criterion = nn.MultiLabelSoftMarginLoss()
-   
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    print_freq = 10
     header = f'Epoch: [{epoch}]'
     
     for samples, targets in metric_logger.log_every(data_loader, print_freq, header, rank=rank):
@@ -56,14 +46,12 @@ def train_one_epoch_multioutputs(args, model, data_loader, optimizer, device,
         with torch.autocast(device_type="cuda"):
             outputs = model(samples)
 
-            cls_loss = criterion(outputs[0], targets)
+            cls_loss = F.multilabel_soft_margin_loss(outputs[0], targets)
             metric_logger.update(cls_loss=cls_loss.item())
             
-            patch_loss = criterion(outputs[1], targets)
+            patch_loss = F.multilabel_soft_margin_loss(outputs[1], targets)
             metric_logger.update(pat_loss=patch_loss.item())
 
-            # cls_weight = get_cls_weight_linear(
-            #     args.cls_weight, epoch, args.warmup_epochs-1, args.epochs - 1)
             total_loss = 3.0 * cls_loss + patch_loss
             
         loss_value = total_loss.item()
@@ -82,12 +70,10 @@ def train_one_epoch_multioutputs(args, model, data_loader, optimizer, device,
         torch.cuda.synchronize()
         metric_logger.update(loss=loss_value)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
-    # gather the stats from all processes
+        
     metric_logger.synchronize_between_processes()
-    
-    if dist.get_rank() == 0:
-        print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}  
+    print("Averaged stats:", metric_logger)
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
 def train_one_epoch_basic(
@@ -129,15 +115,16 @@ def train_one_epoch_basic(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}  
 
 
-def train_one_epoch_mctformerplus(
-        args, model,data_loader,optimizer, device,epoch, loss_scaler, 
-        clip_grad, set_training_mode=True):
+def train_one_epoch(model: torch.nn.Module, data_loader: Iterable,
+                    optimizer: torch.optim.Optimizer, device: torch.device,
+                    epoch: int, loss_scaler, max_norm: float = 0,
+                    set_training_mode=True, args=None):
     model.train(set_training_mode)
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
-    header = f'Epoch: [{epoch}]'
+    header = 'Epoch: [{}]'.format(epoch)
     print_freq = 10
-    
+
     for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
@@ -146,43 +133,48 @@ def train_one_epoch_mctformerplus(
         c_outputs = None
         with torch.cuda.amp.autocast():
             outputs = model(samples)
-            outputs, c_outputs, patch_outputs = outputs
+            if len(outputs) == 2:
+                outputs, patch_outputs = outputs
+            elif len(outputs) == 3:
+                outputs, c_outputs, patch_outputs = outputs
 
             loss = F.multilabel_soft_margin_loss(outputs, targets)
             metric_logger.update(mct_loss=loss.item())
-            
-            output_cls_embeddings = F.normalize(c_outputs, dim=-1)  # 12xBxCxD
-            scores = output_cls_embeddings @ output_cls_embeddings.permute(0, 1, 3, 2)  # 12xBxCxC
 
-            ground_truth = torch.arange(targets.size(-1), dtype=torch.long, device=device)  # C
-            ground_truth = ground_truth.unsqueeze(0).unsqueeze(0).expand(
-                c_outputs.shape[0], c_outputs.shape[1], c_outputs.shape[2])  # 12 x B x C
-            regularizer_loss = torch.nn.CrossEntropyLoss(reduction='none')(
-                scores.permute(1, 2, 3, 0), ground_truth.permute(1, 2, 0))  # B x C x 12
-            regularizer_loss = torch.mean(
-                torch.mean(torch.sum(regularizer_loss * targets.unsqueeze(-1), dim=-2), dim=-1) / (
-                            torch.sum(targets, dim=-1) + 1e-8))
-            metric_logger.update(attn_loss=regularizer_loss.item())
-            loss = loss + regularizer_loss
-            
-            ploss = F.multilabel_soft_margin_loss(patch_outputs, targets)
-            metric_logger.update(pat_loss=ploss.item())
-            loss = loss + ploss
+            if c_outputs is not None:
+                c_outputs = c_outputs[-12:]
+                output_cls_embeddings = F.normalize(c_outputs, dim=-1)  # 12xBxCxD
+                scores = output_cls_embeddings @ output_cls_embeddings.permute(0, 1, 3, 2)  # 12xBxCxC
+
+                ground_truth = torch.arange(targets.size(-1), dtype=torch.long, device=device)  # C
+                ground_truth = ground_truth.unsqueeze(0).unsqueeze(0).expand(c_outputs.shape[0], c_outputs.shape[1],
+                                                                             c_outputs.shape[2])  # 12xBxC
+                regularizer_loss = torch.nn.CrossEntropyLoss(reduction='none')(scores.permute(1, 2, 3, 0),
+                                                                               ground_truth.permute(1, 2, 0))  # BxCx12
+                regularizer_loss = torch.mean(
+                    torch.mean(torch.sum(regularizer_loss * targets.unsqueeze(-1), dim=-2), dim=-1) / (
+                                torch.sum(targets, dim=-1) + 1e-8))
+                metric_logger.update(attn_loss=regularizer_loss.item())
+                loss = loss + regularizer_loss
+
+            if patch_outputs is not None:
+                ploss = F.multilabel_soft_margin_loss(patch_outputs, targets)
+                metric_logger.update(pat_loss=ploss.item())
+                loss = loss + ploss
 
         loss_value = loss.item()
 
         if not math.isfinite(loss_value):
-            print(f"Loss is {loss_value}, stopping training")
+            print("Loss is {}, stopping training".format(loss_value))
             sys.exit(1)
 
         optimizer.zero_grad()
 
         is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
-        loss_scaler(loss, optimizer, clip_grad=clip_grad,
+        loss_scaler(loss, optimizer, clip_grad=max_norm,
                     parameters=model.parameters(), create_graph=is_second_order)
 
         torch.cuda.synchronize()
-
         metric_logger.update(loss=loss_value)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
     # gather the stats from all processes
@@ -193,6 +185,48 @@ def train_one_epoch_mctformerplus(
 
 @torch.no_grad()
 def evaluate(data_loader, model, device):
+    criterion = torch.nn.MultiLabelSoftMarginLoss()
+    mAP = []
+
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    header = 'Test:'
+
+    # switch to evaluation mode
+    model.eval()
+
+    for images, target in metric_logger.log_every(data_loader, 10, header):
+        images = images.to(device, non_blocking=True)
+        target = target.to(device, non_blocking=True)
+        batch_size = images.shape[0]
+
+        with torch.cuda.amp.autocast():
+            output = model(images)
+
+            if len(output) == 2:
+                output, patch_output = output
+            elif len(output) == 3:
+                output, c_output, patch_output = output
+
+            loss = criterion(output, target)
+            output = torch.sigmoid(output)
+
+            mAP_list = compute_mAP(target, output)
+            mAP = mAP + mAP_list
+            metric_logger.meters['mAP'].update(np.mean(mAP_list), n=batch_size)
+
+        metric_logger.update(loss=loss.item())
+    # gather the stats from all processes
+    metric_logger.synchronize_between_processes()
+
+    print('* mAP {mAP.global_avg:.3f} loss {losses.global_avg:.3f}'
+              .format(mAP=metric_logger.mAP, losses=metric_logger.loss))
+
+
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+
+@torch.no_grad()
+def evaluate_ori(data_loader, model, device):
     criterion = torch.nn.MultiLabelSoftMarginLoss()
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Test:'
