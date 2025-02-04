@@ -22,7 +22,7 @@ from torch.utils.data.distributed import DistributedSampler
 import utils
 from engine import evaluate
 from engine import train_one_epoch_mctformerplus, \
-    train_one_epoch_multioutputs
+    train_one_epoch_mctta
 from datasets_cam import build_dataset
 
 import models.srmct
@@ -343,7 +343,7 @@ def main(args):
     if "mctformerplus" in args.model:
         train_one_epoch = train_one_epoch_mctformerplus
     else:
-        train_one_epoch = train_one_epoch_multioutputs
+        train_one_epoch = train_one_epoch_mctta
     
     torch.autograd.set_detect_anomaly(True)
 

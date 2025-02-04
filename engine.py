@@ -16,7 +16,7 @@ import torch.distributed as dist
 from sklearn.metrics import average_precision_score
 
 
-def train_one_epoch_multioutputs(model, data_loader, optimizer, device, 
+def train_one_epoch_mctta(model, data_loader, optimizer, device, 
     epoch, loss_scaler, clip_grad, set_training_mode=True, rank=0, args=None):
     """
     Train the model for one epoch with multiple outputs.
@@ -115,7 +115,7 @@ def train_one_epoch_basic(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}  
 
 
-def train_one_epoch(model: torch.nn.Module, data_loader: Iterable,
+def train_one_epoch_mctplus(model: torch.nn.Module, data_loader: Iterable,
                     optimizer: torch.optim.Optimizer, device: torch.device,
                     epoch: int, loss_scaler, max_norm: float = 0,
                     set_training_mode=True, args=None):

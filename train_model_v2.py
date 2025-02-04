@@ -18,7 +18,7 @@ from timm.utils import NativeScaler
 
 import utils
 from engine import evaluate
-from engine import train_one_epoch, train_one_epoch_multioutputs
+from engine import train_one_epoch_mctplus, train_one_epoch_mctta
 from datasets_cam import build_dataset
 
 import models.srmct
@@ -32,7 +32,7 @@ def get_args_parser():
     parser.add_argument('--epochs', default=45, type=int)
 
     # Model parameters
-    parser.add_argument('--model', default='mctformerplus', type=str, metavar='MODEL',
+    parser.add_argument('--model', default='mcta', type=str, metavar='MODEL',
                         help='Name of model to train')
     parser.add_argument('--input-size', default=448, type=int, help='images input size')
 
@@ -54,6 +54,7 @@ def get_args_parser():
                         help='SGD momentum (default: 0.9)')
     parser.add_argument('--weight-decay', type=float, default=0.05,
                         help='weight decay (default: 0.05)')
+    
     # Learning rate schedule parameters
     parser.add_argument('--sched', default='cosine', type=str, metavar='SCHEDULER',
                         help='LR scheduler (default: "cosine"')
@@ -67,8 +68,8 @@ def get_args_parser():
                         help='learning rate noise std-dev (default: 1.0)')
     parser.add_argument('--warmup-lr', type=float, default=1e-6, metavar='LR',
                         help='warmup learning rate (default: 1e-6)')
-    parser.add_argument('--min-lr', type=float, default=1e-5, metavar='LR',
-                        help='lower lr bound for cyclic schedulers that hit 0 (1e-5)')
+    parser.add_argument('--min-lr', type=float, default=1e-6, metavar='LR',
+                        help='lower lr bound for cyclic schedulers that hit 0 (1e-6)')
 
     parser.add_argument('--decay-epochs', type=float, default=30, metavar='N',
                         help='epoch interval to decay LR')
@@ -132,7 +133,7 @@ def get_args_parser():
                         help='train_id.txt or train_aug_id.txt')
     parser.add_argument('--checkpoint', default='', help='checkpoint for generating maps')
 
-    parser.add_argument('--seed', default=0, type=int)
+    parser.add_argument('--seed', default=None, type=int)
 
     return parser
 
@@ -199,6 +200,8 @@ def load_model_weight(args, model):
 
 def main(args):
     device = torch.device(args.device)
+    if args.seed is None:
+        args.seed = random.randint(0, 29510)
     seed = args.seed
     # cudnn.benchmark = True
     torch.manual_seed(seed)
@@ -238,17 +241,18 @@ def main(args):
         drop_last=False
     )
 
-    print(f"Creating model: {args.model}")
-
     model = create_model(
         args.model,
         pretrained=False,
         num_classes=args.nb_classes,
         drop_rate=args.drop,
         drop_path_rate=args.drop_path,
-        drop_block_rate=None,
-        input_size=args.input_size
-    )
+        input_size=args.input_size)
+
+    if "mctformerplus" in args.model:
+        train_one_epoch = train_one_epoch_mctplus
+    else:
+        train_one_epoch = train_one_epoch_mctta
 
     if args.finetune:
         checkpoint_model = load_model_weight(args, model)
@@ -269,9 +273,11 @@ def main(args):
     utils.logger_info(logger_name=session_name, log_path=os.path.join(
                       args.log_dir, f'train-{time}-{args.dataset}.log'))
     logger = logging.getLogger(session_name)
-    logger.info(args)
-    logger.info('number of params:', n_parameters)
-    
+
+    logger.info(vars(args))
+    logger.info(f'number of params:{n_parameters}')
+
+    max_accuracy = 0.0
     for epoch in range(args.start_epoch, args.epochs):
         train_stats = train_one_epoch(
             model, 
@@ -284,13 +290,22 @@ def main(args):
             args=args)
 
         lr_scheduler.step(epoch)
+
         test_stats = evaluate(data_loader_val, model, device)
-        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-                     **{f'test_{k}': v for k, v in test_stats.items()},
-                     'epoch': epoch}
+        if test_stats["mAP"] > max_accuracy:
+            torch.save({'model': model.module.state_dict()},
+                       os.path.join(args.work_space, f'{args.model}_best.pth'))
+        max_accuracy = max(max_accuracy, test_stats["mAP"])
+
+        log_stats = {'epoch': epoch,
+                     **{f'train_{k}': v for k, v in train_stats.items()},
+                     **{f'test_{k}': v for k, v in test_stats.items()},}
 
         if utils.is_main_process():
-            logger.info(json.dumps(log_stats))
+            logger.info(
+                f'mAP on the {len(dataset_val)} eval images: {test_stats["mAP"] * 100:.2f}%\n' +
+                f'Max mAP: {max_accuracy * 100:.2f}%\n' + json.dumps(log_stats)
+            )
 
     torch.save({'model': model.state_dict()}, work_space / f'{args.model}_final.pth')
 
