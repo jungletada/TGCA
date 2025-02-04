@@ -9,7 +9,7 @@ from timm.models.layers import trunc_normal_, to_2tuple
 import torch.nn.functional as F
 
 
-__all__ = ['deit_small_MCTformerV2']
+__all__ = ['mctformerv2']
 
 
 class MCTformerV2(VisionTransformer):
@@ -17,12 +17,11 @@ class MCTformerV2(VisionTransformer):
         super().__init__(*args, **kwargs)
         self.head = nn.Conv2d(self.embed_dim, self.num_classes, kernel_size=3, stride=1, padding=1)
         self.head.apply(self._init_weights)
-        
         img_size = to_2tuple(input_size)
         patch_size = to_2tuple(self.patch_embed.patch_size)
         num_patches = (img_size[1] // patch_size[1]) * (img_size[0] // patch_size[0])
+        self.Hp, self.Wp = math.ceil(img_size[0] / patch_size[0]), math.ceil(img_size[1] / patch_size[1])
         self.num_patches = num_patches
-
         self.cls_token = nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim))
         self.pos_embed_cls = nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim))
         self.pos_embed_pat = nn.Parameter(torch.zeros(1, num_patches, self.embed_dim))
@@ -155,7 +154,7 @@ def convert_weights_update(checkpoint, num_classes=80):
 
 
 @register_model
-def deit_small_MCTformerV2(pretrained=False, **kwargs):
+def mctformerv2(pretrained=False, **kwargs):
     model = MCTformerV2(
         patch_size=16, embed_dim=384, depth=12, num_heads=6, mlp_ratio=4, qkv_bias=True,
         norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)

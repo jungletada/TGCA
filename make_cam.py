@@ -389,13 +389,13 @@ if __name__ == '__main__':
         args=args)
     
     args.num_classes = num_classes
-    
+
     model = create_cam_model(args)
-    if 'model' in args.checkpoint:
-        model_dict = args.checkpoint['model']
-    else:
-        model_dict = args.checkpoint
-        
+
+    model_dict = torch.load(args.checkpoint)
+    if 'model' in model_dict:
+        model_dict = model_dict['model']
+    
     model.load_state_dict(model_dict)
     model.eval()
     

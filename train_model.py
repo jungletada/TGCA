@@ -26,6 +26,7 @@ from engine import train_one_epoch_mctformerplus, \
 from datasets_cam import build_dataset
 
 import models.srmct
+import models.mctformer
 import models.mct_adapter
 import models.mctformer_plus
 from models.tool import torchutils
@@ -311,7 +312,8 @@ def main(args):
     loss_scaler = NativeScaler()
 
     if args.resume:
-        ckpt = os.path.join(args.work_space, f'{args.model}_best.pth')
+        # ckpt = os.path.join(args.work_space, f'{args.model}_best.pth')
+        ckpt = 'results_voc/mcta/mcta-deit-small-voc-7390.pth'
         checkpoint = torch.load(ckpt, map_location='cpu')
         model.load_state_dict(checkpoint['model'], strict=False)
         # args.start_epoch = checkpoint['epoch']
