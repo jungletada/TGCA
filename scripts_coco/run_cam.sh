@@ -12,7 +12,7 @@ INPUTSIZE=448
 SEGTRAINDIR=cam_mask_train
 SEGVALDIR=cam_mask_val
 
-MODELNAME=mctformerplus
+MODELNAME=mcta
 WORKDIR=results_coco/${MODELNAME}
 
 CUDA_VISIBLE_DEVICES=${GPU}
@@ -25,8 +25,8 @@ CUDA_VISIBLE_DEVICES=${GPU}
 #     --model ${MODELNAME} \
 #     --train_list ${TRAINID} \
 #     --work_space ${WORKDIR} \
-#     --epoch 45 \
-#     --batch_size 32 \
+#     --epoch 40 \
+#     --batch_size 40 \
     
 # ============= Make Class Activation Maps of Model=============#
 python make_cam.py \
@@ -35,7 +35,7 @@ python make_cam.py \
     --work_space ${WORKDIR} \
     --cam_out_dir ${SEGTRAINDIR} \
     --train_list ${TRAINID} \
-    --checkpoint ${WORKDIR}/${MODELNAME}_final.pth \
+    --checkpoint ${WORKDIR}/${MODELNAME}_best.pth \
     # --checkpoint results_coco/mcta/mcta-deit-small-coco-4627.pth \
     
 # ============= Evaluate Class Activation Maps =============#

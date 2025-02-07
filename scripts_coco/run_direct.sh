@@ -9,10 +9,10 @@ VALID=${DATACONFIG}/val_id.txt
 
 SEGVALDIR=cam_mask_val
 CRFDIR=crf_mask_val
-INPUTSIZE=224
+INPUTSIZE=448
 
-MODELNAME=mctformerv2
-WORKDIR=results_coco/mctformerv2
+MODELNAME=mcta
+WORKDIR=results_coco/${MODELNAME}
 CUDA_VISIBLE_DEVICES=${GPU}
 
 # ============= Make Class Activation Maps of Model ============= #
@@ -23,34 +23,34 @@ python make_cam.py \
     --train_list ${VALID} \
     --input_size ${INPUTSIZE} \
     --cam_out_dir ${SEGVALDIR} \
-    --checkpoint  \
+    --checkpoint results_coco/mcta/mctta-deit-small-coco-4632.pth \
       
-# # ============= Evaluate Class Activation Maps No CRF =============#
-# python eval_cam_crf.py \
-#     --dataset ${DATASET} \
-#     --work_space ${WORKDIR} \
-#     --eval_cam_dir ${SEGVALDIR} \
-#     --crf_cam_dir ${CRFDIR} \
-#     --id_list ${VALID} \
-#     --curve_threshold \
-#     --low_thres 39 \
-#     --high_thres 52
+# ============= Evaluate Class Activation Maps No CRF =============#
+python eval_cam_crf.py \
+    --dataset ${DATASET} \
+    --work_space ${WORKDIR} \
+    --eval_cam_dir ${SEGVALDIR} \
+    --crf_cam_dir ${CRFDIR} \
+    --id_list ${VALID} \
+    --curve_threshold \
+    --low_thres 39 \
+    --high_thres 52
     
-# # ============= Evaluate Class Activation Maps =============#
-# python eval_cam_crf.py \
-#     --use_crf \
-#     --dataset ${DATASET} \
-#     --work_space ${WORKDIR} \
-#     --eval_cam_dir ${SEGVALDIR} \
-#     --crf_cam_dir ${CRFDIR} \
-#     --id_list ${VALID} \
-#     --alpha 1.2 \
+# ============= Evaluate Class Activation Maps =============#
+python eval_cam_crf.py \
+    --use_crf \
+    --dataset ${DATASET} \
+    --work_space ${WORKDIR} \
+    --eval_cam_dir ${SEGVALDIR} \
+    --crf_cam_dir ${CRFDIR} \
+    --id_list ${VALID} \
+    --alpha 1.25 \
 
-# #============= Evaluate =============#
-# python steps_coco/eval_sem_seg.py \
-#     --id_list ${VALID} \
-#     --work_space ${WORKDIR} \
-#     --seg_out_dir ${CRFDIR} \
+#============= Evaluate =============#
+python steps_coco/eval_sem_seg.py \
+    --id_list ${VALID} \
+    --work_space ${WORKDIR} \
+    --seg_out_dir ${CRFDIR} \
 
 # # Save the generated mask to zip
 # cd ${WORKDIR} && zip -r ${CRFDIR}.zip ${CRFDIR} && cd -

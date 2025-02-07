@@ -199,7 +199,7 @@ if __name__ == '__main__':
     parser.add_argument('--high_thres', default=55, type=int, help='high threshold for evaluation as background')
     parser.add_argument('--alpha', default=1.15, type=float, help='use alpha to set background')
     parser.add_argument('--eval_nprocs', default=8, type=int, help='use nprocs processess.')
-    parser.add_argument("--crf_cam_dir", default="crf_mask", type=str, help="crf mask path")
+    parser.add_argument("--crf_cam_dir", default="crf_mask_train", type=str, help="crf mask path")
     args = parser.parse_args()
     #----------------------------------------------------------------------------------#
     args.eval_cam_dir = osp.join(args.work_space, args.eval_cam_dir)
