@@ -58,7 +58,7 @@ def get_args_parser():
     # Learning rate schedule parameters
     parser.add_argument('--sched', default='cosine', type=str, metavar='SCHEDULER',
                         help='LR scheduler (default: "cosine"')
-    parser.add_argument('--lr', type=float, default=5e-4, metavar='LR',
+    parser.add_argument('--lr', type=float, default=1e-3, metavar='LR',
                         help='learning rate (default: 5e-4)')
     parser.add_argument('--lr-noise', type=float, nargs='+', default=None, metavar='pct, pct',
                         help='learning rate noise on/off epoch percentages')
@@ -293,7 +293,7 @@ def main(args):
 
         test_stats = evaluate(data_loader_val, model, device)
         if test_stats["mAP"] > max_accuracy:
-            torch.save({'model': model.module.state_dict()},
+            torch.save({'model': model.state_dict()},
                        os.path.join(args.work_space, f'{args.model}_best.pth'))
         max_accuracy = max(max_accuracy, test_stats["mAP"])
 

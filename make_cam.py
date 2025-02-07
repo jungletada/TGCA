@@ -24,7 +24,7 @@ def get_args_parser():
     parser = argparse.ArgumentParser('Generating attention maps', add_help=False)
     # Model parameters
     parser.add_argument("--num_workers", default=4, type=int)
-    parser.add_argument('--model', default='deit_small_mctgformer', type=str, metavar='MODEL',
+    parser.add_argument('--model', default='mctformer', type=str, metavar='MODEL',
                         help='Name of model to train')
     parser.add_argument('--checkpoint', default='', help='checkpoint for generating maps')
     parser.add_argument('--input_size', default=448, type=int, help='images input size')
