@@ -1,6 +1,7 @@
 # MCTTA: Multi-class Token Transformer Adapter for Weakly Supervised Semantic Segmentation
 
-Dingjie PENG*
+Dingjie PENG*  
+
 *Waseda University
 
 
@@ -25,14 +26,14 @@ MCTTA improves Class Activation Map (CAM) quality and final segmentation predict
 ```
 MCTTA/
 ├── models/
-├── datasets/
+├── data/
 ├── configs/
-├── utils/
-├── train.py
-├── infer.py
-├── generate_cam.py
+├── misc/
+├── tools
+├── scripts_coco
+├── scripts_voc
 ├── README.md
-└── requirements.txt
+└── ...
 ```
 
 ---
@@ -41,7 +42,7 @@ MCTTA/
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/MCTTA.git
+git clone https://github.com/jungletada/MCTG.git
 cd MCTTA
 
 # Create a virtual environment (optional but recommended)
@@ -71,7 +72,7 @@ We support training and evaluation on **PASCAL VOC 2012** and **MS COCO 2014** d
 3. **Directory structure** should look like:
 
 ```
-datasets/VOC2012/
+data/VOCdevkit/VOC2012/
 ├── JPEGImages/
 ├── SegmentationClass/
 ├── ImageSets/
@@ -102,92 +103,58 @@ python scripts/preprocess_voc.py --data_root datasets/VOC2012
 3. **Directory structure** should look like:
 
 ```
-datasets/COCO2014/
-├── images/
-│   ├── train2014/
-│   └── val2014/
+data/MSCOCO/
+├── train2014/
+├── val2014/
 ├── annotations/
 │   └── instances_train2014.json
 │   └── instances_val2014.json
-└── labels/
+└── ImageLabel
 ```
 
-4. **Preprocessing** (if required):
+
+
+## For VOC 
+### 1. 🏋️ Generate Class Avtivation Map ()
 
 ```bash
-python scripts/preprocess_coco.py --data_root datasets/COCO2014
+bash scripts_voc/run_cam.sh 
 ```
-
----
-
-## 🏋️ Training
-
+### 2. 🏋️ Run Pixel Semantic Affinity (PSA) or (Inter-Pixel Relation) IRN
 ```bash
-python train.py --config configs/train_mctta_voc.yaml
+bash scripts_voc/run_psa.sh
 ```
 
-For COCO:
+### 3. 🧪 Alternative: Run direct method
+```
+bash scripts_voc/run_direct.sh
+```
 
+### 4. 🧪 Run WSSS using generated pseudo label
+- Please install mmsegmentation and run the training and inference in MMSeg  
+
+## For COCO
+### Same as VOC
 ```bash
-python train.py --config configs/train_mctta_coco.yaml
+bash scripts_coco/run_cam.sh
+
+bash scripts_coco/run_psa.sh
+
+bash scripts_coco/run_direct.sh
 ```
 
----
-
-## 🧪 Inference
-
-```bash
-python infer.py --config configs/infer_voc.yaml
-```
-
----
-
-## 🗺️ CAM Generation
-
-```bash
-python generate_cam.py --config configs/cam_voc.yaml
-```
-
----
-
-## 📊 Evaluation
-
-```bash
-python evaluate.py --config configs/eval_voc.yaml
-```
-
----
-
-## 📈 Results
-
-### PASCAL VOC 2012
-
-| Method               | mIoU (val) | mIoU (test) |
-| -------------------- | ---------- | ----------- |
-| MCTTA (single-stage) | XX.X%      | XX.X%       |
-| MCTTA (multi-stage)  | XX.X%      | XX.X%       |
-
-### MS COCO 2014
-
-| Method               | mIoU (val) |
-| -------------------- | ---------- |
-| MCTTA (single-stage) | XX.X%      |
-| MCTTA (multi-stage)  | XX.X%      |
-
-> Full results and comparison tables are available in the paper.
-
----
 
 ## 📜 Citation
 
 If you find this work useful, please consider citing:
 
 ```bibtex
-@article{your2025mctta,
-  title={MCTTA: Multi-class Token Transformer Adapter for Weakly Supervised Semantic Segmentation},
-  author={Your Name and Others},
-  journal={CVPR/ICCV/ECCV},
-  year={2025}
+@article{peng2024structural,
+  title={Structural Relation Multi-class Token Transformer for Weakly Supervised Semantic Segmentation},
+  author={PENG, Dingjie and KAMEYAMA, Wataru},
+  journal={IEICE Transactions on Information and Systems},
+  year={2024},
+  publisher={The Institute of Electronics, Information and Communication Engineers}
 }
 ```
 
@@ -198,5 +165,3 @@ If you find this work useful, please consider citing:
 This project builds on the [MCTformer+](https://github.com/your-base-repo/MCTformerPlus) architecture and draws inspiration from recent advances in weakly supervised segmentation. We thank the authors of prior work for their contributions.
 
 ---
-
-Let me know if you'd like to auto-generate the `requirements.txt` file or include demo notebooks.
