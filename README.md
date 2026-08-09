@@ -40,18 +40,67 @@ MCTTA/
 
 ## ⚙️ Installation
 
+### Three independent Conda environments are required
+
+TGCA, MoRe, and CTI use different Python, PyTorch, CUDA, and `timm` versions. Do **not** install all three methods into one shared environment. Create one independent environment for each method:
+
+* [`tgca-repro`: How to build the TGCA environment](#how-to-build-the-tgca-environment)
+* [`more-repro`: How to build the MoRe environment](#how-to-build-the-more-environment)
+* [`cti-repro`: How to build the CTI environment](#how-to-build-the-cti-environment)
+
+For a fair comparison, run a host's vanilla baseline and its TGCA variant in the same host-specific environment. Record the complete environment, repository commit, command, seed, and checkpoint for every reported result.
+
+These environments target Linux with an NVIDIA GPU. Check that the installed CUDA runtime is compatible with the machine's NVIDIA driver before training.
+
+### How to build the TGCA environment
+
+The current TGCA repository is based on MCTTA/MCTG. Its [`requirements.txt`](requirements.txt) combines PyTorch 2.1.0 with an incompatible torchvision version, so install the compatible PyTorch stack first and exclude the two conflicting lines when installing the remaining dependencies:
+
 ```bash
 # Clone the repository
-git clone https://github.com/jungletada/MCTG.git
-cd MCTTA
+git clone --recurse-submodules https://github.com/jungletada/TGCA.git
+cd TGCA
 
-# Create a virtual environment (optional but recommended)
-python -m venv venv
-source venv/bin/activate  # on Windows: venv\Scripts\activate
+# Create the independent TGCA/MCTTA environment
+conda create -n tgca-repro python=3.9 -y
+conda activate tgca-repro
+conda install pytorch==2.1.0 torchvision==0.16.0 pytorch-cuda=11.8 -c pytorch -c nvidia -y
 
-# Install dependencies
-pip install -r requirements.txt
+# Install the remaining dependencies without replacing PyTorch or torchvision
+grep -vE '^(torch|torchvision)==' requirements.txt > /tmp/tgca-requirements.txt
+python -m pip install -r /tmp/tgca-requirements.txt
 ```
+
+The legacy dependency pins still require validation and will be replaced by a clean, tested environment specification before public release.
+
+### How to build the MoRe environment
+
+MoRe requires Python 3.7, its older PyTorch stack, and a separately compiled bilateral-filter extension. Its [`requirements.txt`](hosts/MoRe/requirements.txt) is a reference list rather than a valid pip requirements file.
+
+```bash
+conda create -n more-repro python=3.7 -y
+conda activate more-repro
+conda install pytorch==1.12.1 torchvision==0.13.1 cudatoolkit=11.3 -c pytorch -y
+conda install numpy==1.21.5 pydensecrf==1.0rc3 -c conda-forge -y
+python -m pip install einops==0.6.0 imageio==2.26.0 matplotlib==3.5.3 \
+  mmcv==1.7.1 scikit-image==0.19.3 scikit-learn==1.0.2 \
+  tensorboard==2.11.2 texttable==1.6.7 timm==0.6.12 tqdm==4.65.0
+```
+
+Then build the [bilateral-filter Python extension](https://github.com/meng-tang/rloss/tree/master/pytorch#build-python-extension-module) inside `more-repro`. MoRe currently hard-codes an extension build path, so verify or update that path locally before running its training scripts.
+
+### How to build the CTI environment
+
+CTI provides an exported [`environment.yml`](hosts/CTI/environment.yml) containing Python 3.9, PyTorch 2.0.1, torchvision 0.15.2, and CUDA 11.7. Remove its machine-specific prefix and give the environment a descriptive name before creating it:
+
+```bash
+sed -e '/^prefix:/d' -e 's/^name: ddpm$/name: cti-repro/' \
+  hosts/CTI/environment.yml > /tmp/cti-repro.yml
+conda env create -f /tmp/cti-repro.yml
+conda activate cti-repro
+```
+
+The CTI README describes a different PyTorch version from the exported environment. Use the internally consistent exported stack above as the initial reproduction environment, and record any compatibility changes needed to reproduce the published baseline.
 
 ---
 

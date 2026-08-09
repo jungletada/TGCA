@@ -1,0 +1,6 @@
+[submodule "hosts/MoRe"]
+	path = hosts/MoRe
+	url = https://github.com/zwyang6/MoRe.git
+[submodule "hosts/CTI"]
+	path = hosts/CTI
+	url = https://github.com/yoon307/CTI.git

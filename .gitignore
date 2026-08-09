@@ -1,4 +1,6 @@
 
+.DS_Store
+
 configs/
 checkpoints/
 datasets/MSCOCO
