@@ -8,7 +8,6 @@ import os.path as osp
 from torch.utils.data import Dataset
 
 sys.path.append(os.path.dirname(__file__) + os.sep + '../')
-from dataloaders.crf_utils import refine_crf_cam
 
 
 TRAIN_FOLDER_NAME = "train2014"
@@ -203,6 +202,8 @@ class COCOAffDatasetCRF(COCOImageDataset):
             label = label_la.copy()
             
         else:
+            from dataloaders.crf_utils import refine_crf_cam
+
             label_la, label_ha = refine_crf_cam(
                 cam_dict=cam_dict, 
                 original_image=original_image, 

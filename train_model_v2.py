@@ -1,5 +1,6 @@
 
 import os
+import copy
 import time
 import random
 import numpy as np
@@ -131,6 +132,8 @@ def get_args_parser():
     parser.add_argument("--coco_root", default='data/MSCOCO', type=str, help="Path to MSCOCO")
     parser.add_argument("--train_list", default="train_aug_id.txt", type=str, 
                         help='train_id.txt or train_aug_id.txt')
+    parser.add_argument("--val_list", default="val_id.txt", type=str,
+                        help='validation image-id list')
     parser.add_argument('--checkpoint', default='', help='checkpoint for generating maps')
 
     parser.add_argument('--seed', default=None, type=int)
@@ -217,9 +220,11 @@ def main(args):
 
     dataset_train, args.nb_classes = build_dataset(
         is_train=True, make_cam=False, args=args)
-    
+
+    val_args = copy.copy(args)
+    val_args.train_list = args.val_list
     dataset_val, _ = build_dataset(
-        is_train=False, make_cam=False, args=args)
+        is_train=False, make_cam=False, args=val_args)
 
     sampler_train = torch.utils.data.RandomSampler(dataset_train)
     sampler_val = torch.utils.data.SequentialSampler(dataset_val)

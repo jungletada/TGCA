@@ -15,17 +15,20 @@ from misc import torchutils
 from dataloaders.coco.dataloader_psa import COCOSegmentationLabelDataset
 from dataloaders.voc12.dataloader_psa import VOCSegmentationLabelDataset
 from engine import calc_semantic_segmentation_confusion
-from misc.dcrf import DenseCRF
 
 
-crf_inference = DenseCRF(
-    iter_max=10,
-    pos_xy_std=3,
-    pos_w=3,
-    bi_xy_std=45,
-    bi_rgb_std=3,
-    bi_w=3,
-)
+def build_crf():
+    """Construct DenseCRF only for explicitly requested CRF evaluation."""
+    from misc.dcrf import DenseCRF
+
+    return DenseCRF(
+        iter_max=10,
+        pos_xy_std=3,
+        pos_w=3,
+        bi_xy_std=45,
+        bi_rgb_std=3,
+        bi_w=3,
+    )
 
 
 def logfile(args, msg):
@@ -119,6 +122,7 @@ def make_cam_crf(process_id, dataset, args):
         args (Namespace): The arguments containing configuration settings.
     """
 
+    crf_inference = build_crf()
     databin = dataset[process_id]
     num_images = len(databin)
     for i in tqdm(range(num_images)):

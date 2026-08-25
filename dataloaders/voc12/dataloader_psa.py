@@ -10,7 +10,6 @@ import scipy.misc
 from torch.utils.data import Dataset
 
 sys.path.append(os.path.dirname(__file__) + os.sep + '../')
-from dataloaders.crf_utils import refine_crf_cam
 
 IMG_FOLDER_NAME = "JPEGImages"
 ANNOT_FOLDER_NAME = "Annotations"
@@ -270,6 +269,8 @@ class VOC12AffDatasetCRF(VOC12ImageDataset):
         return len(self.img_name_list)
 
     def __getitem__(self, idx):
+        from dataloaders.crf_utils import refine_crf_cam
+
         name, img = super().__getitem__(idx)
         label_cam_path = os.path.join(self.cam_npy_dir, f"{name}.npy")
         label_cam = np.load(label_cam_path, allow_pickle=True).item()
