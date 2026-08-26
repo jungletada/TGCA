@@ -1,0 +1,545 @@
+# TGCA research handoff
+
+Last updated: **2026-08-26 (Asia/Tokyo)**
+
+This file transfers the scientific context, repository state, server setup, completed evidence, active experiments, and next decisions for the TGCA project. It is intended to be the first file read by a new Codex task on the `LHR` server.
+
+## Resume instructions
+
+On `LHR`, work only in:
+
+```text
+/home/peng/code/TGCA
+```
+
+Before doing anything else:
+
+```bash
+cd /home/peng/code/TGCA
+git status --short --branch
+git log -8 --oneline --decorate
+tmux ls
+tmux capture-pane -pt tgca-mctplus-next:0.0 -S -100
+tail -n 120 results/queues/22427d6/mctformerplus-next.log
+```
+
+Then read these files completely:
+
+1. `docs/CHAT_HANDOFF.md` — this operational handoff;
+2. `docs/design.md` — detailed TGCA method and experiment design;
+3. `docs/RESEARCH_PLAN_FULL.md` — full paper rationale and go/no-go plan;
+4. `docs/TIP_REVIEWS.md` — reviewer objections the new work must resolve.
+
+`docs/MCTTA.pdf` is the rejected legacy manuscript. It is evidence and background, not a draft to compress or edit.
+
+Do not stop, restart, or otherwise disturb the active tmux queue merely to inspect it.
+
+## Project objective
+
+Prepare a focused ICASSP 2027 Computer Vision paper:
+
+> **Token-Group Calibrated Attention for Weakly Supervised Semantic Segmentation**
+
+The paper is not a shortened version of the rejected 16-page MCTTA manuscript. Its single contribution is a measurable failure mode of vanilla attention normalization over heterogeneous token groups and a minimal correction:
+
+```text
+s_ij^h = (q_i^h)^T k_j^h / sqrt(d_h)
+s_tilde_ij^h = s_ij^h - log(N_{g(j)}) + b_{g(i),g(j)}^h
+A_ij^h = softmax_j(s_tilde_ij^h)
+```
+
+The central hypothesis is that a joint softmax over a small class-token group and a much larger patch-token group mixes semantic evidence with group cardinality. Increasing patch count, for example through input resolution, may shift aggregate attention mass even when the evidence distribution has not meaningfully changed. TGCA subtracts the log key-group size before one global softmax.
+
+## Non-negotiable scientific contract
+
+TGCA must satisfy all of the following:
+
+- every attention row sums to one;
+- duplicating every key/value in one group leaves that group's aggregate mass and attention output unchanged, up to numerical tolerance;
+- the count correction has no trainable parameters;
+- optional relation bias is only a tiny per-head query-group/key-group matrix;
+- the same formulation supports self-attention and rectangular cross-attention;
+- value projection, output scaling, residual paths, and all unrelated training choices remain fixed.
+
+The required normalization ablation is:
+
+1. vanilla global softmax;
+2. legacy split softmax `(1,1)` — row sum is two by design and this must be stated;
+3. normalized split softmax `(0.5,0.5)` — row sum is one but group mass is forced to `0.5/0.5`;
+4. TGCA without relation bias;
+5. TGCA with relation bias.
+
+Do not reinterpret the two split-softmax baselines as TGCA. They remove group-size effects by assigning fixed group mass, whereas TGCA retains evidence-driven competition between group means.
+
+## Host and baseline roles
+
+- **MCTformer+** is the primary TGCA implementation host.
+- **Know Your Attention Maps: Class-specific Token Masking for WSSS** (ICCV 2025), official repository `https://github.com/HSG-AIML/TokenMasking-WSSS`, is the required independent implementation host. Its singleton register token must be handled as an explicit design choice and tested; do not silently merge it into class or patch tokens.
+- **DiCLIP** (T-IP 2026), official repository `https://github.com/zwyang6/DiCLIP`, is a recent external comparison only. Do not patch TGCA into DiCLIP for the core generality claim.
+- **MoRe** and **CTI** are optional supplementary hosts and currently exist as Git submodules.
+
+Do not return to graph-adapter, CTP-convergence, hierarchical-fusion, pipeline-taxonomy, universal-adapter, or unmatched-SOTA claims. Do not use “Adapter” in the new title. Do not call the old frozen-classifier-plus-separate-segmentation procedure “single-stage.”
+
+## Repository policy
+
+The sole working code repository is:
+
+```text
+/home/peng/code/TGCA
+```
+
+Create or modify research code only within that directory. Do not recreate root-level `src/`, `experiments/`, or `results/` beside the TGCA repository. Keep legacy manuscript material read-only.
+
+Repository remote:
+
+```text
+origin  https://github.com/jungletada/TGCA.git
+```
+
+Git branch state at this handoff:
+
+```text
+main                            7bd603e [origin/main] Document environments and add independent hosts
+research/mctformerplus-baseline 22427d6 Implement TGCA diagnostics and VOC normalization pilots
+```
+
+The active server checkout is `research/mctformerplus-baseline` at clean commit:
+
+```text
+22427d60bff5d1f6c4cc9c5c33f8912502d5a4b0
+```
+
+The research branch had no upstream shown at the time of this handoff. Do not push it or merge it into `main` without explicit user approval and a review of completed results.
+
+Relevant commits:
+
+```text
+22427d6 Implement TGCA diagnostics and VOC normalization pilots
+cf44aa2 Make CRF optional for raw CAM generation
+63d8877 Add reproducible MCTformer+ VOC baseline pipeline
+d6a4a90 Fix vanilla MCTformer+ baseline plumbing
+7bd603e Document environments and add independent hosts
+```
+
+Independent host submodules:
+
+```text
+hosts/CTI   1c6fdb4d14e6843e3d861ebd4580468e30598859
+hosts/MoRe  d733d347e64f21425df245341e1f88900886b2bb
+```
+
+## Server and environment
+
+SSH alias:
+
+```bash
+ssh LHR
+```
+
+Server project path:
+
+```text
+/home/peng/code/TGCA
+```
+
+Primary Conda environment:
+
+```text
+tgca-repro
+Python 3.9.25
+torch 2.1.0
+torchvision 0.16.0
+timm 0.4.12
+CUDA runtime 11.8
+```
+
+Observed GPU for current runs:
+
+```text
+NVIDIA RTX A6000, 49140 MiB
+driver 580.173.02
+```
+
+Activate the environment with:
+
+```bash
+source /home/peng/anaconda3/etc/profile.d/conda.sh
+conda activate tgca-repro
+cd /home/peng/code/TGCA
+```
+
+MoRe, CTI, and TGCA require separate Conda environments because their dependency stacks conflict. Do not merge them merely for convenience.
+
+Codex CLI is installed at `/usr/local/bin/codex`, but it did not start at this snapshot because the server's default Node.js was `v12.22.9` and could not parse the installed CLI. Install/select a current Node.js LTS using an available environment or version manager, reinstall/update `@openai/codex`, and authenticate. Do not copy an entire `~/.codex` directory from another machine because it can contain credentials and machine-specific state.
+
+## Dataset and pretrained assets
+
+The data links are available:
+
+```text
+data/VOCdevkit -> /home/peng/data/VOCdevkit
+data/MSCOCO    -> /home/peng/data/MSCOCO
+```
+
+The development dataset is PASCAL VOC 2012. Current baseline manifests record:
+
+- training: VOC augmented training split;
+- CAM generation and raw-CAM evaluation: 1,464 VOC train images;
+- validation classification: 1,449 images;
+- input training size: `448`;
+- CAM scales: `1.0, 0.75, 1.25`;
+- ImageNet/DeiT initialization: `$HOME/.cache/torch/hub/checkpoints/deit_small_patch16_224-cd65a155.pth`.
+
+Every result directory records dataset hashes, pretrained-weight hash, package freeze, Conda explicit package list, GPU, Git commit, command, seed, and checkpoint hash. Preserve that provenance contract.
+
+Do not start COCO until the VOC mechanism and independent-host go/no-go gates pass.
+
+## Implemented TGCA code
+
+Commit `22427d6` added the initial implementation and experiment plumbing:
+
+- `models/tgca.py` — shared `TokenGroupNormalizer` and functional normalization;
+- `models/vit.py` — MCTformer+ attention integration;
+- `train_model_v2.py` and `make_cam.py` — normalization-mode arguments;
+- `tools/analyze_attention_groups.py` — per-image/layer/head/direction group-mass diagnostics at multiple resolutions;
+- `tools/test_token_replication.py` — synthetic cardinality and replication experiment;
+- `tests/test_tgca_normalization.py` — row sums, masks, relation bias, gradients, mixed precision;
+- `tests/test_tgca_replication.py` — group-mass and output replication invariance;
+- `tests/test_mctformerplus_attention.py` — host integration checks;
+- `experiments/diagnostics/` — reproducible mechanism runners;
+- `experiments/ablations/` — reproducible normalization pilots;
+- `experiments/run_mctformerplus_next_experiments.sh` — active sequential queue.
+
+Supported mode names in the current code are:
+
+```text
+vanilla
+split_11
+split_05
+tgca
+tgca_bias
+tgca_gamma05
+```
+
+The five-mode core suite uses the first five except `tgca_gamma05`.
+
+The legacy `split_11` operator deliberately has row sum two. The diagnostic tool therefore computes its reported “maximum row-sum error” relative to two, not relative to one. Never cite that metric as proof that `split_11` is normalized to unit mass.
+
+## Trustworthy vanilla MCTformer+ baseline
+
+The first completed reproduction is:
+
+```text
+run:       results/mctformerplus/voc/20260825-mctformerplus-voc-vanilla-s0-63d8877
+dataset:   PASCAL VOC 2012 train, 1,464 images
+metric:    raw CAM mIoU, no CRF
+threshold: 0.45
+result:    69.50%
+seed:      0
+epochs:    45
+input:     448
+scales:    1.0, 0.75, 1.25
+```
+
+The exact command is:
+
+```bash
+TGCA_GPU_ID=0 \
+TGCA_RUN_ID=20260825-mctformerplus-voc-vanilla-s0-63d8877 \
+bash experiments/baselines/run_mctformerplus_voc.sh
+```
+
+The final checkpoint SHA-256 is:
+
+```text
+f63dc438a2b2b2650aec5d7c4a0c2c2a92780893466138ed2b71bdc70be43cd7
+```
+
+The training commit was `63d8877`; CAM evaluation used `cf44aa2`; the referenced official MCTformer commit was `0acc27ada87a5582053efb14648442d8644168aa`.
+
+Important interpretation: threshold `0.45` was selected by the existing `train_model_v2.py` tuning workflow. Keep the script, but label `0.45` as the vanilla-seed-0 selected threshold. All current normalization pilots use this same fixed threshold so that each method does not tune its own evaluation threshold.
+
+The integrated vanilla run at commit `22427d6` reproduced the same result exactly:
+
+```text
+run:    results/mctformerplus/voc/20260826-mctformerplus-voc-vanilla-s0-22427d6
+result: 69.50% raw CAM mIoU at fixed threshold 0.45
+```
+
+This is the main regression check that the instrumentation and mode plumbing preserve vanilla behavior.
+
+## Completed mechanism evidence
+
+### Synthetic token-replication test
+
+Run:
+
+```text
+results/mechanism/synthetic/20260826-synthetic-replication-22427d6
+```
+
+Command:
+
+```bash
+bash experiments/diagnostics/run_synthetic_replication.sh
+```
+
+The grid contains 960 configurations over class counts `[1,20,80]`, head counts `[1,6]`, patch counts `[49,196,400,784,1024]`, four logit regimes, and replication factors `[1,2,4,8]`, with seed `2027`.
+
+Observed maximum output change after within-group replication:
+
+```text
+vanilla: 0.4615142941
+TGCA:    0.0000215769
+```
+
+Maximum TGCA row-sum error in this mixed-precision diagnostic:
+
+```text
+0.0000165701
+```
+
+This strongly confirms the mathematical replication property in the synthetic setting. It does not by itself establish better CAM quality.
+
+### Full VOC resolution/group-mass diagnostic for vanilla
+
+Run:
+
+```text
+results/mctformerplus/voc/20260826-mctformerplus-voc-vanilla-scale-diagnostic-22427d6
+```
+
+It processed all 1,464 VOC train images at resolutions `224, 320, 448, 512`, corresponding to patch counts `196, 400, 784, 1024`.
+
+Key results:
+
+```text
+maximum row-sum error:       1.430511474609375e-06
+mean group-mass variance:    0.0046481917763
+median group-mass variance:  0.0018502148937
+```
+
+Directional mean slopes versus log patch count, all layers:
+
+```text
+class query -> class key: -0.0994545
+class query -> patch key: +0.0994545
+patch query -> class key: -0.0539273
+patch query -> patch key: +0.0539273
+```
+
+All four bootstrap 95% confidence intervals exclude zero by a wide margin. In the last three layers, the corresponding magnitudes are approximately `0.09546` for class queries and `0.08179` for patch queries.
+
+Do not use the aggregate `mean_group_mass_slope_vs_log_patch_count` value, which is approximately zero because complementary class-key and patch-key directions cancel under indiscriminate averaging. The directional slopes are the interpretable mechanism result.
+
+This is direct empirical evidence that vanilla attention reallocates aggregate mass toward patch keys as patch count/resolution rises. It still does not prove causality for CAM quality; the normalization ablation must establish that link.
+
+## Active tmux experiment queue
+
+Session:
+
+```text
+tgca-mctplus-next
+```
+
+Pane start command:
+
+```bash
+bash -lc 'source /home/peng/anaconda3/etc/profile.d/conda.sh && \
+conda activate tgca-repro && \
+cd /home/peng/code/TGCA && \
+set -o pipefail && \
+bash experiments/run_mctformerplus_next_experiments.sh 2>&1 | \
+tee results/queues/22427d6/mctformerplus-next.log'
+```
+
+Queue log:
+
+```text
+results/queues/22427d6/mctformerplus-next.log
+```
+
+The queue performs:
+
+1. a full vanilla resolution diagnostic;
+2. five sequential 45-epoch normalization runs:
+   `vanilla`, `split_11`, `split_05`, `tgca`, `tgca_bias`;
+3. raw CAM generation and fixed-threshold evaluation after each run;
+4. a full four-resolution attention diagnostic after each run.
+
+Status at the latest captured snapshot, **2026-08-26 23:09 JST**:
+
+- vanilla: complete, `69.50%` raw CAM mIoU;
+- split `(1,1)`: complete, `58.22%` raw CAM mIoU;
+- split `(0.5,0.5)`: complete, `66.31%` raw CAM mIoU;
+- count-only TGCA: complete, `69.05%` raw CAM mIoU;
+- TGCA with relation bias: training, epoch 3 completed.
+
+The completed split `(1,1)` run is:
+
+```text
+results/mctformerplus/voc/20260826-mctformerplus-voc-split_11-s0-22427d6
+```
+
+Its fixed-threshold raw CAM score is `58.22%`, substantially below vanilla. Its group-mass variance is essentially zero because this baseline forces each group to aggregate to mass one; total row mass is two. This result does not refute TGCA because `split_11` changes output scale and removes evidence-driven inter-group competition.
+
+The active TGCA-with-relation-bias run is:
+
+```text
+results/mctformerplus/voc/20260826-mctformerplus-voc-tgca_bias-s0-22427d6
+```
+
+Each mode uses:
+
+```bash
+TGCA_GPU_ID=0 TGCA_SEED=0 TGCA_FIXED_THRESHOLD=0.45 \
+bash experiments/ablations/run_mctformerplus_voc_mode.sh MODE
+```
+
+Do not launch a duplicate queue. Wait for the session to finish or fail, then inspect `metrics.json`, checkpoint hashes, pipeline logs, and `attention_diagnostics/metrics.json` in every run directory.
+
+## Queued post-pilot diagnostics
+
+A separate waiting tmux session was started at **2026-08-26 23:09 JST**:
+
+```text
+tgca-mctplus-post
+```
+
+It runs:
+
+```bash
+bash experiments/diagnostics/run_mctformerplus_post_pilot.sh
+```
+
+and logs to:
+
+```text
+results/queues/22427d6/mctformerplus-post-pilot.log
+```
+
+The session polls for the primary queue's `QUEUE_COMPLETE` marker and does not use the GPU while `tgca-mctplus-next` is active. If the primary tmux session disappears without that marker, the post-pilot queue exits instead of analyzing incomplete runs.
+
+After the marker appears, it sequentially performs:
+
+1. CUDA FP32/FP16/BF16 normalization and host tests on exact commit `22427d6`;
+2. fixed-threshold raw-CAM precision, recall, and false-positive diagnostics for all five modes;
+3. matched batch-1 inference latency, throughput, parameter, and peak-memory measurements;
+4. flip-aggregated CAM generation at short-side resolutions `224`, `320`, `448`, and `512` for every mode;
+5. fixed-threshold CAM quality at every resolution;
+6. soft CAM cosine, class-mask IoU, foreground IoU, semantic-mask IoU, and pixel agreement relative to `448`;
+7. an audited five-mode JSON/CSV comparison under:
+
+```text
+results/mctformerplus/voc/comparisons/pilot-s0-22427d6
+```
+
+The post-pilot queue stops after producing Gate 3 evidence. It does not automatically launch additional seeds, partial-gamma training, KYAM, or COCO. Those depend on reviewing the completed pilot. At queue creation, the filesystem had approximately `170 GiB` available; the four-resolution CAM outputs are expected to add roughly `30 GiB`.
+
+## How to evaluate the completed queue
+
+For every mode, make a machine-readable comparison containing at least:
+
+- raw CAM mIoU at the fixed vanilla threshold `0.45`;
+- final and maximum classification mAP if recorded;
+- checkpoint hash;
+- maximum attention row-sum error, with the split `(1,1)` target explicitly recorded as two;
+- directional group-mass slopes and their bootstrap intervals;
+- mean/median group-mass variance over resolution;
+- wall time, peak memory, parameters, and latency where available.
+
+Then run these validity checks before drawing conclusions:
+
+1. Vanilla in the integrated pipeline remains `69.50%`.
+2. `split_05`, TGCA, and TGCA-bias rows sum to one numerically.
+3. `split_11` rows sum to two and are never compared as if normalized.
+4. TGCA directional mass is more stable than vanilla under real resolution changes.
+5. TGCA retains evidence-driven group-mass variation rather than degenerating to the fixed `0.5/0.5` behavior of `split_05`.
+6. Any CAM gain is not explained by a separately tuned background threshold, output rescaling, changed training schedule, or different checkpoint selection.
+7. Runtime overhead is measured. The current Python/group-mask implementation may be inefficient and should not be treated as the final efficiency result without profiling and, if needed, a mathematically identical vectorized implementation.
+
+Do not select a favorable method from only seed 0 and present it as final. After the pilot identifies viable modes, repeat the matched comparison with prespecified additional seeds and report variance.
+
+## Immediate next sequence
+
+1. Let `tgca-mctplus-next` finish without interruption.
+2. Audit every stage for completion and collect the five-mode result table.
+3. Inspect attention diagnostics by layer, head, query direction, and scale; do not rely on a cancellation-prone aggregate.
+4. Verify the deterministic unit tests on the exact result commit, including CUDA FP16/BF16 tests where supported.
+5. Add cross-scale CAM consistency, raw-CAM precision/recall, and false-positive/confusion diagnostics under the same checkpoints.
+6. Measure parameters, FLOPs, latency, memory, and optimized TGCA overhead.
+7. Decide the VOC mechanism go/no-go gate. A practical primary-host target is roughly `+0.8` to `+1.0` raw seed mIoU, although a smaller gain may be viable if invariance and cross-scale stability are exceptionally strong.
+8. Reproduce vanilla Know Your Attention Maps in its independent environment.
+9. Specify and ablate the singleton register-token grouping before implementing TGCA there.
+10. Run matched vanilla/TGCA validation in Know Your Attention Maps.
+11. Use DiCLIP only as a transparent external comparison.
+12. Start COCO only if the VOC mechanism and independent-host gates pass.
+
+## Risks that can invalidate or weaken the hypothesis
+
+- **Trained logits may compensate for token count.** Synthetic replication invariance can be mathematically true while the learned network already counteracts cardinality in practice.
+- **Resolution is confounded.** Changing resolution changes image evidence, receptive fields, interpolation, positional embeddings, and object scale—not just patch count. Synthetic replication and real-scale tests must be reported together.
+- **Stability may not improve localization.** More stable attention mass is useful only if CAM quality, cross-scale consistency, or errors improve.
+- **Fixed group mass may be sufficient.** If `split_05` matches TGCA, the evidence-driven mean-competition story becomes weaker and the contribution may reduce to a normalization heuristic.
+- **Output-scale confounding.** `split_11` doubles row mass and therefore changes residual/output magnitude. Its poor CAM result cannot be attributed solely to group competition.
+- **Threshold sensitivity.** A gain appearing only after per-method threshold tuning is weak. Fixed-threshold results are primary; threshold curves are diagnostic.
+- **Implementation overhead.** A slow mask/one-hot implementation could invalidate the negligible-overhead claim even when an optimized equivalent is possible.
+- **Relation bias may dominate.** If gains occur only with learned bias, distinguish count calibration from added capacity using TGCA without bias and parameter-matched controls.
+- **Single-host overfitting.** A positive MCTformer+ result without a positive independent Know Your Attention Maps result is insufficient for the generality claim.
+- **Register-token ambiguity.** In Know Your Attention Maps, treating the singleton register token as class, patch, or a separate group changes the method. All choices must be explicit and ablated.
+- **Training instability or seed variance.** Seed-0 improvements can disappear. Confirm with multiple matched seeds after the pilot.
+- **Metric cancellation.** Averaging complementary attention directions can falsely imply zero cardinality effect. Retain directional layer/head statistics.
+- **Post-processing confounds.** Keep raw CAM evaluation primary and hold downstream CRF/segmentation pipelines fixed.
+- **Unmatched comparisons.** DiCLIP and other recent systems may use different pretraining, backbones, supervision, or post-processing. Author-reported and reproduced results must be separated.
+
+## Paper decision gates
+
+Proceed to the full paper only if all are satisfied:
+
+- the directional cardinality phenomenon is measurable;
+- TGCA stabilizes group mass under patch-count/resolution changes;
+- TGCA improves or stabilizes CAMs beyond simple output rescaling and fixed group mass;
+- at least one independent host shows a positive effect;
+- optimized overhead is negligible;
+- all claims are matched for backbone, pretraining, supervision, and post-processing.
+
+If TGCA improves invariance but consistently damages CAM quality, do not force a positive paper claim. Determine whether cardinality bias is actually a useful inductive bias for WSSS, whether partial correction `gamma < 1` is scientifically justified, or whether the hypothesis should be rejected.
+
+## Provenance and reporting rules
+
+Never report a result without:
+
+- repository URL and commit;
+- exact command and config;
+- Conda/pip environment;
+- dataset and list hashes;
+- pretrained and trained checkpoint hashes;
+- seed;
+- raw machine-readable metrics;
+- explicit threshold and post-processing;
+- hardware and timing.
+
+Generated metrics belong under `results/` as JSON/CSV in addition to paper tables. Use Git checkpoints before and after substantive code changes. Do not fabricate missing values, citations, repository behavior, or experimental outcomes.
+
+## Documentation inventory
+
+The complete documentation copied for this handoff is:
+
+```text
+docs/CHAT_HANDOFF.md
+docs/MCTTA.pdf
+docs/RESEARCH_PLAN_FULL.md
+docs/TIP_REVIEWS.md
+```
+
+The server repository already contains the tracked file:
+
+```text
+docs/design.md
+```
+
+At the time of transfer, the local and server copies of `design.md` had matching SHA-256:
+
+```text
+4086ac6250aa7acd91d928f4f67b05d5139898dc6637792732d492d52671f5e0
+```
