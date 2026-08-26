@@ -8,6 +8,8 @@ from timm.models.helpers import load_pretrained
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 from timm.models.registry import register_model
 
+from models.tgca import TokenGroupNormalizer, build_mctformer_groups
+
 
 def _cfg(url='', **kwargs):
     return {
@@ -72,13 +74,22 @@ class Mlp(nn.Module):
 
 class Attention(nn.Module):
     def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0.,
-                 proj_drop=0., num_classes=20):
+                 proj_drop=0., num_classes=20, attention_normalization="vanilla",
+                 attention_gamma=1.0):
         super().__init__()
         self.num_classes = num_classes
         self.num_heads = num_heads
         head_dim = dim // num_heads
         self.scale = qk_scale or head_dim ** -0.5
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.normalizer = TokenGroupNormalizer(
+            num_heads=num_heads,
+            num_query_groups=2,
+            num_key_groups=2,
+            mode=attention_normalization,
+            gamma=attention_gamma,
+            learn_relation_bias=attention_normalization == "tgca_bias",
+        )
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
@@ -89,8 +100,10 @@ class Attention(nn.Module):
         q, k, v = qkv[0], qkv[1], qkv[2] 
         # d for each head, Nd heads in total. --> B x Nd x N x d for q, k, v.
         attn = (q @ k.transpose(-2, -1)) * self.scale  # B x Nd x N x N
-
-        attn = attn.softmax(dim=-1)
+        query_group_ids, key_group_ids = build_mctformer_groups(
+            self.num_classes, N - self.num_classes, device=attn.device
+        )
+        attn = self.normalizer(attn, key_group_ids, query_group_ids)
         weights = attn
 
         attn = self.attn_drop(attn)
@@ -105,13 +118,16 @@ class Attention(nn.Module):
 class Block(nn.Module):
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, 
                  drop=0., attn_drop=0., drop_path=0., act_layer=nn.GELU, 
-                 norm_layer=nn.LayerNorm, num_classes=20, clear_block=False):
+                 norm_layer=nn.LayerNorm, num_classes=20, clear_block=False,
+                 attention_normalization="vanilla", attention_gamma=1.0):
         super().__init__()
         self.clear_block = clear_block
         self.norm1 = norm_layer(dim)
         self.attn = Attention(
             dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, 
-            attn_drop=attn_drop, proj_drop=drop, num_classes=num_classes)
+            attn_drop=attn_drop, proj_drop=drop, num_classes=num_classes,
+            attention_normalization=attention_normalization,
+            attention_gamma=attention_gamma)
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
         self.mlp = Mlp(in_features=dim, 
@@ -148,10 +164,12 @@ class VisionTransformer(nn.Module):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=384, depth=12,
                  num_heads=6, mlp_ratio=4., qkv_bias=True, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., norm_layer=partial(nn.LayerNorm, eps=1e-6), 
-                 mask_type=None):
+                 mask_type=None, attention_normalization="vanilla", attention_gamma=1.0):
         super().__init__()
         self.num_classes = num_classes
         self.mask_type = mask_type
+        self.attention_normalization = attention_normalization
+        self.attention_gamma = attention_gamma
         self.img_size = img_size
         self.patch_size = patch_size
         self.num_features = self.embed_dim = embed_dim
@@ -168,7 +186,9 @@ class VisionTransformer(nn.Module):
                         qkv_bias=qkv_bias, qk_scale=qk_scale,drop=drop_rate, 
                         attn_drop=attn_drop_rate, drop_path=dpr[i], 
                         norm_layer=norm_layer, num_classes=num_classes,
-                        clear_block=False) for i in range(depth)]
+                        clear_block=False,
+                        attention_normalization=attention_normalization,
+                        attention_gamma=attention_gamma) for i in range(depth)]
         self.blocks = nn.ModuleList(blocks)
         
         self.norm = norm_layer(embed_dim)
@@ -259,4 +279,3 @@ class VisionTransformer(nn.Module):
             return x
         else:
             return x, attn_weights
-

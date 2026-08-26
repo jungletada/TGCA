@@ -10,6 +10,7 @@ __pycache__
 
 results_voc/
 results_coco/
+results/
 
 data/coco/COCO_cls_labels.npy
 data/coco/train_labels.npy

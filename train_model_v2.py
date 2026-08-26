@@ -25,6 +25,7 @@ from datasets_cam import build_dataset
 import models.srmct
 import models.mct_adapter
 import models.mctformer_plus
+from models.tgca import SUPPORTED_MODES
 
 
 def get_args_parser():
@@ -36,6 +37,14 @@ def get_args_parser():
     parser.add_argument('--model', default='mcta', type=str, metavar='MODEL',
                         help='Name of model to train')
     parser.add_argument('--input-size', default=448, type=int, help='images input size')
+    parser.add_argument(
+        '--attention-normalization',
+        default='vanilla',
+        choices=sorted(SUPPORTED_MODES),
+        help='attention normalization used in the shared MCTformer+ attention path')
+    parser.add_argument(
+        '--attention-gamma', default=1.0, type=float,
+        help='key-group count correction exponent (TGCA modes only)')
 
     parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
                         help='Dropout rate (default: 0.)')
@@ -252,7 +261,9 @@ def main(args):
         num_classes=args.nb_classes,
         drop_rate=args.drop,
         drop_path_rate=args.drop_path,
-        input_size=args.input_size)
+        input_size=args.input_size,
+        attention_normalization=args.attention_normalization,
+        attention_gamma=args.attention_gamma)
 
     if "mctformerplus" in args.model:
         train_one_epoch = train_one_epoch_mctplus
@@ -298,7 +309,15 @@ def main(args):
 
         test_stats = evaluate(data_loader_val, model, device)
         if test_stats["mAP"] > max_accuracy:
-            torch.save({'model': model.state_dict()},
+            torch.save({
+                        'model': model.state_dict(),
+                        'attention_normalization': {
+                            'mode': args.attention_normalization,
+                            'gamma': args.attention_gamma,
+                            'relation_bias': args.attention_normalization == 'tgca_bias',
+                        },
+                        'epoch': epoch,
+                       },
                        os.path.join(args.work_space, f'{args.model}_best.pth'))
         max_accuracy = max(max_accuracy, test_stats["mAP"])
 
@@ -312,7 +331,15 @@ def main(args):
                 f'Max mAP: {max_accuracy * 100:.2f}%\n' + json.dumps(log_stats)
             )
 
-    torch.save({'model': model.state_dict()}, work_space / f'{args.model}_final.pth')
+    torch.save({
+        'model': model.state_dict(),
+        'attention_normalization': {
+            'mode': args.attention_normalization,
+            'gamma': args.attention_gamma,
+            'relation_bias': args.attention_normalization == 'tgca_bias',
+        },
+        'epoch': args.epochs - 1,
+    }, work_space / f'{args.model}_final.pth')
 
 
 if __name__ == '__main__':

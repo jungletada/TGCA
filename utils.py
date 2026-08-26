@@ -183,7 +183,9 @@ def create_cam_model(args):
     elif 'mctformerplus' in args.model.lower():
         model = MCTformerPlusCam(
             num_classes=args.num_classes,
-            input_size=args.input_size)
+            input_size=args.input_size,
+            attention_normalization=getattr(args, 'attention_normalization', 'vanilla'),
+            attention_gamma=getattr(args, 'attention_gamma', 1.0))
         
     elif 'srmctformer' in args.model.lower():
         model = SRMCTformerCam(

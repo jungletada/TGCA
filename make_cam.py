@@ -15,6 +15,7 @@ warnings.filterwarnings("ignore")
 from misc import torchutils, imutils
 from utils import create_cam_model, parse_scales
 from models.adapter_modules import resize_input_minbound
+from models.tgca import SUPPORTED_MODES
 
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
@@ -29,6 +30,12 @@ def get_args_parser():
     parser.add_argument('--checkpoint', default='', help='checkpoint for generating maps')
     parser.add_argument('--input_size', default=448, type=int, help='images input size')
     parser.add_argument('--min_size', default=448, type=int, help='images input size')
+    parser.add_argument(
+        '--attention-normalization', default='vanilla', choices=sorted(SUPPORTED_MODES),
+        help='attention normalization used by the checkpoint')
+    parser.add_argument(
+        '--attention-gamma', default=1.0, type=float,
+        help='key-group count correction exponent (TGCA modes only)')
     parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
                         help='Dropout rate (default: 0.)')
     parser.add_argument('--drop-path', type=float, default=0.1, metavar='PCT',
@@ -389,12 +396,6 @@ if __name__ == '__main__':
     args.num_classes = num_classes
 
     model = create_cam_model(args)
-    model_dict = torch.load(args.checkpoint)
-    
-    if 'model' in model_dict:
-        model_dict = model_dict['model']
-        
-
     model_dict = torch.load(args.checkpoint)
     if 'model' in model_dict:
         model_dict = model_dict['model']
