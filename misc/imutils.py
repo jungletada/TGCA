@@ -1,8 +1,5 @@
 import random
 import numpy as np
-import pydensecrf.densecrf as dcrf
-from pydensecrf.utils import unary_from_labels
-from pydensecrf.utils import unary_from_softmax
 from PIL import Image
 
 
@@ -154,6 +151,9 @@ def HWC_to_CHW(img):
 
 
 def crf_inference_label(img, labels, t=10, n_labels=21, gt_prob=0.7):
+    import pydensecrf.densecrf as dcrf
+    from pydensecrf.utils import unary_from_labels
+
     h, w = img.shape[:2]
     d = dcrf.DenseCRF2D(w, h, n_labels)
     # unary potentials
@@ -169,6 +169,9 @@ def crf_inference_label(img, labels, t=10, n_labels=21, gt_prob=0.7):
 
 
 def crf_inference_inf(img, probs, t=10, scale_factor=1, labels=21):
+    import pydensecrf.densecrf as dcrf
+    from pydensecrf.utils import unary_from_softmax
+
     h, w = img.shape[:2]
     n_labels = labels
 
@@ -324,4 +327,3 @@ def show_seg_on_img():
     # Save or display the combined image
     combined_image.save("path_to_combined_image.png")
     # combined_image.show()
-
