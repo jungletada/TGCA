@@ -185,7 +185,12 @@ def create_cam_model(args):
             num_classes=args.num_classes,
             input_size=args.input_size,
             attention_normalization=getattr(args, 'attention_normalization', 'vanilla'),
-            attention_gamma=getattr(args, 'attention_gamma', 1.0))
+            attention_gamma=getattr(args, 'attention_gamma', 1.0),
+            bcss_variant=getattr(args, 'bcss_variant', 'e0'),
+            bcss_num_background_slots=getattr(args, 'bcss_num_background_slots', 1),
+            bcss_tau=getattr(args, 'bcss_tau', 0.5),
+            bcss_beta=getattr(args, 'bcss_beta', 0.5),
+            bcss_cls_threshold=getattr(args, 'bcss_cls_threshold', 0.5))
         
     elif 'srmctformer' in args.model.lower():
         model = SRMCTformerCam(

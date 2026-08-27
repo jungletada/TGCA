@@ -1,6 +1,33 @@
 # TGCA research handoff
 
-Last updated: **2026-08-26 (Asia/Tokyo)**
+Last updated: **2026-08-27 (Asia/Tokyo)**
+
+> **Superseded research direction.** `docs/CHAT_HANDOFF-0827.md` is now the
+> canonical scientific and execution plan. It replaces the TGCA paper plan
+> below with Background-Aware Competitive Semantic Slots (BCSS) for ICLR 2027.
+> The historical TGCA state in this file is retained for provenance only.
+
+## BCSS implementation state on 2026-08-27
+
+The diagnostic system and VOC minimum-screen implementation requested by
+Section 11 of `docs/CHAT_HANDOFF-0827.md` now exists. Exact variant contracts,
+commands, outputs, and verification are recorded in:
+
+```text
+docs/BCSS_EXPERIMENTS.md
+```
+
+Implemented experiment variants are `E0`, `E1`, `E2`, `E4`, `E5`, and `E6`.
+The queue entry point is:
+
+```text
+experiments/ablations/run_bcss_voc_screen.sh
+```
+
+The worktree is intentionally still dirty pending review, so the clean-tree
+safeguard prevents launching the full queue. No tmux experiment is active and
+no BCSS scientific result is available yet. Read-only implementation smoke
+checks passed, including exact E0 CAM parity and E6 CUDA FP16 backward.
 
 This file transfers the scientific context, repository state, server setup, completed evidence, active experiments, and next decisions for the TGCA project. It is intended to be the first file read by a new Codex task on the `LHR` server.
 
@@ -19,8 +46,7 @@ cd /home/peng/code/TGCA
 git status --short --branch
 git log -8 --oneline --decorate
 tmux ls
-tmux capture-pane -pt tgca-mctplus-next:0.0 -S -100
-tail -n 120 results/queues/22427d6/mctformerplus-next.log
+tail -n 120 results/queues/22427d6/mctformerplus-post-pilot.log
 ```
 
 Then read these files completely:
@@ -100,20 +126,21 @@ Git branch state at this handoff:
 
 ```text
 main                            7bd603e [origin/main] Document environments and add independent hosts
-research/mctformerplus-baseline 22427d6 Implement TGCA diagnostics and VOC normalization pilots
+research/mctformerplus-baseline 596fbc6 [origin/research/mctformerplus-baseline] Refactor VOC normalization process and enhance diagnostics for TGCA integration
 ```
 
-The active server checkout is `research/mctformerplus-baseline` at clean commit:
+The active server checkout is `research/mctformerplus-baseline` at analysis commit:
 
 ```text
-22427d60bff5d1f6c4cc9c5c33f8912502d5a4b0
+596fbc6fb7d26771aa67fe6380681d2740411a71
 ```
 
-The research branch had no upstream shown at the time of this handoff. Do not push it or merge it into `main` without explicit user approval and a review of completed results.
+The completed pilot results were produced from result commit `22427d60bff5d1f6c4cc9c5c33f8912502d5a4b0`. Commit `596fbc6` adds post-analysis tooling and documentation without changing the pilot's result-critical model, training, CAM-generation, or ablation-runner code. The worktree contains this handoff update and the untracked provenance-explicit resume runner; preserve both. Do not push or merge into `main` without explicit user approval and review.
 
 Relevant commits:
 
 ```text
+596fbc6 Refactor VOC normalization process and enhance diagnostics for TGCA integration
 22427d6 Implement TGCA diagnostics and VOC normalization pilots
 cf44aa2 Make CRF optional for raw CAM generation
 63d8877 Add reproducible MCTformer+ VOC baseline pipeline
@@ -334,7 +361,7 @@ Do not use the aggregate `mean_group_mass_slope_vs_log_patch_count` value, which
 
 This is direct empirical evidence that vanilla attention reallocates aggregate mass toward patch keys as patch count/resolution rises. It still does not prove causality for CAM quality; the normalization ablation must establish that link.
 
-## Active tmux experiment queue
+## Completed primary experiment queue
 
 Session:
 
@@ -367,13 +394,13 @@ The queue performs:
 3. raw CAM generation and fixed-threshold evaluation after each run;
 4. a full four-resolution attention diagnostic after each run.
 
-Status at the latest captured snapshot, **2026-08-26 23:09 JST**:
+Final status, completed **2026-08-27 01:19 JST**:
 
 - vanilla: complete, `69.50%` raw CAM mIoU;
 - split `(1,1)`: complete, `58.22%` raw CAM mIoU;
 - split `(0.5,0.5)`: complete, `66.31%` raw CAM mIoU;
 - count-only TGCA: complete, `69.05%` raw CAM mIoU;
-- TGCA with relation bias: training, epoch 3 completed.
+- TGCA with relation bias: complete, `68.88%` raw CAM mIoU.
 
 The completed split `(1,1)` run is:
 
@@ -383,7 +410,7 @@ results/mctformerplus/voc/20260826-mctformerplus-voc-split_11-s0-22427d6
 
 Its fixed-threshold raw CAM score is `58.22%`, substantially below vanilla. Its group-mass variance is essentially zero because this baseline forces each group to aggregate to mass one; total row mass is two. This result does not refute TGCA because `split_11` changes output scale and removes evidence-driven inter-group competition.
 
-The active TGCA-with-relation-bias run is:
+The completed TGCA-with-relation-bias run is:
 
 ```text
 results/mctformerplus/voc/20260826-mctformerplus-voc-tgca_bias-s0-22427d6
@@ -396,11 +423,13 @@ TGCA_GPU_ID=0 TGCA_SEED=0 TGCA_FIXED_THRESHOLD=0.45 \
 bash experiments/ablations/run_mctformerplus_voc_mode.sh MODE
 ```
 
-Do not launch a duplicate queue. Wait for the session to finish or fail, then inspect `metrics.json`, checkpoint hashes, pipeline logs, and `attention_diagnostics/metrics.json` in every run directory.
+Do not launch a duplicate primary queue. All five run directories contain `metrics.json`, the final checkpoint, CAM evaluation outputs, and `attention_diagnostics/metrics.json`.
 
-## Queued post-pilot diagnostics
+## Completed post-pilot diagnostics
 
-A separate waiting tmux session was started at **2026-08-26 23:09 JST**:
+The original waiting session observed the primary `QUEUE_COMPLETE` marker and then exited at **2026-08-27 01:19 JST** because `HEAD` had advanced from result commit `22427d6` to analysis commit `596fbc6`. This was the intended provenance guard, not an experiment failure. The intervening commit added documentation and post-analysis tools only; `models/`, training, CAM generation, and the ablation runner are unchanged between the commits.
+
+A provenance-explicit replacement session started at **2026-08-27 11:20 JST** and completed at **11:45 JST**:
 
 ```text
 tgca-mctplus-post
@@ -409,7 +438,7 @@ tgca-mctplus-post
 It runs:
 
 ```bash
-bash experiments/diagnostics/run_mctformerplus_post_pilot.sh
+bash experiments/diagnostics/run_mctformerplus_post_pilot_resume.sh
 ```
 
 and logs to:
@@ -418,7 +447,7 @@ and logs to:
 results/queues/22427d6/mctformerplus-post-pilot.log
 ```
 
-The session polls for the primary queue's `QUEUE_COMPLETE` marker and does not use the GPU while `tgca-mctplus-next` is active. If the primary tmux session disappears without that marker, the post-pilot queue exits instead of analyzing incomplete runs.
+The replacement records result commit `22427d6` and analysis commit `596fbc6` separately and verifies that result-critical code did not change. Its CUDA test stage passed `19/19`. There is no active tmux session after normal completion.
 
 After the marker appears, it sequentially performs:
 
@@ -435,6 +464,33 @@ results/mctformerplus/voc/comparisons/pilot-s0-22427d6
 ```
 
 The post-pilot queue stops after producing Gate 3 evidence. It does not automatically launch additional seeds, partial-gamma training, KYAM, or COCO. Those depend on reviewing the completed pilot. At queue creation, the filesystem had approximately `170 GiB` available; the four-resolution CAM outputs are expected to add roughly `30 GiB`.
+
+### Post-pilot result summary
+
+All five modes use seed `0`, result commit `22427d6`, and fixed background threshold `0.45`:
+
+| Mode | Raw CAM mIoU | Semantic precision | Semantic recall | Background FPR | Mean mass variance | Latency at 448 |
+|---|---:|---:|---:|---:|---:|---:|
+| vanilla | 69.50 | 81.85 | 83.87 | 6.04 | 0.004648 | 8.48 ms |
+| split `(1,1)` | 58.22 | 61.72 | 76.58 | 16.36 | approximately 0 | 18.76 ms |
+| split `(0.5,0.5)` | 66.31 | 82.33 | 78.22 | 5.38 | approximately 0 | 18.79 ms |
+| TGCA | 69.05 | 78.73 | 86.40 | 7.65 | 0.000837 | 11.12 ms |
+| TGCA + bias | 68.88 | 79.37 | 85.13 | 7.21 | 0.000837 | 12.35 ms |
+
+TGCA reduces mean attention group-mass variance by approximately `82%`. Relative to vanilla, its all-layer patch-key mass slope magnitude falls by approximately `89%` for class queries and `75%` for patch queries. Thus the cardinality mechanism and correction are measurable.
+
+The localization result does not pass the primary gain target. Count-only TGCA is `0.45` mIoU point below vanilla and TGCA+bias is `0.62` below. Both are below vanilla at every single-scale short-side resolution (`224`, `320`, `448`, `512`). TGCA raises recall but lowers precision and increases background false positives at the fixed threshold.
+
+Cross-scale mask stability improves modestly at the largest resolution gap. For `224` versus `448`, paired image bootstrap analysis gives foreground-mask IoU differences of `+1.44` points for TGCA (95% CI `+0.81` to `+2.06`) and `+1.57` for TGCA+bias (`+0.99` to `+2.16`). At `512` versus `448`, the differences are small and the paired intervals include zero.
+
+The current Python/group-mask implementation also does not yet satisfy the negligible-overhead gate: count-only TGCA latency is about `31%` above vanilla and TGCA+bias about `46%` above. Parameter count is unchanged for count-only TGCA; relation bias adds `288` parameters. FLOPs/MACs remain unmeasured.
+
+Machine-readable comparison:
+
+```text
+results/mctformerplus/voc/comparisons/pilot-s0-22427d6/pilot_comparison.json
+results/mctformerplus/voc/comparisons/pilot-s0-22427d6/pilot_comparison.csv
+```
 
 ## How to evaluate the completed queue
 
@@ -462,18 +518,14 @@ Do not select a favorable method from only seed 0 and present it as final. After
 
 ## Immediate next sequence
 
-1. Let `tgca-mctplus-next` finish without interruption.
-2. Audit every stage for completion and collect the five-mode result table.
-3. Inspect attention diagnostics by layer, head, query direction, and scale; do not rely on a cancellation-prone aggregate.
-4. Verify the deterministic unit tests on the exact result commit, including CUDA FP16/BF16 tests where supported.
-5. Add cross-scale CAM consistency, raw-CAM precision/recall, and false-positive/confusion diagnostics under the same checkpoints.
-6. Measure parameters, FLOPs, latency, memory, and optimized TGCA overhead.
-7. Decide the VOC mechanism go/no-go gate. A practical primary-host target is roughly `+0.8` to `+1.0` raw seed mIoU, although a smaller gain may be viable if invariance and cross-scale stability are exceptionally strong.
-8. Reproduce vanilla Know Your Attention Maps in its independent environment.
-9. Specify and ablate the singleton register-token grouping before implementing TGCA there.
-10. Run matched vanilla/TGCA validation in Know Your Attention Maps.
-11. Use DiCLIP only as a transparent external comparison.
-12. Start COCO only if the VOC mechanism and independent-host gates pass.
+1. Treat full TGCA as mechanism-positive but localization-negative on the seed-0 primary-host pilot; do not launch additional full-TGCA seeds yet.
+2. Run the single prespecified contingency `tgca_gamma05` at seed `0`, fixed threshold `0.45`, with identical training and evaluation. Do not tune gamma beyond `{0, 0.5, 1}`.
+3. Apply the same post-pilot attention, error, scale, and efficiency diagnostics to `tgca_gamma05`.
+4. If partial correction still loses CAM quality, stop primary-host expansion and reassess or reject the WSSS benefit hypothesis rather than proceeding to KYAM or COCO.
+5. If partial correction retains meaningful stability and recovers or improves localization, predeclare additional matched seeds before running them.
+6. Optimize the mathematically identical count-correction implementation and measure FLOPs/MACs before claiming negligible overhead.
+7. Reproduce vanilla Know Your Attention Maps only after the primary-host decision, then specify and ablate its singleton register-token grouping.
+8. Use DiCLIP only as a transparent external comparison. Start COCO only if the VOC mechanism and independent-host gates pass.
 
 ## Risks that can invalidate or weaken the hypothesis
 

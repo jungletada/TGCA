@@ -16,6 +16,7 @@ from misc import torchutils, imutils
 from utils import create_cam_model, parse_scales
 from models.adapter_modules import resize_input_minbound
 from models.tgca import SUPPORTED_MODES
+from models.bcss import BCSS_VARIANTS
 
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
@@ -36,6 +37,11 @@ def get_args_parser():
     parser.add_argument(
         '--attention-gamma', default=1.0, type=float,
         help='key-group count correction exponent (TGCA modes only)')
+    parser.add_argument('--bcss-variant', default='e0', choices=tuple(BCSS_VARIANTS))
+    parser.add_argument('--bcss-num-background-slots', default=1, type=int)
+    parser.add_argument('--bcss-tau', default=0.5, type=float)
+    parser.add_argument('--bcss-beta', default=0.5, type=float)
+    parser.add_argument('--bcss-cls-threshold', default=0.5, type=float)
     parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
                         help='Dropout rate (default: 0.)')
     parser.add_argument('--drop-path', type=float, default=0.1, metavar='PCT',
@@ -194,17 +200,21 @@ def _work_trainset_psa(process_id, model, dataset, args):
             try:
                 outputs = []
                 for img in pack['img']:
+                    active_labels = label.to(img[0].device).unsqueeze(0).expand(img[0].shape[0], -1)
                     out = model(resize_input_minbound(
                             x=img[0].cuda(non_blocking=True),
-                            min_size=args.min_size)) # img[0]->[(2, 3, H', W')]
+                            min_size=args.min_size), active_labels=active_labels.cuda())
                     outputs.append(out)
                  # outputs->list[(2, n_cls, H/16, W/16)]
             except RuntimeError as e:
                 if "out of memory" in str(e):
-                    outputs = [model(resize_input_minbound(
-                        x=img[0].cuda(non_blocking=True),
-                        min_size=int(args.min_size * 0.5))) # img[0]->[(2, 3, H', W')]
-                            for img in pack['img']] # outputs->list[(2, n_cls, H/16, W/16)]
+                    outputs = []
+                    for img in pack['img']:
+                        active_labels = label.unsqueeze(0).expand(img[0].shape[0], -1).cuda()
+                        outputs.append(model(resize_input_minbound(
+                            x=img[0].cuda(non_blocking=True),
+                            min_size=int(args.min_size * 0.5)),
+                            active_labels=active_labels))
                 else:
                     raise e
             #=================== high resolution cam list ===================#
@@ -396,11 +406,31 @@ if __name__ == '__main__':
     args.num_classes = num_classes
 
     model = create_cam_model(args)
-    model_dict = torch.load(args.checkpoint)
-    if 'model' in model_dict:
-        model_dict = model_dict['model']
+    checkpoint = torch.load(args.checkpoint, map_location='cpu')
+    if 'bcss' in checkpoint:
+        bcss_checkpoint = checkpoint['bcss']
+        checkpoint_variant = bcss_checkpoint.get('variant', 'e0')
+        if checkpoint_variant != args.bcss_variant:
+            raise ValueError(
+                f"Checkpoint uses BCSS {checkpoint_variant}, but --bcss-variant is {args.bcss_variant}")
+        expected = {
+            'num_background_slots': args.bcss_num_background_slots,
+            'tau': args.bcss_tau,
+            'beta': args.bcss_beta,
+            'class_threshold': args.bcss_cls_threshold,
+        }
+        mismatches = {
+            key: (bcss_checkpoint.get(key), value)
+            for key, value in expected.items()
+            if bcss_checkpoint.get(key, value) != value
+        }
+        if mismatches:
+            raise ValueError(f"BCSS checkpoint/CLI mismatch: {mismatches}")
+    model_dict = checkpoint.get('model', checkpoint)
     
     model.load_state_dict(model_dict)
+    if hasattr(model, 'set_bcss_epoch'):
+        model.set_bcss_epoch(8)
     model.eval()
     
     print(f'Using {args.checkpoint} for making cams.')

@@ -120,6 +120,9 @@ def train_one_epoch_mctplus(model: torch.nn.Module, data_loader: Iterable,
                     epoch: int, loss_scaler, max_norm: float = 0,
                     set_training_mode=True, args=None):
     model.train(set_training_mode)
+    model_without_ddp = model.module if hasattr(model, 'module') else model
+    if hasattr(model_without_ddp, 'set_bcss_epoch'):
+        model_without_ddp.set_bcss_epoch(epoch)
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
@@ -131,12 +134,15 @@ def train_one_epoch_mctplus(model: torch.nn.Module, data_loader: Iterable,
 
         patch_outputs = None
         c_outputs = None
+        bcss_auxiliary = None
         with torch.cuda.amp.autocast():
-            outputs = model(samples)
+            outputs = model(samples, active_labels=targets)
             if len(outputs) == 2:
                 outputs, patch_outputs = outputs
             elif len(outputs) == 3:
                 outputs, c_outputs, patch_outputs = outputs
+            elif len(outputs) == 4:
+                outputs, c_outputs, patch_outputs, bcss_auxiliary = outputs
 
             loss = F.multilabel_soft_margin_loss(outputs, targets)
             metric_logger.update(mct_loss=loss.item())
@@ -161,6 +167,18 @@ def train_one_epoch_mctplus(model: torch.nn.Module, data_loader: Iterable,
                 ploss = F.multilabel_soft_margin_loss(patch_outputs, targets)
                 metric_logger.update(pat_loss=ploss.item())
                 loss = loss + ploss
+
+            if bcss_auxiliary is not None:
+                auxiliary_losses = model_without_ddp.bcss_losses(
+                    bcss_auxiliary, targets)
+                if 'foreground_anchor' in auxiliary_losses:
+                    fg_loss = auxiliary_losses['foreground_anchor']
+                    metric_logger.update(bcss_fg_loss=fg_loss.item())
+                    loss = loss + model_without_ddp.bcss_lambda_fg * fg_loss
+                if 'background_null' in auxiliary_losses:
+                    bg_loss = auxiliary_losses['background_null']
+                    metric_logger.update(bcss_bg_loss=bg_loss.item())
+                    loss = loss + model_without_ddp.bcss_lambda_bg * bg_loss
 
         loss_value = loss.item()
 
@@ -206,6 +224,8 @@ def evaluate(data_loader, model, device):
                 output, patch_output = output
             elif len(output) == 3:
                 output, c_output, patch_output = output
+            elif len(output) == 4:
+                output, c_output, patch_output, _ = output
 
             loss = criterion(output, target)
             output = torch.sigmoid(output)

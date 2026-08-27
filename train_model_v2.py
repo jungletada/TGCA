@@ -26,6 +26,7 @@ import models.srmct
 import models.mct_adapter
 import models.mctformer_plus
 from models.tgca import SUPPORTED_MODES
+from models.bcss import BCSS_VARIANTS
 
 
 def get_args_parser():
@@ -45,6 +46,15 @@ def get_args_parser():
     parser.add_argument(
         '--attention-gamma', default=1.0, type=float,
         help='key-group count correction exponent (TGCA modes only)')
+    parser.add_argument('--bcss-variant', default='e0', choices=tuple(BCSS_VARIANTS),
+                        help='frozen VOC screening variant')
+    parser.add_argument('--bcss-num-background-slots', default=1, type=int)
+    parser.add_argument('--bcss-tau', default=0.5, type=float)
+    parser.add_argument('--bcss-beta', default=0.5, type=float)
+    parser.add_argument('--bcss-cls-threshold', default=0.5, type=float)
+    parser.add_argument('--bcss-lambda-fg', default=0.5, type=float)
+    parser.add_argument('--bcss-lambda-bg', default=0.1, type=float)
+    parser.add_argument('--bcss-semantic-temperature', default=1.0, type=float)
 
     parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
                         help='Dropout rate (default: 0.)')
@@ -263,7 +273,25 @@ def main(args):
         drop_path_rate=args.drop_path,
         input_size=args.input_size,
         attention_normalization=args.attention_normalization,
-        attention_gamma=args.attention_gamma)
+        attention_gamma=args.attention_gamma,
+        bcss_variant=args.bcss_variant,
+        bcss_num_background_slots=args.bcss_num_background_slots,
+        bcss_tau=args.bcss_tau,
+        bcss_beta=args.bcss_beta,
+        bcss_cls_threshold=args.bcss_cls_threshold,
+        bcss_lambda_fg=args.bcss_lambda_fg,
+        bcss_lambda_bg=args.bcss_lambda_bg,
+        bcss_semantic_temperature=args.bcss_semantic_temperature)
+
+    # Variant-specific parameter initialization consumes different amounts of
+    # RNG. Reset before optimization so augmentation, dropout, and sampling use
+    # an identical stochastic stream in every matched screening run.
+    training_seed = seed + 1000003
+    torch.manual_seed(training_seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(training_seed)
+    np.random.seed(training_seed % (2 ** 32))
+    random.seed(training_seed)
 
     if "mctformerplus" in args.model:
         train_one_epoch = train_one_epoch_mctplus
@@ -311,6 +339,16 @@ def main(args):
         if test_stats["mAP"] > max_accuracy:
             torch.save({
                         'model': model.state_dict(),
+                        'bcss': {
+                            'variant': args.bcss_variant,
+                            'num_background_slots': args.bcss_num_background_slots,
+                            'tau': args.bcss_tau,
+                            'beta': args.bcss_beta,
+                            'class_threshold': args.bcss_cls_threshold,
+                            'lambda_fg': args.bcss_lambda_fg,
+                            'lambda_bg': args.bcss_lambda_bg,
+                            'semantic_temperature': args.bcss_semantic_temperature,
+                        },
                         'attention_normalization': {
                             'mode': args.attention_normalization,
                             'gamma': args.attention_gamma,
@@ -333,6 +371,16 @@ def main(args):
 
     torch.save({
         'model': model.state_dict(),
+        'bcss': {
+            'variant': args.bcss_variant,
+            'num_background_slots': args.bcss_num_background_slots,
+            'tau': args.bcss_tau,
+            'beta': args.bcss_beta,
+            'class_threshold': args.bcss_cls_threshold,
+            'lambda_fg': args.bcss_lambda_fg,
+            'lambda_bg': args.bcss_lambda_bg,
+            'semantic_temperature': args.bcss_semantic_temperature,
+        },
         'attention_normalization': {
             'mode': args.attention_normalization,
             'gamma': args.attention_gamma,
