@@ -11,6 +11,19 @@ from timm.models.registry import register_model
 from models.tgca import TokenGroupNormalizer, build_mctformer_groups
 
 
+TOKEN_ROLE_SPECIALIZATIONS = ("shared", "norm", "norm_qkv")
+
+
+def validate_token_role_specialization(mode):
+    mode = mode.lower()
+    if mode not in TOKEN_ROLE_SPECIALIZATIONS:
+        raise ValueError(
+            f"Unsupported token-role specialization {mode!r}; "
+            f"expected one of {TOKEN_ROLE_SPECIALIZATIONS}"
+        )
+    return mode
+
+
 def _cfg(url='', **kwargs):
     return {
         'url': url,
@@ -75,13 +88,17 @@ class Mlp(nn.Module):
 class Attention(nn.Module):
     def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0.,
                  proj_drop=0., num_classes=20, attention_normalization="vanilla",
-                 attention_gamma=1.0):
+                 attention_gamma=1.0, specialize_class_qkv=False):
         super().__init__()
         self.num_classes = num_classes
         self.num_heads = num_heads
         head_dim = dim // num_heads
         self.scale = qk_scale or head_dim ** -0.5
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.class_qkv = (
+            nn.Linear(dim, dim * 3, bias=qkv_bias)
+            if specialize_class_qkv else None
+        )
         self.normalizer = TokenGroupNormalizer(
             num_heads=num_heads,
             num_query_groups=2,
@@ -94,9 +111,18 @@ class Attention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
+    def project_qkv(self, x):
+        if self.class_qkv is None:
+            return self.qkv(x)
+        class_qkv = self.class_qkv(x[:, :self.num_classes])
+        patch_qkv = self.qkv(x[:, self.num_classes:])
+        return torch.cat((class_qkv, patch_qkv), dim=1)
+
     def forward(self, x):
         B, N, C = x.shape  # Here N = #patches + #class-tokens
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        qkv = self.project_qkv(x).reshape(
+            B, N, 3, self.num_heads, C // self.num_heads
+        ).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2] 
         # d for each head, Nd heads in total. --> B x Nd x N x d for q, k, v.
         attn = (q @ k.transpose(-2, -1)) * self.scale  # B x Nd x N x N
@@ -119,26 +145,42 @@ class Block(nn.Module):
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, 
                  drop=0., attn_drop=0., drop_path=0., act_layer=nn.GELU, 
                  norm_layer=nn.LayerNorm, num_classes=20, clear_block=False,
-                 attention_normalization="vanilla", attention_gamma=1.0):
+                 attention_normalization="vanilla", attention_gamma=1.0,
+                 specialize_role_norm=False, specialize_class_qkv=False):
         super().__init__()
         self.clear_block = clear_block
+        self.num_classes = num_classes
         self.norm1 = norm_layer(dim)
+        self.class_norm1 = norm_layer(dim) if specialize_role_norm else None
         self.attn = Attention(
             dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, 
             attn_drop=attn_drop, proj_drop=drop, num_classes=num_classes,
             attention_normalization=attention_normalization,
-            attention_gamma=attention_gamma)
+            attention_gamma=attention_gamma,
+            specialize_class_qkv=specialize_class_qkv)
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
+        self.class_norm2 = norm_layer(dim) if specialize_role_norm else None
         self.mlp = Mlp(in_features=dim, 
                     hidden_features=int(dim * mlp_ratio), 
                     act_layer=act_layer, 
                     drop=drop)
 
+    def apply_role_norm(self, x, patch_norm, class_norm):
+        if class_norm is None:
+            return patch_norm(x)
+        class_tokens = class_norm(x[:, :self.num_classes])
+        patch_tokens = patch_norm(x[:, self.num_classes:])
+        return torch.cat((class_tokens, patch_tokens), dim=1)
+
     def forward(self, x):
-        o, weights = self.attn(self.norm1(x))
+        o, weights = self.attn(
+            self.apply_role_norm(x, self.norm1, self.class_norm1)
+        )
         x = x + self.drop_path(o)
-        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        x = x + self.drop_path(
+            self.mlp(self.apply_role_norm(x, self.norm2, self.class_norm2))
+        )
         return x, weights
 
 
@@ -164,12 +206,16 @@ class VisionTransformer(nn.Module):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=384, depth=12,
                  num_heads=6, mlp_ratio=4., qkv_bias=True, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
                  drop_path_rate=0., norm_layer=partial(nn.LayerNorm, eps=1e-6), 
-                 mask_type=None, attention_normalization="vanilla", attention_gamma=1.0):
+                 mask_type=None, attention_normalization="vanilla", attention_gamma=1.0,
+                 token_role_specialization="shared"):
         super().__init__()
         self.num_classes = num_classes
         self.mask_type = mask_type
         self.attention_normalization = attention_normalization
         self.attention_gamma = attention_gamma
+        self.token_role_specialization = validate_token_role_specialization(
+            token_role_specialization
+        )
         self.img_size = img_size
         self.patch_size = patch_size
         self.num_features = self.embed_dim = embed_dim
@@ -182,13 +228,19 @@ class VisionTransformer(nn.Module):
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
+        qkv_specialized_blocks = depth // 3
         blocks = [Block(dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, 
                         qkv_bias=qkv_bias, qk_scale=qk_scale,drop=drop_rate, 
                         attn_drop=attn_drop_rate, drop_path=dpr[i], 
                         norm_layer=norm_layer, num_classes=num_classes,
                         clear_block=False,
                         attention_normalization=attention_normalization,
-                        attention_gamma=attention_gamma) for i in range(depth)]
+                        attention_gamma=attention_gamma,
+                        specialize_role_norm=self.token_role_specialization != "shared",
+                        specialize_class_qkv=(
+                            self.token_role_specialization == "norm_qkv"
+                            and i < qkv_specialized_blocks
+                        )) for i in range(depth)]
         self.blocks = nn.ModuleList(blocks)
         
         self.norm = norm_layer(embed_dim)
@@ -198,6 +250,28 @@ class VisionTransformer(nn.Module):
         trunc_normal_(self.pos_embed, std=.02)
         trunc_normal_(self.cls_token, std=.02)
         self.apply(self._init_weights)
+
+    def expand_token_role_state_dict(self, state_dict):
+        """Initialize specialized class paths from their shared pretrained paths."""
+        expanded = dict(state_dict)
+        for index, block in enumerate(self.blocks):
+            source_prefixes = {}
+            if block.class_norm1 is not None:
+                source_prefixes.update({
+                    f"blocks.{index}.class_norm1": f"blocks.{index}.norm1",
+                    f"blocks.{index}.class_norm2": f"blocks.{index}.norm2",
+                })
+            if block.attn.class_qkv is not None:
+                source_prefixes[
+                    f"blocks.{index}.attn.class_qkv"
+                ] = f"blocks.{index}.attn.qkv"
+            for target_prefix, source_prefix in source_prefixes.items():
+                for suffix in ("weight", "bias"):
+                    target = f"{target_prefix}.{suffix}"
+                    source = f"{source_prefix}.{suffix}"
+                    if target not in expanded and source in expanded:
+                        expanded[target] = expanded[source].clone()
+        return expanded
         
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):

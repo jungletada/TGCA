@@ -475,6 +475,7 @@ def mctformerplus(pretrained=False, **kwargs):
             if k in checkpoint and checkpoint[k].shape != model_dict[k].shape:
                 print(f"Removing key {k} from pretrained checkpoint")
                 del checkpoint[k]
+        checkpoint = model.expand_token_role_state_dict(checkpoint)
         pretrained_dict = {k: v for k, v in checkpoint.items() if k in model_dict}
         pretrained_dict = {k: v for k, v in pretrained_dict.items() if k not in ['cls_token', 'pos_embed']}
         model_dict.update(pretrained_dict)

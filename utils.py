@@ -186,6 +186,8 @@ def create_cam_model(args):
             input_size=args.input_size,
             attention_normalization=getattr(args, 'attention_normalization', 'vanilla'),
             attention_gamma=getattr(args, 'attention_gamma', 1.0),
+            token_role_specialization=getattr(
+                args, 'token_role_specialization', 'shared'),
             bcss_variant=getattr(args, 'bcss_variant', 'e0'),
             bcss_num_background_slots=getattr(args, 'bcss_num_background_slots', 1),
             bcss_tau=getattr(args, 'bcss_tau', 0.5),

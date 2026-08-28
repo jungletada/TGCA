@@ -20,12 +20,18 @@ if str(REPO_ROOT) not in sys.path:
 
 from models.mctformer_plus import MCTformerPlusCam
 from models.tgca import SUPPORTED_MODES
+from models.vit import TOKEN_ROLE_SPECIALIZATIONS
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--mode", choices=sorted(SUPPORTED_MODES), required=True)
+    parser.add_argument(
+        "--token-role-specialization",
+        choices=TOKEN_ROLE_SPECIALIZATIONS,
+        default="shared",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--input-size", type=int, default=448)
     parser.add_argument("--batch-size", type=int, default=1)
@@ -55,12 +61,20 @@ def main():
         raise ValueError(
             f"Checkpoint mode {config.get('mode')!r} does not match {args.mode!r}"
         )
+    role_config = checkpoint.get("token_role_specialization", {})
+    checkpoint_role = role_config.get("mode", "shared")
+    if checkpoint_role != args.token_role_specialization:
+        raise ValueError(
+            f"Checkpoint role specialization {checkpoint_role!r} does not match "
+            f"{args.token_role_specialization!r}"
+        )
     state_dict = checkpoint["model"] if "model" in checkpoint else checkpoint
     model = MCTformerPlusCam(
         num_classes=20,
         input_size=448,
         attention_normalization=args.mode,
         attention_gamma=1.0,
+        token_role_specialization=args.token_role_specialization,
     )
     incompatibility = model.load_state_dict(state_dict, strict=True)
     if incompatibility.missing_keys or incompatibility.unexpected_keys:
@@ -95,6 +109,7 @@ def main():
     metrics = {
         "host": "MCTformer+",
         "normalization": args.mode,
+        "token_role_specialization": args.token_role_specialization,
         "checkpoint": str(args.checkpoint.resolve()),
         "device": torch.cuda.get_device_name(device),
         "python": platform.python_version(),
@@ -109,6 +124,11 @@ def main():
             parameter.numel() for parameter in model.parameters() if parameter.requires_grad
         ),
         "relation_bias_parameters": relation_bias_parameters,
+        "role_specialization_parameters": sum(
+            parameter.numel()
+            for name, parameter in model.named_parameters()
+            if ".class_norm" in name or ".class_qkv" in name
+        ),
         "latency_ms_mean": statistics.mean(durations_ms),
         "latency_ms_median": statistics.median(durations_ms),
         "latency_ms_p95": percentile(durations_ms, 0.95),
