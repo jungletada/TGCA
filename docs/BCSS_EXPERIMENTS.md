@@ -270,6 +270,41 @@ reviewing this run. The primary comparison remains matched E0 `70.063`; compare
 the debug directly with historical E4 `56.060` to determine whether removing
 the loss degeneracy restores foreground ownership and CAM recall.
 
+The authorized run completed normally from `2026-08-28T13:54:00+09:00` to
+`2026-08-28T15:17:39+09:00`:
+
+```text
+commit: ade83ad7010820314d62867eb00d01ef3414b832
+run:    20260828-135358-mctformerplus-voc-bcss-e4_mass-s0-ade83ad
+sha256: c9b8f1f5fdcde60658188ed934bbaaea164c920bace0e4c002336b66cc759cb1
+```
+
+All stages and completion markers passed. The fixed-threshold result is:
+
+| Variant | CAM mIoU | Sem. precision | Sem. recall | BG FPR | Final cls. mAP | CBL | CCS-bg | BG AUPRC | Pred. BG fraction |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| E0 | 70.063 | 80.735 | 85.817 | 6.756 | 96.410 | 0.5785 | 0.4467 | 0.9673 | 0.6461 |
+| E4 | 56.060 | 78.433 | 66.292 | 6.016 | 96.590 | 0.5965 | 0.3878 | 0.7338 | 0.9961 |
+| E4-mass | 55.650 | 68.032 | 72.204 | 11.463 | 96.365 | 0.5930 | 0.4061 | 0.7867 | 0.2827 |
+
+The mass-aware loss prevents epsilon foreground ownership: epoch-44 mean
+foreground ownership is `0.6388`, while foreground-anchor loss falls from
+`2.9960` at epoch 0 to `0.0645`. Classification is retained. However, CAM mIoU
+is `14.413` points below E0 and `0.410` below historical E4. Relative to E0,
+semantic precision and recall fall by `12.703` and `13.613` points, and
+background false-positive rate increases by `4.707` points.
+
+The ownership failure changes direction rather than disappearing. Historical
+E4 predicts nearly all patches as background (`99.61%`); E4-mass predicts only
+`28.27%` as background against a mean ground-truth background fraction of
+`72.77%`. Its direct background-ownership IoU is `0.2800`. The competition is
+therefore badly calibrated even though the ownership rows and new loss behave
+as designed.
+
+This closes the BCSS debug path as a no-go. No other BCSS variant or seed is
+queued. Do not tune this formulation, combine it with TGCA, or expand it to
+COCO, downstream segmentation, or an independent host.
+
 ## Implementation verification
 
 Implementation verification on 2026-08-27:
