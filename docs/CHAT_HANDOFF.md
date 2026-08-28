@@ -7,6 +7,58 @@ Last updated: **2026-08-28 (Asia/Tokyo)**
 > TGCA and BCSS screens are both negative for localization. Do not expand either
 > formulation without a new positive VOC mechanism result.
 
+## Active MCTformer+ token-role pilot
+
+The only authorized experiment queue is the seed-0 class-token/patch-token
+specialization pilot:
+
+```text
+tmux session: mctplus-token-role-pilot
+queue ID:     20260828-152106
+queue log:    results/queues/token-role/20260828-152106.log
+code commit:  0f9a217 Add MCTformer+ token-role specialization pilots
+```
+
+It adapts the ICLR 2026 paper *Revisiting [CLS] and Patch Token Interaction in
+Vision Transformers* to MCTformer+'s first 20 class tokens versus its spatial
+patch tokens. This is an exploratory prior-art transfer, not a novelty claim.
+The exact adaptation and decision rule are frozen in:
+
+```text
+docs/TOKEN_ROLE_EXPERIMENTS.md
+```
+
+The queue reuses the completed E0 seed-0 run as `shared`, recomputes matched
+200-image pre/post-`norm1` cosine and efficiency diagnostics for its frozen
+checkpoint, then trains these two variants sequentially:
+
+```text
+norm      separate class/patch norm1 and norm2 in all 12 blocks
+norm_qkv  norm plus separate class QKV in blocks 0--3
+```
+
+Both variants retain vanilla attention normalization, BCSS E0, shared MLP and
+output projection, 45 epochs, seed 0, input 448, CAM scales
+`1.0,0.75,1.25`, and fixed threshold `0.45`. The `norm` and `norm_qkv`
+parameter increases are `0.0836%` and `8.1290%`. Specialized paths copy their
+corresponding shared DeiT weights, making the modes equivalent at
+initialization within numerical tolerance. All 52 repository tests pass.
+
+Inspect without interrupting:
+
+```bash
+tmux capture-pane -pt mctplus-token-role-pilot:0 -S -120
+tail -n 120 results/queues/token-role/20260828-152106.log
+```
+
+Do not start another GPU experiment, edit result-critical source, or duplicate
+this queue while it is active. The queue will write immutable run directories
+for `norm` and `norm_qkv`, plus a comparison under
+`results/mctformerplus/voc/comparisons/token-role-pilot-20260828-152106-*`.
+Do not expand this exploratory direction beyond seed 0 until raw CAM,
+precision/recall, background false positives, class/patch cosine, classification,
+parameters, memory, and latency have all been reviewed.
+
 ## BCSS VOC screen state on 2026-08-28
 
 ### Completed mass-aware E4 debug
@@ -117,8 +169,9 @@ Then read these files completely:
 
 `docs/MCTTA.pdf` is the rejected legacy manuscript. It is evidence and background, not a draft to compress or edit.
 
-No experiment is active at this checkpoint. The completed `e4_mass` run above
-must not be restarted or duplicated.
+The `mctplus-token-role-pilot` queue above is active. Inspect it read-only and
+do not stop, restart, or duplicate it. The completed `e4_mass` run must not be
+restarted.
 
 ## Project objective
 
@@ -186,13 +239,13 @@ Git branch state at this handoff:
 
 ```text
 main                            7bd603e [origin/main] Document environments and add independent hosts
-research/mctformerplus-baseline ade83ad [ahead 1] Add mass-aware BCSS foreground anchor debug
+research/mctformerplus-baseline current handoff commit (result-critical parent: 0f9a217)
 ```
 
-The active server checkout is `research/mctformerplus-baseline` at commit:
+The result-critical token-role implementation on the active checkout is:
 
 ```text
-ade83ad7010820314d62867eb00d01ef3414b832
+0f9a217 Add MCTformer+ token-role specialization pilots
 ```
 
 The completed TGCA pilot results were produced from result commit
@@ -202,14 +255,17 @@ result-critical model, training, CAM-generation, or ablation-runner code.
 
 Commit `4147fc3` contains the BCSS implementation used by the completed VOC
 screen. Commit `ade83ad` records the negative result summary, mass-aware anchor,
-anti-collapse tests, and single-debug runner support. The tracked worktree was
-clean when the `e4_mass` run started. This active-run handoff update is the only
-uncommitted change. Do not commit, push, or merge it without explicit user
-approval.
+anti-collapse tests, and single-debug runner support. Commit `522be66` records
+the completed negative `e4_mass` result. Commit `0f9a217` adds the token-role
+implementation, diagnostics, tests, and sequential VOC pilot. The launch
+manifest records the full handoff commit and a clean tracked worktree. No push
+was performed.
 
 Relevant commits:
 
 ```text
+0f9a217 Add MCTformer+ token-role specialization pilots
+522be66 Record mass-aware BCSS debug result
 ade83ad Add mass-aware BCSS foreground anchor debug
 4147fc3 Add BCSS support to MCTformerPlus and update training and evaluation processes
 596fbc6 Refactor VOC normalization process and enhance diagnostics for TGCA integration
