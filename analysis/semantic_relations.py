@@ -174,3 +174,42 @@ def region_composition(mask, target, class_id):
         ],
         dtype=np.int64,
     )
+
+
+def conservative_diagnostic_gates(
+    pc_accuracy_ci_lower,
+    random_accuracy,
+    maximum_recovery_recall,
+    region_c_ci_lower,
+    region_c_images,
+    total_images,
+    minimum_coverage_fraction=0.05,
+    minimum_coverage_images=30,
+    minimum_recovery_recall=0.01,
+):
+    """Apply coverage guards to automated Phase 1 triage flags."""
+    required_images = max(
+        minimum_coverage_images,
+        int(np.ceil(total_images * minimum_coverage_fraction)),
+    )
+    pc_nonrandom = (
+        pc_accuracy_ci_lower is not None
+        and pc_accuracy_ci_lower > random_accuracy
+    )
+    recovers = maximum_recovery_recall >= minimum_recovery_recall
+    region_supported = region_c_images >= required_images
+    region_enriched = (
+        region_supported
+        and region_c_ci_lower is not None
+        and region_c_ci_lower > 0
+        and recovers
+    )
+    return {
+        "pc_all_above_uniform_random": bool(pc_nonrandom),
+        "pc_all_recovers_cp_missed_foreground": bool(recovers),
+        "region_c_enriched_over_cp_low_reference": bool(region_enriched),
+        "region_c_minimum_images": required_images,
+        "region_c_observed_images": int(region_c_images),
+        "minimum_recovery_recall": minimum_recovery_recall,
+        "maximum_observed_recovery_recall": float(maximum_recovery_recall),
+    }

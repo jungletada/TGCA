@@ -30,6 +30,7 @@ from analysis._common import load_labels, segmentation_path
 from analysis.semantic_relations import (
     cam_prediction,
     conditional_relations,
+    conservative_diagnostic_gates,
     confusion_matrix,
     confusion_summary,
     foreground_counts,
@@ -1061,38 +1062,44 @@ def main():
         key=lambda row: row["pc_all_fg_accuracy"]
         if row["pc_all_fg_accuracy"] is not None else -math.inf,
     )["layer"]
-    best_region_c_layer = max(
-        range(len(model.blocks)),
-        key=lambda layer: bootstrap[f"layer_{layer}_region_c_purity_difference"]["mean"]
-        if bootstrap[f"layer_{layer}_region_c_purity_difference"]["mean"] is not None
-        else -math.inf,
-    )
     random_accuracy = 1.0 / 20.0
     best_pc_accuracy = layer_rows[best_pc_all_layer]["pc_all_fg_accuracy"]
     best_pc_bootstrap = bootstrap[
         f"layer_{best_pc_all_layer}_pc_all_fg_accuracy"
     ]
-    gates = {
-        "pc_all_above_uniform_random": bool(
-            best_pc_bootstrap["ci95"][0] is not None
-            and best_pc_bootstrap["ci95"][0] > random_accuracy
-        ),
-        "pc_all_recovers_cp_missed_foreground": bool(
-            max(
-                row["macro_image_region_c_recovery_recall"] or 0.0
-                for row in layer_rows
-            ) > 0
-        ),
-        "region_c_enriched_over_cp_low_reference": bool(
-            bootstrap[
-                f"layer_{best_region_c_layer}_region_c_purity_difference"
-            ]["ci95"][0] is not None
-            and bootstrap[
-                f"layer_{best_region_c_layer}_region_c_purity_difference"
-            ]["ci95"][0] > 0
-        ),
-        "decision": "diagnostic_only_pending_scientific_review",
-    }
+    minimum_region_images = max(30, math.ceil(0.05 * len(image_ids)))
+    eligible_region_layers = [
+        layer for layer in range(len(model.blocks))
+        if bootstrap[f"layer_{layer}_region_c_purity_difference"]["num_images"]
+        >= minimum_region_images
+    ]
+    best_region_c_layer = (
+        max(
+            eligible_region_layers,
+            key=lambda layer: bootstrap[
+                f"layer_{layer}_region_c_purity_difference"
+            ]["mean"],
+        )
+        if eligible_region_layers else None
+    )
+    maximum_recovery = max(
+        row["macro_image_region_c_recovery_recall"] or 0.0
+        for row in layer_rows
+    )
+    selected_region_bootstrap = (
+        bootstrap[f"layer_{best_region_c_layer}_region_c_purity_difference"]
+        if best_region_c_layer is not None
+        else {"ci95": [None, None], "num_images": 0}
+    )
+    gates = conservative_diagnostic_gates(
+        pc_accuracy_ci_lower=best_pc_bootstrap["ci95"][0],
+        random_accuracy=random_accuracy,
+        maximum_recovery_recall=maximum_recovery,
+        region_c_ci_lower=selected_region_bootstrap["ci95"][0],
+        region_c_images=selected_region_bootstrap["num_images"],
+        total_images=len(image_ids),
+    )
+    gates["decision"] = "diagnostic_only_pending_scientific_review"
     metrics = {
         "run_id": args.run_id,
         "phase": [0, 1],

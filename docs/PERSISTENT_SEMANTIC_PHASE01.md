@@ -55,6 +55,12 @@ layer to distinguish an uninformative relation from a calibrated but diffuse
 one. It is diagnostic only and must not be used to select a favorable threshold
 for each method or layer.
 
+Automated go/no-go fields are conservative triage only. A primary-threshold
+Region C flag requires non-empty Region C in at least `max(30, 5% of images)`
+and at least 1% recovery of target patches missed by class-to-patch. This avoids
+declaring success from a high-purity but vanishingly small subset. Scientific
+review of coverage, per-class behavior, and post-selection remains mandatory.
+
 All layer indices in machine-readable files are zero based. GT is used only
 for analysis. No metric in this phase is a full semantic segmentation result
 for patch-to-class because no background/dustbin latent exists.

@@ -4,6 +4,7 @@ import torch
 from analysis.semantic_relations import (
     cam_prediction,
     conditional_relations,
+    conservative_diagnostic_gates,
     confusion_matrix,
     confusion_summary,
     four_region_masks,
@@ -107,3 +108,32 @@ def test_normalizer_hook_observes_exact_raw_logits_without_changing_output():
     torch.testing.assert_close(captured["post"], torch.softmax(expected_raw, -1))
     torch.testing.assert_close(hooked_output, plain_output, rtol=0, atol=0)
     torch.testing.assert_close(hooked_attention, plain_attention, rtol=0, atol=0)
+
+
+def test_conservative_gates_reject_tiny_region_c_support():
+    gates = conservative_diagnostic_gates(
+        pc_accuracy_ci_lower=0.58,
+        random_accuracy=0.05,
+        maximum_recovery_recall=0.00002,
+        region_c_ci_lower=0.7,
+        region_c_images=2,
+        total_images=1464,
+    )
+    assert gates["pc_all_above_uniform_random"]
+    assert not gates["pc_all_recovers_cp_missed_foreground"]
+    assert not gates["region_c_enriched_over_cp_low_reference"]
+    assert gates["region_c_minimum_images"] == 74
+
+
+def test_conservative_region_c_gate_requires_coverage_and_recovery():
+    gates = conservative_diagnostic_gates(
+        pc_accuracy_ci_lower=0.04,
+        random_accuracy=0.05,
+        maximum_recovery_recall=0.12,
+        region_c_ci_lower=0.08,
+        region_c_images=100,
+        total_images=1464,
+    )
+    assert not gates["pc_all_above_uniform_random"]
+    assert gates["pc_all_recovers_cp_missed_foreground"]
+    assert gates["region_c_enriched_over_cp_low_reference"]

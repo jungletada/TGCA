@@ -57,8 +57,97 @@ shell validation:       bash -n passed; shellcheck is not installed on LHR
 
 The 5-image smoke showed that the output is informative enough to distinguish
 diffuse calibration from random ranking, but it is not scientific evidence and
-must not be reported as the Phase 1 result. The full queue remains the next
-operation at the time of this implementation checkpoint.
+must not be reported as the Phase 1 result.
+
+The full Phase 0/1 queue launched from clean result-critical commit `e222676`
+at `2026-08-29T01:09:48+09:00` and completed normally at
+`2026-08-29T01:13:05+09:00`:
+
+```text
+tmux:     tgca-psl-phase01
+run ID:   20260829-010948-persistent-semantic-phase01-e222676
+run dir:  results/persistent_semantic/voc/20260829-010948-persistent-semantic-phase01-e222676
+queue log: results/queues/persistent-semantic/20260829-010948-persistent-semantic-phase01-e222676.log
+PID:      385018 at launch
+```
+
+Both `analysis/completion.json` and the run-root `completion.json` are present;
+the analysis processed all 1464 images in `194.38` seconds. The outer tmux
+wrapper's cosmetic exit-status print was expanded early, but the inner runner
+emitted `QUEUE_COMPLETE` and tmux exited. There is no active experiment now.
+
+Result validation:
+
+```text
+checkpoint hash:       exact expected match
+train_id hash:         aa623bd2c8ce4443a8aaae51c524c0eb165e8e44caf6aa9e3ad33d7b75a3ef20
+Phase 0 image rows:    281088 = 1464 * 4 resolutions * 12 layers * 4 directions
+Phase 0 head rows:     8064 = 4 * 12 * 6 * 4 * 7 metrics
+Phase 1 image rows:    17568 = 1464 * 12
+maximum FP32 row error: 9.5367431640625e-7
+raw matrix dumps:      2, each [12,6,216,216] for raw and post attention
+sample/preview dumps:  12 / 12
+total result size:     99 MiB
+```
+
+### Phase 1 scientific result
+
+The strict result normalizes `S_pc` over all 20 class keys and evaluates only
+GT foreground patches. This avoids the strong single-label shortcut in the
+image-label-masked diagnostic. The best strict layer is layer 12:
+
+```text
+patch-weighted foreground accuracy: 57.363%
+foreground-restricted class mIoU:    43.506%
+macro image accuracy:                60.399%
+image-bootstrap 95% CI:              [58.781%, 62.011%]
+uniform 20-class reference:          5.000%
+```
+
+Every class is above the 5% uniform reference; per-class accuracies range from
+`16.77%` for chair to `86.91%` for cow. This is strong evidence that the
+baseline patch-to-class raw relation contains non-random patch semantics. The
+image-label-masked result peaks at `83.77%` patch-weighted accuracy in layer 10,
+but is secondary because masking makes single-label images trivial and forces
+all patches into a foreground class.
+
+Direct per-layer relation maps are much weaker localizers than the actual
+MCTformer+ pipeline: the best conditional class-to-patch CAM mIoU is `6.92%`,
+best post-global-softmax class-to-patch mIoU is `15.70%`, and best mutual-map
+mIoU is `19.49%`. These use a single 448 center crop at patch resolution and
+must not be compared as if they were the trusted multi-scale final CAM result
+of `70.063%`. The mutual result is diagnostic only.
+
+The primary `0.5` Region C test does **not** establish complementarity. Layer 10
+has non-empty Region C in only two images, with mean recovery of only
+`0.0017%`; the original run's mechanical `region_c=true` flag therefore has
+insufficient support. Post-result code adds a conservative guard requiring at
+least `max(30, 5% of images)` and at least 1% recovery. Under that guard, the
+primary-threshold Region C and recovery flags are false.
+
+The shared threshold-sensitivity diagnostic is more encouraging but remains
+secondary. At threshold `0.10`, layer 12 obtains `56.46%` binary foreground
+precision, `65.70%` recall, Region C target purity `44.32%`, and Region C
+recovery `59.30%`. At threshold `0.05`, Region C recovery is `78.07%` with
+`35.31%` target purity. Thus the relation has useful ranking but diffuse class
+probabilities; these thresholds were not used to replace the primary `0.5`
+gate and do not yet prove a deployable foreground/background decision.
+
+Overall Phase 1 is a **go for the intrinsic semantic-attribution hypothesis**,
+because one prespecified criterion, clearly non-random `A_pc`, is strongly met.
+It is not yet a go based on primary-threshold Region C complementarity. Phase 2
+is scientifically reasonable to design next, but remains unimplemented and
+must be predeclared before training.
+
+The coverage-aware machine-readable post-review is generated without changing
+the immutable raw metrics at:
+
+```text
+results/persistent_semantic/voc/20260829-010948-persistent-semantic-phase01-e222676/analysis/scientific_review.json
+```
+
+Its generator is `tools/review_patch_to_class_result.py`. Treat its corrected
+conservative flags as the interpretation layer over the original measurements.
 
 ## Completed MCTformer+ token-role pilot
 
@@ -238,10 +327,9 @@ Then read these files completely:
 
 `docs/MCTTA.pdf` is the rejected legacy manuscript. It is evidence and background, not a draft to compress or edit.
 
-At this implementation checkpoint there is no active experiment queue. The
-completed token-role pilot and `e4_mass` run must not be restarted or
-duplicated. The next authorized queue is the single frozen-checkpoint Persistent
-Semantic Latent Phase 0/1 diagnostic described above.
+There is no active experiment queue. The completed Persistent Semantic Latent
+Phase 0/1 run, token-role pilot, and `e4_mass` run must not be restarted or
+duplicated.
 
 ## Historical TGCA objective
 
@@ -718,13 +806,13 @@ Do not select a favorable method from only seed 0 and present it as final. After
 
 ## Immediate next sequence
 
-1. Run the single frozen-checkpoint Phase 0/1 queue over all 1464 VOC `train_id` images.
-2. Verify completion markers, checkpoint/list hashes, 12 layers, 6 heads, four resolutions, and raw/post row normalization before interpreting metrics.
-3. Review strict 20-class patch-to-class accuracy, foreground-restricted semantic mIoU, per-class results, and layer/head variation.
-4. Review Region C target purity and recovery at primary threshold `0.5`; use the shared sensitivity grid only to diagnose diffuse calibration.
-5. Compare Region C purity against the within-image class-to-patch-low reference using the image-bootstrap interval.
-6. Decide the Phase 1 go/no-go from the complete evidence. Do not implement persistent semantic latents merely because one diagnostic threshold or five-image smoke is favorable.
-7. Only after a positive reviewed gate, predeclare the minimal Phase 2 Read/Write variants from the new plan.
+1. Treat Phase 1 as positive for intrinsic strict patch-to-class semantic attribution, not as proof of primary-threshold Region C complementarity.
+2. Do not rerun Phase 0/1 or select a separate favorable threshold per layer/method.
+3. Before Phase 2, predeclare the minimal persistent-latent baseline, Read-only, Write-only, and Read-then-Write variants from the new plan.
+4. Keep `D_c=D_p=384`, preserve the patch ViT backbone, and add no background/OT/multiple latents until the minimal interaction gate is known.
+5. Define how Phase 2 will handle foreground/background confidence, because `pc_present` alone assigns every patch to a foreground class and the strict relation is diffuse at threshold `0.5`.
+6. Use layer 12 as the prespecified first interaction point based on strict `pc_all`; treat layer 10 Region C observations as exploratory, not a selection target.
+7. Add zero-init/no-op parity tests and parameter-matched controls before launching any Phase 2 training.
 
 ## Risks that can invalidate or weaken the hypothesis
 
