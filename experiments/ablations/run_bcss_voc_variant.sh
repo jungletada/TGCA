@@ -11,7 +11,7 @@ fi
 
 variant=${1:?Usage: run_bcss_voc_variant.sh VARIANT}
 case "$variant" in
-    e0|e1|e2|e4|e5|e6) ;;
+    e0|e1|e2|e4|e4_mass|e5|e6) ;;
     *) echo "Unsupported BCSS screening variant: $variant" >&2; exit 2 ;;
 esac
 
@@ -36,6 +36,10 @@ train_list="$voc_root/ImageLists/train_aug_id.txt"
 val_list="$voc_root/ImageLists/val_id.txt"
 cam_list="$voc_root/ImageLists/train_id.txt"
 pretrain="$HOME/.cache/torch/hub/checkpoints/deit_small_patch16_224-cd65a155.pth"
+foreground_anchor_mode=spatial_normalized
+if [[ "$variant" == "e4_mass" ]]; then
+    foreground_anchor_mode=ownership_mass_scaled
+fi
 
 if [[ -e "$run_dir" ]]; then
     echo "Refusing to overwrite existing run directory: $run_dir" >&2
@@ -45,14 +49,15 @@ mkdir -p "$run_dir"
 exec > >(tee -a "$run_dir/pipeline.log") 2>&1
 
 printf "run_id=%s\nrun_dir=%s\nvariant=%s\n" "$run_id" "$run_dir" "$variant"
-printf "BCSS_GPU_ID=%q BCSS_SEED=%q BCSS_FIXED_THRESHOLD=%q BCSS_TAU=%q BCSS_BETA=%q bash %q %q\n" \
-    "$gpu_id" "$seed" "$fixed_threshold" "$tau" "$beta" \
+printf "BCSS_GPU_ID=%q BCSS_SEED=%q BCSS_RUN_ID=%q BCSS_FIXED_THRESHOLD=%q BCSS_TAU=%q BCSS_BETA=%q BCSS_LAMBDA_FG=%q BCSS_LAMBDA_BG=%q bash %q %q\n" \
+    "$gpu_id" "$seed" "$run_id" "$fixed_threshold" "$tau" "$beta" \
+    "$lambda_fg" "$lambda_bg" \
     "experiments/ablations/run_bcss_voc_variant.sh" "$variant" > "$run_dir/command.txt"
 printf '{"commit":"%s","branch":"%s","dirty":false,"official_mctformer_commit":"%s"}\n' \
     "$full_commit" "$(git branch --show-current)" \
     "0acc27ada87a5582053efb14648442d8644168aa" > "$run_dir/git_state.json"
-printf '{"variant":"%s","seed":%s,"epochs":45,"input_size":448,"tau":%s,"beta":%s,"lambda_fg":%s,"lambda_bg":%s,"background_slots":1,"fixed_background_threshold":%s,"attention_normalization":"vanilla","warmup":{"epochs_0_2":"beta=0,refinement=0,tau=1","epochs_3_8":"linear ramp"}}\n' \
-    "$variant" "$seed" "$tau" "$beta" "$lambda_fg" "$lambda_bg" \
+printf '{"variant":"%s","seed":%s,"epochs":45,"input_size":448,"tau":%s,"beta":%s,"lambda_fg":%s,"lambda_bg":%s,"background_slots":1,"foreground_anchor_mode":"%s","fixed_background_threshold":%s,"attention_normalization":"vanilla","warmup":{"epochs_0_2":"beta=0,refinement=0,tau=1","epochs_3_8":"linear ramp"}}\n' \
+    "$variant" "$seed" "$tau" "$beta" "$lambda_fg" "$lambda_bg" "$foreground_anchor_mode" \
     "$fixed_threshold" > "$run_dir/config.json"
 
 {

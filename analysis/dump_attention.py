@@ -11,6 +11,7 @@ import numpy as np
 import torch
 
 from analysis._common import dump_manifest, image_tensor, load_cam_model, load_labels, read_ids
+from models.bcss import BCSS_VARIANTS
 
 
 MAP_KEYS = (
@@ -27,7 +28,7 @@ def parse_args():
     parser.add_argument("--voc-root", type=Path, required=True)
     parser.add_argument("--id-list", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--variant", choices=("e0", "e1", "e2", "e4", "e5", "e6"))
+    parser.add_argument("--variant", choices=tuple(BCSS_VARIANTS))
     parser.add_argument("--input-size", type=int, default=448)
     parser.add_argument("--max-images", type=int)
     parser.add_argument("--device", default="cuda")

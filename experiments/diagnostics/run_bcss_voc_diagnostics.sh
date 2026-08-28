@@ -12,7 +12,7 @@ fi
 run_dir=${1:?Usage: run_bcss_voc_diagnostics.sh RUN_DIR VARIANT}
 variant=${2:?Usage: run_bcss_voc_diagnostics.sh RUN_DIR VARIANT}
 case "$variant" in
-    e0|e1|e2|e4|e5|e6) ;;
+    e0|e1|e2|e4|e4_mass|e5|e6) ;;
     *) echo "Unsupported BCSS variant: $variant" >&2; exit 2 ;;
 esac
 
@@ -83,7 +83,7 @@ case "$variant" in
             --map-key background_attention --score-transform max --threshold 0.5 \
             --output-dir "$diagnostic_dir/background_attention"
         ;;
-    e4|e5|e6)
+    e4|e4_mass|e5|e6)
         python -m analysis.background_metrics \
             --dump-dir "$diagnostic_dir/unified_maps" --voc-root "$voc_root" \
             --map-key background_ownership --threshold 0.5 \

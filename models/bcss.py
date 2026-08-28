@@ -21,6 +21,7 @@ class BCSSVariantSpec:
     independent_background: bool = False
     competitive_ownership: bool = False
     foreground_anchor: bool = False
+    foreground_mass_anchor: bool = False
     background_null: bool = False
     slot_update: bool = False
 
@@ -35,6 +36,11 @@ BCSS_VARIANTS: Dict[str, BCSSVariantSpec] = {
     "e4": BCSSVariantSpec(
         competitive_ownership=True,
         foreground_anchor=True,
+    ),
+    "e4_mass": BCSSVariantSpec(
+        competitive_ownership=True,
+        foreground_anchor=True,
+        foreground_mass_anchor=True,
     ),
     "e5": BCSSVariantSpec(
         competitive_ownership=True,
@@ -250,6 +256,7 @@ def semantic_slot_losses(
     targets: torch.Tensor,
     use_foreground_anchor: bool,
     use_background_null: bool,
+    retain_foreground_ownership_mass: bool = False,
     semantic_temperature: float = 1.0,
 ) -> Dict[str, torch.Tensor]:
     """Compute only the losses enabled by a frozen experiment variant."""
@@ -258,6 +265,9 @@ def semantic_slot_losses(
         class_logits = F.linear(
             auxiliary["class_aggregate"], classifier_weight, classifier_bias
         ) / semantic_temperature
+        if retain_foreground_ownership_mass:
+            ownership_mass = auxiliary["class_ownership"].float().mean(dim=-1)
+            class_logits = class_logits * ownership_mass.to(class_logits.dtype).unsqueeze(-1)
         batch, classes, _ = class_logits.shape
         target_ids = torch.arange(classes, device=class_logits.device).expand(batch, -1)
         per_slot = F.cross_entropy(

@@ -1,13 +1,13 @@
 # TGCA research handoff
 
-Last updated: **2026-08-27 (Asia/Tokyo)**
+Last updated: **2026-08-28 (Asia/Tokyo)**
 
 > **Superseded research direction.** `docs/CHAT_HANDOFF-0827.md` is now the
 > canonical scientific and execution plan. It replaces the TGCA paper plan
 > below with Background-Aware Competitive Semantic Slots (BCSS) for ICLR 2027.
 > The historical TGCA state in this file is retained for provenance only.
 
-## BCSS implementation state on 2026-08-27
+## BCSS VOC screen state on 2026-08-28
 
 The diagnostic system and VOC minimum-screen implementation requested by
 Section 11 of `docs/CHAT_HANDOFF-0827.md` now exists. Exact variant contracts,
@@ -24,10 +24,37 @@ The queue entry point is:
 experiments/ablations/run_bcss_voc_screen.sh
 ```
 
-The worktree is intentionally still dirty pending review, so the clean-tree
-safeguard prevents launching the full queue. No tmux experiment is active and
-no BCSS scientific result is available yet. Read-only implementation smoke
-checks passed, including exact E0 CAM parity and E6 CUDA FP16 backward.
+The full seed-0 VOC screen completed normally at `2026-08-28T03:28:12+09:00`
+from commit `4147fc368fdef2698d3a0570c6c5b913527327ee`. All six variants reached 45
+epochs, produced final checkpoints and diagnostics, and passed the queue's
+completion and manifest checks. The comparison is:
+
+```text
+results/mctformerplus/voc/comparisons/
+  bcss-screen-20260827-190911-s0-4147fc3/screen.json
+```
+
+The screen is a **no-go for the current BCSS formulation**. E6 obtains `56.145`
+raw CAM mIoU versus `70.063` for E0, while semantic foreground recall falls
+from `85.817` to `66.089`. CBL worsens by `2.41%`; CCS-bg falls by only `10.61%`,
+short of the required `20%`; only the classification-retention constraint
+passes. E4--E6 assign background ownership above `0.9` to more than `99%` of
+patches. The ownership rows are correctly normalized, so this is an objective
+degeneracy rather than a softmax or Split implementation error.
+
+Do not expand this formulation to three seeds, COCO, downstream segmentation,
+or an independent host. The only authorized follow-up is the `e4_mass` seed-0
+debug documented in `docs/BCSS_EXPERIMENTS.md`. It multiplies each class slot's
+semantic logits by its mean patch ownership, causing epsilon ownership to
+approach the `log(N_c)` no-information loss instead of near-zero loss. It does
+not change historical E4--E6 behavior, ownership normalization, slot
+aggregation, CAM gating, or the training schedule.
+
+The anti-collapse tests, exact E4 pre-loss parity test, complete 44-test suite,
+and CUDA FP16 backward all pass. On 50 images from the collapsed E4 checkpoint, the
+old and mass-aware foreground losses are `0.00130` and `2.93545`, respectively,
+with `log(20)=2.99573`. Launch only this one debug after creating the required
+clean Git checkpoint; do not start a multi-variant queue.
 
 This file transfers the scientific context, repository state, server setup, completed evidence, active experiments, and next decisions for the TGCA project. It is intended to be the first file read by a new Codex task on the `LHR` server.
 
@@ -46,7 +73,7 @@ cd /home/peng/code/TGCA
 git status --short --branch
 git log -8 --oneline --decorate
 tmux ls
-tail -n 120 results/queues/22427d6/mctformerplus-post-pilot.log
+tail -n 120 results/queues/4147fc3/bcss-voc-screen-20260827-190911.log
 ```
 
 Then read these files completely:
@@ -58,7 +85,8 @@ Then read these files completely:
 
 `docs/MCTTA.pdf` is the rejected legacy manuscript. It is evidence and background, not a draft to compress or edit.
 
-Do not stop, restart, or otherwise disturb the active tmux queue merely to inspect it.
+No tmux experiment is active as of this update. When a future queue is active,
+inspect it read-only and do not stop or restart it merely for status checks.
 
 ## Project objective
 
@@ -126,20 +154,30 @@ Git branch state at this handoff:
 
 ```text
 main                            7bd603e [origin/main] Document environments and add independent hosts
-research/mctformerplus-baseline 596fbc6 [origin/research/mctformerplus-baseline] Refactor VOC normalization process and enhance diagnostics for TGCA integration
+research/mctformerplus-baseline 4147fc3 [origin/research/mctformerplus-baseline] Add BCSS support to MCTformerPlus and update training and evaluation processes
 ```
 
-The active server checkout is `research/mctformerplus-baseline` at analysis commit:
+The active server checkout is `research/mctformerplus-baseline` at commit:
 
 ```text
-596fbc6fb7d26771aa67fe6380681d2740411a71
+4147fc368fdef2698d3a0570c6c5b913527327ee
 ```
 
-The completed pilot results were produced from result commit `22427d60bff5d1f6c4cc9c5c33f8912502d5a4b0`. Commit `596fbc6` adds post-analysis tooling and documentation without changing the pilot's result-critical model, training, CAM-generation, or ablation-runner code. The worktree contains this handoff update and the untracked provenance-explicit resume runner; preserve both. Do not push or merge into `main` without explicit user approval and review.
+The completed TGCA pilot results were produced from result commit
+`22427d60bff5d1f6c4cc9c5c33f8912502d5a4b0`. Commit `596fbc6` adds
+post-analysis tooling and documentation without changing that pilot's
+result-critical model, training, CAM-generation, or ablation-runner code.
+
+Commit `4147fc3` contains the BCSS implementation used by the completed VOC
+screen. The tracked worktree was clean when that queue started and when its
+results were audited. This 2026-08-28 result-summary update modifies only
+`docs/CHAT_HANDOFF.md` and `docs/BCSS_EXPERIMENTS.md`; it is not committed.
+Do not commit, push, or merge it without explicit user approval.
 
 Relevant commits:
 
 ```text
+4147fc3 Add BCSS support to MCTformerPlus and update training and evaluation processes
 596fbc6 Refactor VOC normalization process and enhance diagnostics for TGCA integration
 22427d6 Implement TGCA diagnostics and VOC normalization pilots
 cf44aa2 Make CRF optional for raw CAM generation

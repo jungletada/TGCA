@@ -232,6 +232,7 @@ class MCTformerPlus(VisionTransformer):
             targets=targets,
             use_foreground_anchor=self.bcss_spec.foreground_anchor,
             use_background_null=self.bcss_spec.background_null,
+            retain_foreground_ownership_mass=self.bcss_spec.foreground_mass_anchor,
             semantic_temperature=self.bcss_semantic_temperature,
         )
 

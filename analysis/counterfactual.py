@@ -15,6 +15,7 @@ from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
 from analysis._common import finite_mean, load_cam_model, load_labels, load_segmentation, read_ids
 from models.adapter_modules import resize_input_minbound
+from models.bcss import BCSS_VARIANTS
 
 
 RGB_MEAN = np.asarray(IMAGENET_DEFAULT_MEAN, dtype=np.float32) * 255.0
@@ -26,7 +27,7 @@ def parse_args():
     parser.add_argument("--voc-root", type=Path, required=True)
     parser.add_argument("--id-list", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--variant", choices=("e0", "e1", "e2", "e4", "e5", "e6"))
+    parser.add_argument("--variant", choices=tuple(BCSS_VARIANTS))
     parser.add_argument("--input-size", type=int, default=448)
     parser.add_argument("--replacement", choices=("mean", "blur"), default="mean")
     parser.add_argument("--max-images", type=int)

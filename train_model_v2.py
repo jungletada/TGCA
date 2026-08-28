@@ -47,7 +47,7 @@ def get_args_parser():
         '--attention-gamma', default=1.0, type=float,
         help='key-group count correction exponent (TGCA modes only)')
     parser.add_argument('--bcss-variant', default='e0', choices=tuple(BCSS_VARIANTS),
-                        help='frozen VOC screening variant')
+                        help='BCSS screening or prespecified debug variant')
     parser.add_argument('--bcss-num-background-slots', default=1, type=int)
     parser.add_argument('--bcss-tau', default=0.5, type=float)
     parser.add_argument('--bcss-beta', default=0.5, type=float)
@@ -348,6 +348,11 @@ def main(args):
                             'lambda_fg': args.bcss_lambda_fg,
                             'lambda_bg': args.bcss_lambda_bg,
                             'semantic_temperature': args.bcss_semantic_temperature,
+                            'foreground_anchor_mode': (
+                                'ownership_mass_scaled'
+                                if args.bcss_variant == 'e4_mass'
+                                else 'spatial_normalized'
+                            ),
                         },
                         'attention_normalization': {
                             'mode': args.attention_normalization,
@@ -380,6 +385,11 @@ def main(args):
             'lambda_fg': args.bcss_lambda_fg,
             'lambda_bg': args.bcss_lambda_bg,
             'semantic_temperature': args.bcss_semantic_temperature,
+            'foreground_anchor_mode': (
+                'ownership_mass_scaled'
+                if args.bcss_variant == 'e4_mass'
+                else 'spatial_normalized'
+            ),
         },
         'attention_normalization': {
             'mode': args.attention_normalization,

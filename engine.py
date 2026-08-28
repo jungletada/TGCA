@@ -169,6 +169,13 @@ def train_one_epoch_mctplus(model: torch.nn.Module, data_loader: Iterable,
                 loss = loss + ploss
 
             if bcss_auxiliary is not None:
+                if 'class_ownership' in bcss_auxiliary:
+                    active = targets.to(bcss_auxiliary['class_ownership'].dtype)
+                    foreground_ownership = (
+                        bcss_auxiliary['class_ownership'] * active.unsqueeze(-1)
+                    ).sum(dim=1).mean()
+                    metric_logger.update(
+                        bcss_fg_ownership=foreground_ownership.item())
                 auxiliary_losses = model_without_ddp.bcss_losses(
                     bcss_auxiliary, targets)
                 if 'foreground_anchor' in auxiliary_losses:
