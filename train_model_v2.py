@@ -27,7 +27,6 @@ import models.mct_adapter
 import models.mctformer_plus
 from models.tgca import SUPPORTED_MODES
 from models.bcss import BCSS_VARIANTS
-from models.vit import TOKEN_ROLE_SPECIALIZATIONS
 
 
 def get_args_parser():
@@ -47,10 +46,6 @@ def get_args_parser():
     parser.add_argument(
         '--attention-gamma', default=1.0, type=float,
         help='key-group count correction exponent (TGCA modes only)')
-    parser.add_argument(
-        '--token-role-specialization', default='shared',
-        choices=TOKEN_ROLE_SPECIALIZATIONS,
-        help='class-token/patch-token parameter specialization mode')
     parser.add_argument('--bcss-variant', default='e0', choices=tuple(BCSS_VARIANTS),
                         help='BCSS screening or prespecified debug variant')
     parser.add_argument('--bcss-num-background-slots', default=1, type=int)
@@ -222,8 +217,6 @@ def load_model_weight(args, model):
         new_cls_token = cls_token_checkpoint.repeat(1, nc, 1)
         checkpoint_model['cls_token'] = new_cls_token
 
-    checkpoint_model = model.expand_token_role_state_dict(checkpoint_model)
-    
     return checkpoint_model
 
 
@@ -281,7 +274,6 @@ def main(args):
         input_size=args.input_size,
         attention_normalization=args.attention_normalization,
         attention_gamma=args.attention_gamma,
-        token_role_specialization=args.token_role_specialization,
         bcss_variant=args.bcss_variant,
         bcss_num_background_slots=args.bcss_num_background_slots,
         bcss_tau=args.bcss_tau,
@@ -367,15 +359,6 @@ def main(args):
                             'gamma': args.attention_gamma,
                             'relation_bias': args.attention_normalization == 'tgca_bias',
                         },
-                        'token_role_specialization': {
-                            'mode': args.token_role_specialization,
-                            'class_token_count': args.nb_classes,
-                            'qkv_specialized_blocks': (
-                                len(model.blocks) // 3
-                                if args.token_role_specialization == 'norm_qkv'
-                                else 0
-                            ),
-                        },
                         'epoch': epoch,
                        },
                        os.path.join(args.work_space, f'{args.model}_best.pth'))
@@ -412,15 +395,6 @@ def main(args):
             'mode': args.attention_normalization,
             'gamma': args.attention_gamma,
             'relation_bias': args.attention_normalization == 'tgca_bias',
-        },
-        'token_role_specialization': {
-            'mode': args.token_role_specialization,
-            'class_token_count': args.nb_classes,
-            'qkv_specialized_blocks': (
-                len(model.blocks) // 3
-                if args.token_role_specialization == 'norm_qkv'
-                else 0
-            ),
         },
         'epoch': args.epochs - 1,
     }, work_space / f'{args.model}_final.pth')

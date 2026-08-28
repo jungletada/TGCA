@@ -2,10 +2,63 @@
 
 Last updated: **2026-08-29 (Asia/Tokyo)**
 
-> **Research direction status.** The historical TGCA plan below and the BCSS
-> plan in `docs/CHAT_HANDOFF-0827.md` are retained for provenance. The completed
-> TGCA and BCSS screens are both negative for localization. Do not expand either
-> formulation without a new positive VOC mechanism result.
+> **Research direction status.** TGCA, BCSS, and token-role specialization are
+> completed negative explorations retained for provenance. The active research
+> plan is now `docs/Persistent_Semantic_Latent_Codex_Plan.md`. Only its Phase 0
+> frozen-baseline instrumentation and Phase 1 patch-to-class semantic diagnostic
+> are authorized. Do not implement Phase 2 persistent latents until the Phase 1
+> go/no-go evidence has been reviewed.
+
+## Persistent Semantic Latent Phase 0/1 implementation
+
+The current implementation is non-invasive: it registers forward hooks on the
+12 existing `TokenGroupNormalizer` modules, where hook inputs are the exact raw
+`QK^T/sqrt(d)` logits and hook outputs are the attention matrices used by the
+baseline. It does not add parameters, alter the model forward result, retrain a
+checkpoint, or implement the proposed Phase 2 architecture.
+
+The frozen host is the matched MCTformer+ E0 seed-0 checkpoint:
+
+```text
+checkpoint: results/mctformerplus/voc/20260827-190911-mctformerplus-voc-bcss-e0-s0-4147fc3/mctformerplus_final.pth
+sha256:     41ac9ce47f6a22875cba32edb92c31c150e804ae5ae19824c2585e4e3cda7a2a
+baseline:   70.06305830908285 raw CAM mIoU at fixed threshold 0.45
+split:      VOC train_id, 1464 images
+```
+
+Implementation and protocol:
+
+```text
+analysis/semantic_relations.py
+tools/analyze_patch_to_class.py
+tests/test_semantic_relations.py
+experiments/diagnostics/run_persistent_semantic_phase01.sh
+docs/PERSISTENT_SEMANTIC_PHASE01.md
+```
+
+Phase 0 records raw-logit and post-softmax summaries at resolutions
+`224,320,448,512`, per image/layer/head/direction. Two fixed 224-resolution
+images retain complete 12-layer raw and post-softmax matrices. Phase 1 evaluates
+per-layer `softmax_p(S_cp)`, strict 20-class `softmax_c(S_pc)`, an explicitly
+separate image-label-masked version, mutual maps, foreground-only semantic
+metrics, and A/B/C/D GT composition. Primary high/low thresholds are fixed at
+`0.5`; a common `0.05,0.10,0.25,0.50` calibration sensitivity grid is
+diagnostic only.
+
+Validation before the full launch:
+
+```text
+full repository tests: 51 passed
+GPU smoke:              5 VOC images, all four resolutions, complete
+checkpoint load:        strict
+maximum FP32 row error: 5.96e-7 in the earlier 2-image smoke
+shell validation:       bash -n passed; shellcheck is not installed on LHR
+```
+
+The 5-image smoke showed that the output is informative enough to distinguish
+diffuse calibration from random ranking, but it is not scientific evidence and
+must not be reported as the Phase 1 result. The full queue remains the next
+operation at the time of this implementation checkpoint.
 
 ## Completed MCTformer+ token-role pilot
 
@@ -22,10 +75,12 @@ comparison:   results/mctformerplus/voc/comparisons/token-role-pilot-20260828-15
 It adapts the ICLR 2026 paper *Revisiting [CLS] and Patch Token Interaction in
 Vision Transformers* to MCTformer+'s first 20 class tokens versus its spatial
 patch tokens. This is an exploratory prior-art transfer, not a novelty claim.
-The exact adaptation and decision rule are frozen in:
+The historical adaptation and decision rule are preserved in Git commit
+`0f9a217` and the immutable result directories. The active-tree protocol file
+was removed when this exploration was terminated:
 
 ```text
-docs/TOKEN_ROLE_EXPERIMENTS.md
+0f9a217 Add MCTformer+ token-role specialization pilots
 ```
 
 The queue reused the completed E0 seed-0 run as `shared`, recomputed matched
@@ -69,8 +124,9 @@ separation is not sufficient for MCTformer+'s multi-class-token WSSS.
 
 This is a no-go for direct transfer of separate LayerNorm/QKV to MCTformer+.
 Do not run more seeds, combine it with TGCA/BCSS, or expand it to COCO or an
-independent host. Preserve the implementation, tests, checkpoints, and negative
-result for provenance. There is no active tmux session or GPU experiment.
+independent host. Its active implementation, tests, and runners were deleted at
+the user's request; the checkpoints, result directories, commits, and negative
+conclusion remain available for provenance.
 
 ## BCSS VOC screen state on 2026-08-28
 
@@ -182,10 +238,12 @@ Then read these files completely:
 
 `docs/MCTTA.pdf` is the rejected legacy manuscript. It is evidence and background, not a draft to compress or edit.
 
-There is no active experiment queue. The completed token-role pilot and
-`e4_mass` run must not be restarted or duplicated.
+At this implementation checkpoint there is no active experiment queue. The
+completed token-role pilot and `e4_mass` run must not be restarted or
+duplicated. The next authorized queue is the single frozen-checkpoint Persistent
+Semantic Latent Phase 0/1 diagnostic described above.
 
-## Project objective
+## Historical TGCA objective
 
 Prepare a focused ICASSP 2027 Computer Vision paper:
 
@@ -660,14 +718,13 @@ Do not select a favorable method from only seed 0 and present it as final. After
 
 ## Immediate next sequence
 
-1. Treat full TGCA as mechanism-positive but localization-negative on the seed-0 primary-host pilot; do not launch additional full-TGCA seeds yet.
-2. Run the single prespecified contingency `tgca_gamma05` at seed `0`, fixed threshold `0.45`, with identical training and evaluation. Do not tune gamma beyond `{0, 0.5, 1}`.
-3. Apply the same post-pilot attention, error, scale, and efficiency diagnostics to `tgca_gamma05`.
-4. If partial correction still loses CAM quality, stop primary-host expansion and reassess or reject the WSSS benefit hypothesis rather than proceeding to KYAM or COCO.
-5. If partial correction retains meaningful stability and recovers or improves localization, predeclare additional matched seeds before running them.
-6. Optimize the mathematically identical count-correction implementation and measure FLOPs/MACs before claiming negligible overhead.
-7. Reproduce vanilla Know Your Attention Maps only after the primary-host decision, then specify and ablate its singleton register-token grouping.
-8. Use DiCLIP only as a transparent external comparison. Start COCO only if the VOC mechanism and independent-host gates pass.
+1. Run the single frozen-checkpoint Phase 0/1 queue over all 1464 VOC `train_id` images.
+2. Verify completion markers, checkpoint/list hashes, 12 layers, 6 heads, four resolutions, and raw/post row normalization before interpreting metrics.
+3. Review strict 20-class patch-to-class accuracy, foreground-restricted semantic mIoU, per-class results, and layer/head variation.
+4. Review Region C target purity and recovery at primary threshold `0.5`; use the shared sensitivity grid only to diagnose diffuse calibration.
+5. Compare Region C purity against the within-image class-to-patch-low reference using the image-bootstrap interval.
+6. Decide the Phase 1 go/no-go from the complete evidence. Do not implement persistent semantic latents merely because one diagnostic threshold or five-image smoke is favorable.
+7. Only after a positive reviewed gate, predeclare the minimal Phase 2 Read/Write variants from the new plan.
 
 ## Risks that can invalidate or weaken the hypothesis
 

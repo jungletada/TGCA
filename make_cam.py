@@ -17,7 +17,6 @@ from utils import create_cam_model, parse_scales
 from models.adapter_modules import resize_input_minbound
 from models.tgca import SUPPORTED_MODES
 from models.bcss import BCSS_VARIANTS
-from models.vit import TOKEN_ROLE_SPECIALIZATIONS
 
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
@@ -38,10 +37,6 @@ def get_args_parser():
     parser.add_argument(
         '--attention-gamma', default=1.0, type=float,
         help='key-group count correction exponent (TGCA modes only)')
-    parser.add_argument(
-        '--token-role-specialization', default='shared',
-        choices=TOKEN_ROLE_SPECIALIZATIONS,
-        help='class-token/patch-token parameter specialization used by the checkpoint')
     parser.add_argument('--bcss-variant', default='e0', choices=tuple(BCSS_VARIANTS))
     parser.add_argument('--bcss-num-background-slots', default=1, type=int)
     parser.add_argument('--bcss-tau', default=0.5, type=float)
@@ -412,13 +407,6 @@ if __name__ == '__main__':
 
     model = create_cam_model(args)
     checkpoint = torch.load(args.checkpoint, map_location='cpu')
-    role_checkpoint = checkpoint.get('token_role_specialization', {})
-    checkpoint_role = role_checkpoint.get('mode', 'shared')
-    if checkpoint_role != args.token_role_specialization:
-        raise ValueError(
-            f"Checkpoint uses token-role specialization {checkpoint_role}, "
-            f"but --token-role-specialization is {args.token_role_specialization}"
-        )
     if 'bcss' in checkpoint:
         bcss_checkpoint = checkpoint['bcss']
         checkpoint_variant = bcss_checkpoint.get('variant', 'e0')
