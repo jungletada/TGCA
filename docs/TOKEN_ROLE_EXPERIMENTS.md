@@ -2,6 +2,8 @@
 
 ## Status and scope
 
+**Completed 2026-08-28; final seed-0 decision: no-go for direct transfer.**
+
 This is an exploratory MCTformer+ seed-0 pilot motivated by the ICLR 2026 paper
 [Revisiting [CLS] and Patch Token Interaction in Vision Transformers](https://arxiv.org/abs/2602.08626).
 It does not establish a novel contribution: separate normalization and selective
@@ -85,3 +87,38 @@ If feature separation increases while CAM localization degrades, the ICLR 2026
 mechanism does not transfer directly to MCTformer+'s multi-class-token WSSS
 objective. If both modes improve, the next research discussion must identify a
 WSSS-specific mechanism beyond simply reusing separate LayerNorm/QKV.
+
+## Completed result
+
+The sequential queue completed normally at `2026-08-28T18:22:06+09:00` from
+commit `d055da84197d1965d81176efd4785e05357822ba`. Machine-readable outputs are
+under:
+
+```text
+results/mctformerplus/voc/comparisons/
+  token-role-pilot-20260828-152106-s0-d055da8/
+```
+
+| Mode | Raw CAM mIoU | Semantic P/R | Background FPR | Final cls mAP |
+|---|---:|---:|---:|---:|
+| shared | 70.063 | 80.735/85.817 | 6.756 | 96.410 |
+| norm | 68.960 | 80.121/84.657 | 7.001 | 96.503 |
+| norm_qkv | 68.482 | 79.911/84.477 | 7.033 | 96.203 |
+
+Relative to shared, paired image bootstrap gives a raw-CAM mIoU change of
+`-1.104` (95% CI `[-1.519,-0.688]`) for `norm` and `-1.581`
+(`[-2.332,-0.805]`) for `norm_qkv`. Classification is retained, so the
+localization decline is not explained by a failed classifier. Both semantic
+precision and recall decline, and background false positives increase.
+
+The LayerNorm-only path also does not create a materially different all-layer
+class-patch cosine response: shared changes from `0.00745` before `norm1` to
+`-0.05755` after it, while `norm` changes from `0.00994` to `-0.05811`.
+Separate early QKV moves the pre-normalization cosine to `-0.03456`, but that
+stronger representation separation coincides with worse CAMs and costs an
+`8.129%` parameter increase.
+
+The prespecified decision rule therefore fails. Do not expand these modes to
+additional seeds, datasets, hosts, or combinations. The result rejects this
+direct MCTformer+ transfer; it does not prove that class and patch roles are
+identical or rule out a different WSSS-specific mechanism.

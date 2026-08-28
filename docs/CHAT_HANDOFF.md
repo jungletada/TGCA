@@ -1,22 +1,22 @@
 # TGCA research handoff
 
-Last updated: **2026-08-28 (Asia/Tokyo)**
+Last updated: **2026-08-29 (Asia/Tokyo)**
 
 > **Research direction status.** The historical TGCA plan below and the BCSS
 > plan in `docs/CHAT_HANDOFF-0827.md` are retained for provenance. The completed
 > TGCA and BCSS screens are both negative for localization. Do not expand either
 > formulation without a new positive VOC mechanism result.
 
-## Active MCTformer+ token-role pilot
+## Completed MCTformer+ token-role pilot
 
-The only authorized experiment queue is the seed-0 class-token/patch-token
-specialization pilot:
+The seed-0 class-token/patch-token specialization pilot completed normally:
 
 ```text
-tmux session: mctplus-token-role-pilot
 queue ID:     20260828-152106
 queue log:    results/queues/token-role/20260828-152106.log
-code commit:  0f9a217 Add MCTformer+ token-role specialization pilots
+result commit: d055da84197d1965d81176efd4785e05357822ba
+finished:     2026-08-28T18:22:06+09:00
+comparison:   results/mctformerplus/voc/comparisons/token-role-pilot-20260828-152106-s0-d055da8
 ```
 
 It adapts the ICLR 2026 paper *Revisiting [CLS] and Patch Token Interaction in
@@ -28,36 +28,49 @@ The exact adaptation and decision rule are frozen in:
 docs/TOKEN_ROLE_EXPERIMENTS.md
 ```
 
-The queue reuses the completed E0 seed-0 run as `shared`, recomputes matched
+The queue reused the completed E0 seed-0 run as `shared`, recomputed matched
 200-image pre/post-`norm1` cosine and efficiency diagnostics for its frozen
-checkpoint, then trains these two variants sequentially:
+checkpoint, then trained these two variants sequentially:
 
 ```text
 norm      separate class/patch norm1 and norm2 in all 12 blocks
 norm_qkv  norm plus separate class QKV in blocks 0--3
 ```
 
-Both variants retain vanilla attention normalization, BCSS E0, shared MLP and
+Both variants retained vanilla attention normalization, BCSS E0, shared MLP and
 output projection, 45 epochs, seed 0, input 448, CAM scales
 `1.0,0.75,1.25`, and fixed threshold `0.45`. The `norm` and `norm_qkv`
 parameter increases are `0.0836%` and `8.1290%`. Specialized paths copy their
 corresponding shared DeiT weights, making the modes equivalent at
 initialization within numerical tolerance. All 52 repository tests pass.
 
-Inspect without interrupting:
+The fixed-threshold results are:
 
-```bash
-tmux capture-pane -pt mctplus-token-role-pilot:0 -S -120
-tail -n 120 results/queues/token-role/20260828-152106.log
-```
+| Mode | Raw CAM mIoU | Semantic P/R | Background FPR | Final cls mAP | Params | Latency |
+|---|---:|---:|---:|---:|---:|---:|
+| shared | 70.063 | 80.735/85.817 | 6.756 | 96.410 | 22.051M | 8.431 ms |
+| norm | 68.960 | 80.121/84.657 | 7.001 | 96.503 | 22.069M | 8.803 ms |
+| norm_qkv | 68.482 | 79.911/84.477 | 7.033 | 96.203 | 23.843M | 8.870 ms |
 
-Do not start another GPU experiment, edit result-critical source, or duplicate
-this queue while it is active. The queue will write immutable run directories
-for `norm` and `norm_qkv`, plus a comparison under
-`results/mctformerplus/voc/comparisons/token-role-pilot-20260828-152106-*`.
-Do not expand this exploratory direction beyond seed 0 until raw CAM,
-precision/recall, background false positives, class/patch cosine, classification,
-parameters, memory, and latency have all been reviewed.
+Paired 10,000-resample image bootstrap confirms that both CAM losses are
+negative rather than sampling noise. Relative to shared, the mIoU change is
+`-1.104` points with 95% CI `[-1.519,-0.688]` for `norm`, and `-1.581`
+with CI `[-2.332,-0.805]` for `norm_qkv`. For `norm`, semantic and binary
+precision and recall all decrease with intervals excluding zero, while
+background FPR increases by `0.245` point with CI `[0.097,0.394]`.
+
+The 200-image geometry diagnostic does not support a useful LayerNorm-only
+mechanism. All-layer class-patch cosine before/after `norm1` is
+`0.00745/-0.05755` for shared and `0.00994/-0.05811` for `norm`; their
+normalization-induced deltas are nearly unchanged (`-0.06500` versus
+`-0.06805`). `norm_qkv` makes the pre-normalization representation more
+separated (`-0.03456`) but still degrades localization. Thus greater role
+separation is not sufficient for MCTformer+'s multi-class-token WSSS.
+
+This is a no-go for direct transfer of separate LayerNorm/QKV to MCTformer+.
+Do not run more seeds, combine it with TGCA/BCSS, or expand it to COCO or an
+independent host. Preserve the implementation, tests, checkpoints, and negative
+result for provenance. There is no active tmux session or GPU experiment.
 
 ## BCSS VOC screen state on 2026-08-28
 
@@ -169,9 +182,8 @@ Then read these files completely:
 
 `docs/MCTTA.pdf` is the rejected legacy manuscript. It is evidence and background, not a draft to compress or edit.
 
-The `mctplus-token-role-pilot` queue above is active. Inspect it read-only and
-do not stop, restart, or duplicate it. The completed `e4_mass` run must not be
-restarted.
+There is no active experiment queue. The completed token-role pilot and
+`e4_mass` run must not be restarted or duplicated.
 
 ## Project objective
 
@@ -239,13 +251,14 @@ Git branch state at this handoff:
 
 ```text
 main                            7bd603e [origin/main] Document environments and add independent hosts
-research/mctformerplus-baseline current handoff commit (result-critical parent: 0f9a217)
+research/mctformerplus-baseline active research branch
 ```
 
-The result-critical token-role implementation on the active checkout is:
+The result-critical token-role implementation and launch manifest are:
 
 ```text
 0f9a217 Add MCTformer+ token-role specialization pilots
+d055da8 Queue MCTformer+ token-role VOC pilots
 ```
 
 The completed TGCA pilot results were produced from result commit
@@ -257,13 +270,14 @@ Commit `4147fc3` contains the BCSS implementation used by the completed VOC
 screen. Commit `ade83ad` records the negative result summary, mass-aware anchor,
 anti-collapse tests, and single-debug runner support. Commit `522be66` records
 the completed negative `e4_mass` result. Commit `0f9a217` adds the token-role
-implementation, diagnostics, tests, and sequential VOC pilot. The launch
-manifest records the full handoff commit and a clean tracked worktree. No push
-was performed.
+implementation, diagnostics, tests, and sequential VOC pilot. Commit `d055da8`
+records the frozen queue and is the full commit in both run manifests; the
+worktree was clean at launch. No push was performed.
 
 Relevant commits:
 
 ```text
+d055da8 Queue MCTformer+ token-role VOC pilots
 0f9a217 Add MCTformer+ token-role specialization pilots
 522be66 Record mass-aware BCSS debug result
 ade83ad Add mass-aware BCSS foreground anchor debug
@@ -363,7 +377,7 @@ Commit `22427d6` added the initial implementation and experiment plumbing:
 - `tests/test_mctformerplus_attention.py` — host integration checks;
 - `experiments/diagnostics/` — reproducible mechanism runners;
 - `experiments/ablations/` — reproducible normalization pilots;
-- `experiments/run_mctformerplus_next_experiments.sh` — active sequential queue.
+- `experiments/run_mctformerplus_next_experiments.sh` — completed historical TGCA queue runner.
 
 Supported mode names in the current code are:
 
