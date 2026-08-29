@@ -6,8 +6,9 @@ Last updated: **2026-08-29 (Asia/Tokyo)**
 > completed negative explorations retained for provenance. The active research
 > plan is now `docs/Persistent_Semantic_Latent_Codex_Plan.md`. Only its Phase 0
 > frozen-baseline instrumentation and Phase 1 patch-to-class semantic diagnostic
-> are authorized. Do not implement Phase 2 persistent latents until the Phase 1
-> go/no-go evidence has been reviewed.
+> are authorized and now complete on exploratory `train_id` and frozen
+> confirmatory `val_id`. Do not implement Phase 2 persistent latents until its
+> experiment is separately predeclared and authorized.
 
 ## Persistent Semantic Latent Phase 0/1 implementation
 
@@ -31,8 +32,10 @@ Implementation and protocol:
 ```text
 analysis/semantic_relations.py
 tools/analyze_patch_to_class.py
+tools/review_patch_to_class_result.py
 tests/test_semantic_relations.py
 experiments/diagnostics/run_persistent_semantic_phase01.sh
+experiments/diagnostics/run_persistent_semantic_val_confirmatory.sh
 docs/PERSISTENT_SEMANTIC_PHASE01.md
 ```
 
@@ -148,6 +151,66 @@ results/persistent_semantic/voc/20260829-010948-persistent-semantic-phase01-e222
 
 Its generator is `tools/review_patch_to_class_result.py`. Treat its corrected
 conservative flags as the interpretation layer over the original measurements.
+
+### Frozen VOC val confirmatory diagnostic
+
+The confirmatory protocol was committed before the full validation result was
+observed. It fixes paper layer 12 (zero-based 11), the six-head mean, strict
+20-class `pc_all`, primary threshold `0.5`, and a secondary paper-head-6
+diagnostic. It additionally requires superiority to both 5% uniform accuracy
+and a paired global-majority-class predictor, plus a 10,000-sample fixed-seed
+class-identity permutation test. No model weights or forward computation were
+changed.
+
+```text
+implementation commit: cea7f9ca8a3400ae795b53a0b56e93b1e1b845ee
+run ID: 20260829-134444-persistent-semantic-val-confirmatory-cea7f9c
+run dir: results/persistent_semantic/voc/20260829-134444-persistent-semantic-val-confirmatory-cea7f9c
+queue log: results/queues/persistent-semantic/20260829-134444-persistent-semantic-val-confirmatory-cea7f9c.log
+val_id SHA-256: 6f8edc37993764f6e212237d39546fb595246244147e8a050813c520aac0ade1
+images: 1449 complete; 1444 contain foreground after the fixed center crop
+elapsed: 192.71 seconds
+```
+
+The fixed layer-12 result confirms the intrinsic semantic-attribution finding:
+
+```text
+patch-weighted foreground accuracy:       55.094%
+foreground-restricted class mIoU:          41.700%
+macro image accuracy:                      57.347%
+macro image bootstrap 95% CI:              [55.654%, 59.029%]
+majority class:                            person
+majority macro image accuracy:             16.084%
+paired accuracy advantage:                 41.263 points
+paired advantage 95% CI:                   [38.797, 43.712] points
+class-identity permutation mean / p-value: 5.015% / 0.00010
+```
+
+The exploratory train-to-confirmatory-val change is `-3.052` points in macro
+image accuracy, `-2.269` points in patch-weighted accuracy, and `-1.806` points
+in foreground-restricted mIoU. The macro accuracy stays within the predeclared
+five-point retention band. Layer 12 also happens to remain the best validation
+layer, but that fact was not used for selection. Secondary head 6 obtains
+`61.178%` accuracy and `45.031%` foreground-restricted mIoU.
+
+The primary-threshold Region C result remains a no-go. At `0.5`, no strict
+`pc_all` probability passes the threshold, so Region C has zero support and
+zero recovery. On the fixed sensitivity grid, threshold `0.25` gives `77.97%`
+purity but only `5.72%` recovery; threshold `0.10` gives `45.16%` purity and
+`57.06%` recovery. These secondary values confirm diffuse calibration, not the
+predeclared foreground decision. The machine-readable decision is therefore
+`go` for intrinsic patch-to-class semantics and `no_go` for primary-threshold
+Region-C complementarity.
+
+Artifact counts were checked: Phase 0 has `278208` image rows, Phase 1 has
+`17388` image-layer rows, and the run contains 2 raw matrix dumps plus 12 sample
+and preview dumps. Maximum FP32 attention row-sum error is `9.54e-7`. At fixed
+layer 12, mean class-query-to-patch-key mass rises from `34.67%` at 224 to
+`45.37%` at 512, while patch-query-to-patch-key mass rises from `43.38%` to
+`58.29%`; the validation split therefore reproduces the expected vanilla
+resolution/cardinality dependence. Both completion markers and
+`scientific_review.json` are present. All 54 repository tests passed before
+launch, and there is no active experiment now.
 
 ## Completed MCTformer+ token-role pilot
 
