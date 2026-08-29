@@ -3,6 +3,7 @@ import torch
 
 from analysis.semantic_relations import (
     cam_prediction,
+    class_permutation_control,
     conditional_relations,
     conservative_diagnostic_gates,
     confusion_matrix,
@@ -137,3 +138,13 @@ def test_conservative_region_c_gate_requires_coverage_and_recovery():
     assert not gates["pc_all_above_uniform_random"]
     assert gates["pc_all_recovers_cp_missed_foreground"]
     assert gates["region_c_enriched_over_cp_low_reference"]
+
+
+def test_class_permutation_control_rejects_wrong_class_identities():
+    confusion = np.full((10, 10), 1, dtype=np.int64)
+    np.fill_diagonal(confusion, 91)
+    result = class_permutation_control(confusion, resamples=1000, seed=2027)
+    assert result["observed_accuracy"] > 0.9
+    assert result["permuted_accuracy_ci95"][1] < result["observed_accuracy"]
+    assert result["empirical_p_greater_equal"] <= 0.01
+    assert result["seed"] == 2027

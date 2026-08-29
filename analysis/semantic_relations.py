@@ -213,3 +213,34 @@ def conservative_diagnostic_gates(
         "minimum_recovery_recall": minimum_recovery_recall,
         "maximum_observed_recovery_recall": float(maximum_recovery_recall),
     }
+
+
+def class_permutation_control(confusion, resamples=10000, seed=2027):
+    """Test whether semantic accuracy depends on the learned class identities."""
+    confusion = np.asarray(confusion, dtype=np.int64)
+    if confusion.ndim != 2 or confusion.shape[0] != confusion.shape[1]:
+        raise ValueError("confusion must be a square class confusion matrix")
+    if resamples <= 0:
+        raise ValueError("resamples must be positive")
+    total = int(confusion.sum())
+    if not total:
+        raise ValueError("confusion must contain at least one observation")
+    observed = float(np.trace(confusion) / total)
+    generator = np.random.default_rng(seed)
+    accuracies = np.empty(resamples, dtype=np.float64)
+    classes = confusion.shape[0]
+    for index in range(resamples):
+        permutation = generator.permutation(classes)
+        accuracies[index] = confusion[permutation, np.arange(classes)].sum() / total
+    interval = np.quantile(accuracies, (0.025, 0.975))
+    return {
+        "observed_accuracy": observed,
+        "permuted_accuracy_mean": float(accuracies.mean()),
+        "permuted_accuracy_std": float(accuracies.std()),
+        "permuted_accuracy_ci95": [float(interval[0]), float(interval[1])],
+        "empirical_p_greater_equal": float(
+            (np.count_nonzero(accuracies >= observed) + 1) / (resamples + 1)
+        ),
+        "resamples": int(resamples),
+        "seed": int(seed),
+    }

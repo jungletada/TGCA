@@ -64,3 +64,29 @@ review of coverage, per-class behavior, and post-selection remains mandatory.
 All layer indices in machine-readable files are zero based. GT is used only
 for analysis. No metric in this phase is a full semantic segmentation result
 for patch-to-class because no background/dustbin latent exists.
+
+## Frozen VOC val confirmation
+
+The first Phase 0/1 run used `train_id` and therefore remains exploratory. The
+confirmatory diagnostic uses the same immutable E0 checkpoint on the complete
+VOC `val_id` split, with every selection fixed before observing validation
+results:
+
+- paper layer 12 (`--confirmatory-layer 11`) is the only primary layer;
+- the mean of all six heads is primary, while paper head 6
+  (`--diagnostic-head 5`) is a secondary diagnostic only;
+- strict `pc_all` attribution over all 20 classes is primary;
+- `0.5` is the primary semantic threshold, and
+  `0.05,0.10,0.25,0.50` is a fixed sensitivity grid;
+- the other layers are retained for descriptive plots and cannot replace the
+  primary layer after results are observed;
+- class identity is tested with 10,000 fixed-seed permutations (`seed=2027`).
+
+Intrinsic patch-to-class semantics are confirmed only if the layer-12
+macro-image bootstrap lower bound exceeds 5% uniform accuracy, the paired
+bootstrap lower bound of its per-image accuracy advantage over the global VOC
+validation foreground majority-class predictor exceeds zero, and the
+identity-permutation test has empirical `p < 0.01`. Region-C complementarity
+remains a separate gate with the existing coverage and recovery guards.
+Agreement within five percentage points of the exploratory train result is
+strong secondary evidence, not an additional pass criterion.

@@ -29,6 +29,7 @@ if str(REPO_ROOT) not in sys.path:
 from analysis._common import load_labels, segmentation_path
 from analysis.semantic_relations import (
     cam_prediction,
+    class_permutation_control,
     conditional_relations,
     conservative_diagnostic_gates,
     confusion_matrix,
@@ -95,6 +96,14 @@ def parse_args():
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--resolutions", type=parse_int_tuple, default=(224, 320, 448, 512))
     parser.add_argument("--semantic-resolution", type=int, default=448)
+    parser.add_argument(
+        "--confirmatory-layer", type=int, default=-1,
+        help="zero-based fixed primary layer; -1 retains exploratory best-layer review",
+    )
+    parser.add_argument(
+        "--diagnostic-head", type=int, default=-1,
+        help="zero-based head reported only as a secondary diagnostic",
+    )
     parser.add_argument("--cam-threshold", type=float, default=0.5)
     parser.add_argument("--semantic-threshold", type=float, default=0.5)
     parser.add_argument(
@@ -107,6 +116,8 @@ def parse_args():
     parser.add_argument("--raw-dump-resolution", type=int, default=224)
     parser.add_argument("--bootstrap-resamples", type=int, default=10000)
     parser.add_argument("--bootstrap-seed", type=int, default=2027)
+    parser.add_argument("--permutation-resamples", type=int, default=10000)
+    parser.add_argument("--permutation-seed", type=int, default=2027)
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
     if args.semantic_resolution not in args.resolutions:
@@ -117,6 +128,8 @@ def parse_args():
         parser.error("diagnostic thresholds must be in (0, 1)")
     if args.semantic_threshold not in args.semantic_thresholds:
         parser.error("the primary semantic threshold must be in --semantic-thresholds")
+    if args.confirmatory_layer < -1 or args.diagnostic_head < -1:
+        parser.error("confirmatory layer and diagnostic head must be -1 or non-negative")
     return args
 
 
@@ -441,7 +454,12 @@ def main():
         image_ids = image_ids[:args.max_images]
     if not image_ids:
         raise RuntimeError("The selected dataset split is empty")
-    if args.max_images == 0 and baseline_metrics.get("num_images") != len(image_ids):
+    baseline_split = baseline_metrics.get("split")
+    if (
+        args.max_images == 0
+        and baseline_split == args.split
+        and baseline_metrics.get("num_images") != len(image_ids)
+    ):
         raise ValueError("Baseline metric image count does not match the requested split")
     image_labels = load_labels(args.voc_root)
 
@@ -459,6 +477,8 @@ def main():
         "trusted_baseline_metrics_sha256": sha256(args.baseline_metrics),
         "trusted_baseline_raw_cam_miou_percent": baseline_metrics.get("mean_iou_percent"),
         "trusted_baseline_raw_cam_threshold": baseline_metrics.get("background_threshold"),
+        "trusted_baseline_split": baseline_split,
+        "baseline_count_match_required": baseline_split == args.split,
         "voc_root": str(args.voc_root.resolve()),
         "id_list": str(args.id_list.resolve()),
         "id_list_sha256": sha256(args.id_list),
@@ -466,6 +486,12 @@ def main():
         "num_images": len(image_ids),
         "resolutions": list(args.resolutions),
         "semantic_resolution": args.semantic_resolution,
+        "confirmatory_layer_zero_based": (
+            args.confirmatory_layer if args.confirmatory_layer >= 0 else None
+        ),
+        "diagnostic_head_zero_based": (
+            args.diagnostic_head if args.diagnostic_head >= 0 else None
+        ),
         "cam_threshold": args.cam_threshold,
         "semantic_threshold": args.semantic_threshold,
         "semantic_threshold_sensitivity": list(args.semantic_thresholds),
@@ -496,6 +522,7 @@ def main():
     sensitivity_foreground = defaultdict(lambda: np.zeros(7, dtype=np.int64))
     sensitivity_overlap = defaultdict(lambda: np.zeros(2, dtype=np.int64))
     sensitivity_region_c = defaultdict(lambda: np.zeros(3, dtype=np.int64))
+    per_image_foreground_class_counts = []
     per_image_rows = []
     start_time = time.time()
 
@@ -590,6 +617,11 @@ def main():
                     target_flat = semantic_target.reshape(-1).astype(np.int64)
                     valid = target_flat != 255
                     foreground_valid = valid & (target_flat > 0)
+                    per_image_foreground_class_counts.append(
+                        np.bincount(
+                            target_flat[foreground_valid] - 1, minlength=20
+                        ).astype(np.int64)
+                    )
                     sample_maps = []
 
                     for relation in semantic_payload:
@@ -1062,14 +1094,31 @@ def main():
         key=lambda row: row["pc_all_fg_accuracy"]
         if row["pc_all_fg_accuracy"] is not None else -math.inf,
     )["layer"]
+    if args.confirmatory_layer >= len(model.blocks):
+        raise ValueError(
+            f"Confirmatory layer {args.confirmatory_layer} is outside "
+            f"the {len(model.blocks)}-layer model"
+        )
+    if args.diagnostic_head >= model.blocks[0].attn.num_heads:
+        raise ValueError(
+            f"Diagnostic head {args.diagnostic_head} is outside "
+            f"the {model.blocks[0].attn.num_heads}-head model"
+        )
+    selected_pc_layer = (
+        args.confirmatory_layer if args.confirmatory_layer >= 0 else best_pc_all_layer
+    )
     random_accuracy = 1.0 / 20.0
     best_pc_accuracy = layer_rows[best_pc_all_layer]["pc_all_fg_accuracy"]
-    best_pc_bootstrap = bootstrap[
-        f"layer_{best_pc_all_layer}_pc_all_fg_accuracy"
+    selected_pc_bootstrap = bootstrap[
+        f"layer_{selected_pc_layer}_pc_all_fg_accuracy"
     ]
     minimum_region_images = max(30, math.ceil(0.05 * len(image_ids)))
+    region_layers = (
+        [selected_pc_layer]
+        if args.confirmatory_layer >= 0 else list(range(len(model.blocks)))
+    )
     eligible_region_layers = [
-        layer for layer in range(len(model.blocks))
+        layer for layer in region_layers
         if bootstrap[f"layer_{layer}_region_c_purity_difference"]["num_images"]
         >= minimum_region_images
     ]
@@ -1085,6 +1134,7 @@ def main():
     maximum_recovery = max(
         row["macro_image_region_c_recovery_recall"] or 0.0
         for row in layer_rows
+        if row["layer"] in region_layers
     )
     selected_region_bootstrap = (
         bootstrap[f"layer_{best_region_c_layer}_region_c_purity_difference"]
@@ -1092,7 +1142,7 @@ def main():
         else {"ci95": [None, None], "num_images": 0}
     )
     gates = conservative_diagnostic_gates(
-        pc_accuracy_ci_lower=best_pc_bootstrap["ci95"][0],
+        pc_accuracy_ci_lower=selected_pc_bootstrap["ci95"][0],
         random_accuracy=random_accuracy,
         maximum_recovery_recall=maximum_recovery,
         region_c_ci_lower=selected_region_bootstrap["ci95"][0],
@@ -1100,6 +1150,78 @@ def main():
         total_images=len(image_ids),
     )
     gates["decision"] = "diagnostic_only_pending_scientific_review"
+    selected_confusion = semantic_confusions[("pc_all", selected_pc_layer)]
+    target_counts = selected_confusion.sum(axis=1)
+    majority_class_index = int(target_counts.argmax())
+    majority_patch_accuracy = float(target_counts.max() / target_counts.sum())
+    selected_image_rows = [
+        item for item in per_image_rows if item["layer"] == selected_pc_layer
+    ]
+    if len(selected_image_rows) != len(per_image_foreground_class_counts):
+        raise RuntimeError("Per-image semantic rows and target counts are misaligned")
+    majority_image_accuracies = []
+    accuracy_advantages = []
+    for row, counts in zip(selected_image_rows, per_image_foreground_class_counts):
+        count = int(counts.sum())
+        accuracy = row["pc_all_fg_accuracy"]
+        if count and accuracy is not None and math.isfinite(accuracy):
+            majority_accuracy = float(counts[majority_class_index] / count)
+            majority_image_accuracies.append(majority_accuracy)
+            accuracy_advantages.append(float(accuracy - majority_accuracy))
+    majority_bootstrap = bootstrap_mean(
+        majority_image_accuracies,
+        args.bootstrap_resamples,
+        args.bootstrap_seed + 1000,
+    )
+    majority_advantage_bootstrap = bootstrap_mean(
+        accuracy_advantages,
+        args.bootstrap_resamples,
+        args.bootstrap_seed + 2000,
+    )
+    majority_class_accuracy = majority_bootstrap["mean"]
+    majority_control = {
+        "class_index_zero_based": majority_class_index,
+        "class_id_voc": majority_class_index + 1,
+        "class_name": CLASS_NAMES[majority_class_index],
+        "patch_weighted_accuracy": majority_patch_accuracy,
+        "macro_image_accuracy": majority_class_accuracy,
+        "macro_image_accuracy_ci95": majority_bootstrap["ci95"],
+        "pc_all_minus_majority_macro_image_accuracy": (
+            majority_advantage_bootstrap["mean"]
+        ),
+        "pc_all_minus_majority_macro_image_accuracy_ci95": (
+            majority_advantage_bootstrap["ci95"]
+        ),
+        "num_images": majority_bootstrap["num_images"],
+    }
+    permutation_control = class_permutation_control(
+        selected_confusion,
+        resamples=args.permutation_resamples,
+        seed=args.permutation_seed,
+    )
+    gates["pc_all_above_foreground_majority_class"] = bool(
+        majority_advantage_bootstrap["ci95"][0] is not None
+        and majority_advantage_bootstrap["ci95"][0] > 0
+    )
+    gates["class_identity_permutation_p_below_0_01"] = bool(
+        permutation_control["empirical_p_greater_equal"] < 0.01
+    )
+    diagnostic_head_metrics = None
+    if args.diagnostic_head >= 0:
+        head_cp = confusion_summary(
+            head_cp_confusions[(selected_pc_layer, args.diagnostic_head)]
+        )
+        head_pc = confusion_summary(
+            head_pc_confusions[(selected_pc_layer, args.diagnostic_head)]
+        )
+        diagnostic_head_metrics = {
+            "layer_zero_based": selected_pc_layer,
+            "head_zero_based": args.diagnostic_head,
+            "pc_all_fg_accuracy": head_pc["accuracy"],
+            "pc_all_fg_miou": head_pc["mean_iou"],
+            "cp_cam_miou": head_cp["mean_iou"],
+            "role": "secondary_diagnostic_not_used_for_selection",
+        }
     metrics = {
         "run_id": args.run_id,
         "phase": [0, 1],
@@ -1112,10 +1234,22 @@ def main():
         },
         "classification": classification,
         "phase1": {
+            "selection_mode": (
+                "fixed_confirmatory_layer"
+                if args.confirmatory_layer >= 0 else "exploratory_best_layer"
+            ),
+            "confirmatory_layer_zero_based": (
+                selected_pc_layer if args.confirmatory_layer >= 0 else None
+            ),
+            "selected_primary_layer_zero_based": selected_pc_layer,
             "best_pc_present_layer_zero_based": best_pc_present_layer,
             "best_pc_all_layer_zero_based": best_pc_all_layer,
             "best_pc_all_fg_accuracy": best_pc_accuracy,
             "uniform_20_class_random_accuracy": random_accuracy,
+            "foreground_majority_class_accuracy": majority_class_accuracy,
+            "foreground_majority_class_control": majority_control,
+            "class_identity_permutation_control": permutation_control,
+            "diagnostic_head": diagnostic_head_metrics,
             "best_region_c_enrichment_layer_zero_based": best_region_c_layer,
             "layer_metrics": layer_rows,
             "bootstrap": bootstrap,
@@ -1147,6 +1281,7 @@ def main():
         "num_images": len(image_ids),
         "best_pc_present_layer": best_pc_present_layer,
         "best_pc_all_layer": best_pc_all_layer,
+        "selected_primary_layer": selected_pc_layer,
         "best_pc_all_fg_accuracy": best_pc_accuracy,
         "gates": gates,
     }, sort_keys=True))
