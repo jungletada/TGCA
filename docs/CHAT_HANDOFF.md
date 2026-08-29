@@ -1,14 +1,78 @@
 # TGCA research handoff
 
-Last updated: **2026-08-29 (Asia/Tokyo)**
+Last updated: **2026-08-30 (Asia/Tokyo)**
 
 > **Research direction status.** TGCA, BCSS, and token-role specialization are
 > completed negative explorations retained for provenance. The active research
-> plan is now `docs/Persistent_Semantic_Latent_Codex_Plan.md`. Only its Phase 0
+> plan is now `docs/Persistent_Semantic_Latent_Codex_Plan.md`. Its Phase 0
 > frozen-baseline instrumentation and Phase 1 patch-to-class semantic diagnostic
-> are authorized and now complete on exploratory `train_id` and frozen
-> confirmatory `val_id`. Do not implement Phase 2 persistent latents until its
-> experiment is separately predeclared and authorized.
+> are complete on exploratory `train_id` and frozen confirmatory `val_id`.
+> Phase 2 has now been separately predeclared and authorized as the minimal
+> seed-0 Read/Write screen described below. Do not expand it to depth, width,
+> initialization, multi-latent, OT, or multi-seed studies until this gate is
+> reviewed.
+
+## Persistent Semantic Latent Phase 2 launch
+
+The first Phase 2 screen is frozen in
+`docs/PERSISTENT_SEMANTIC_PHASE2.md`. It reuses the completed E0 seed-0 baseline
+and sequentially trains only `read_only`, `write_only`, and `read_write` under
+the matched 45-epoch VOC schedule. The core configuration is:
+
+```text
+patch stream:             patch-only DeiT-S/16, 384 dimensions
+semantic latents:         20 foreground + 1 static background, 384 dimensions
+shared relation:          384 dimensions
+interaction:              zero-based block 11 only (paper layer 12)
+ordering:                 Read then Write
+Write residual gate:      learned scalar, initialized exactly to 0
+attention normalization:  vanilla
+CAM threshold:            fixed 0.45
+seed:                     0
+```
+
+Layer 12 is the prespecified first interaction point from the strict Phase 1
+confirmation. Late-3 and other depth settings remain later ablations. The
+foreground and background latents stay outside patch self-attention. Relation
+Q/K/V and output projections copy the corresponding pretrained block, with
+parameter-free per-token normalization restoring the scale expected by those
+pretrained projections. All three active variants instantiate identical
+parameter shapes.
+
+The implementation adds:
+
+```text
+models/persistent_semantic.py
+tests/test_persistent_semantic.py
+tools/analyze_psl_relations.py
+tools/collect_psl_phase2.py
+experiments/ablations/run_psl_voc_variant.sh
+experiments/ablations/run_psl_phase2_screen.sh
+docs/PERSISTENT_SEMANTIC_PHASE2.md
+```
+
+Before launch, the full repository suite passes `62` tests. A full-size CUDA
+forward/backward at 448 verifies exact zero-gate initialization, a finite gate
+gradient, strict train-to-CAM state loading, and CAM shape `[1,20,28,28]`.
+An actual one-epoch training smoke also completed with finite losses before the
+interaction depth was frozen; that smoke is mechanical validation only and is
+not a Phase 2 result.
+
+The authorized immutable queue identity is:
+
+```text
+tmux:      tgca-psl-phase2
+screen ID: 20260830-012501
+order:     read_only -> write_only -> read_write -> comparison
+results:   results/persistent_semantic/phase2/voc/
+queue log: results/queues/persistent-semantic/20260830-012501-psl-phase2-<launch-commit>.log
+```
+
+The queue must start only after the implementation checkpoint is committed and
+the tracked worktree is clean. While it is active, inspect it read-only and do
+not change tracked files, because every variant must retain the same source
+commit. The first scientific conclusion is available only after all three
+variants and the audited comparison complete.
 
 ## Persistent Semantic Latent Phase 0/1 implementation
 
@@ -869,13 +933,11 @@ Do not select a favorable method from only seed 0 and present it as final. After
 
 ## Immediate next sequence
 
-1. Treat Phase 1 as positive for intrinsic strict patch-to-class semantic attribution, not as proof of primary-threshold Region C complementarity.
-2. Do not rerun Phase 0/1 or select a separate favorable threshold per layer/method.
-3. Before Phase 2, predeclare the minimal persistent-latent baseline, Read-only, Write-only, and Read-then-Write variants from the new plan.
-4. Keep `D_c=D_p=384`, preserve the patch ViT backbone, and add no background/OT/multiple latents until the minimal interaction gate is known.
-5. Define how Phase 2 will handle foreground/background confidence, because `pc_present` alone assigns every patch to a foreground class and the strict relation is diffuse at threshold `0.5`.
-6. Use layer 12 as the prespecified first interaction point based on strict `pc_all`; treat layer 10 Region C observations as exploratory, not a selection target.
-7. Add zero-init/no-op parity tests and parameter-matched controls before launching any Phase 2 training.
+1. Run the predeclared Phase 2 seed-0 queue without changing its configuration or tracked source commit.
+2. Wait for all three active variants and the audited comparison before deciding whether the architecture passes Gate B.
+3. Treat Phase 1 as positive for intrinsic strict patch-to-class semantic attribution, not as proof of primary-threshold Region C complementarity.
+4. Do not rerun Phase 0/1 or select a separate favorable threshold per layer or method.
+5. Do not start Late-3/depth, independent-relation, width, dynamic-initialization, multi-latent, OT, extra-background-loss, or multi-seed experiments unless the seed-0 gate supports expansion.
 
 ## Risks that can invalidate or weaken the hypothesis
 

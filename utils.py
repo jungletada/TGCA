@@ -190,7 +190,13 @@ def create_cam_model(args):
             bcss_num_background_slots=getattr(args, 'bcss_num_background_slots', 1),
             bcss_tau=getattr(args, 'bcss_tau', 0.5),
             bcss_beta=getattr(args, 'bcss_beta', 0.5),
-            bcss_cls_threshold=getattr(args, 'bcss_cls_threshold', 0.5))
+            bcss_cls_threshold=getattr(args, 'bcss_cls_threshold', 0.5),
+            psl_variant=getattr(args, 'psl_variant', 'baseline'),
+            psl_interaction_layers=getattr(
+                args, 'psl_interaction_layers', (11,)),
+            psl_relation_dim=getattr(args, 'psl_relation_dim', 384),
+            psl_num_background_latents=getattr(
+                args, 'psl_num_background_latents', 1))
         
     elif 'srmctformer' in args.model.lower():
         model = SRMCTformerCam(

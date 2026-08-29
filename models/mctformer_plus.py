@@ -14,6 +14,11 @@ from models.bcss import (
     semantic_slot_losses,
     validate_bcss_variant,
 )
+from models.persistent_semantic import (
+    SemanticReadWrite,
+    parse_interaction_layers,
+    validate_psl_variant,
+)
 
 __all__ = ['mctformerplus']
 
@@ -23,7 +28,9 @@ class MCTformerPlus(VisionTransformer):
             bcss_variant='e0', bcss_num_background_slots=1,
             bcss_tau=0.5, bcss_beta=0.5, bcss_cls_threshold=0.5,
             bcss_lambda_fg=0.5, bcss_lambda_bg=0.1,
-            bcss_semantic_temperature=1.0, *args, **kwargs):
+            bcss_semantic_temperature=1.0, psl_variant='baseline',
+            psl_interaction_layers=(11,), psl_relation_dim=384,
+            psl_num_background_latents=1, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.head = nn.Conv2d(self.embed_dim, self.num_classes, kernel_size=3, stride=1, padding=1)
         self.head.apply(self._init_weights)
@@ -88,11 +95,50 @@ class MCTformerPlus(VisionTransformer):
             trunc_normal_(self.semantic_slot_decoder.background_slots, std=.02)
         else:
             self.semantic_slot_decoder = None
+
+        self.psl_variant = psl_variant.lower()
+        self.psl_spec = validate_psl_variant(self.psl_variant)
+        self.psl_interaction_layers = parse_interaction_layers(
+            psl_interaction_layers)
+        self.psl_relation_dim = int(psl_relation_dim)
+        self.psl_num_background_latents = int(psl_num_background_latents)
+        if self.psl_spec.enabled:
+            if self.bcss_variant != 'e0':
+                raise ValueError('Persistent semantic variants require BCSS E0')
+            if self.attention_normalization != 'vanilla':
+                raise ValueError(
+                    'Persistent semantic Phase 2 requires vanilla patch attention')
+            if self.psl_relation_dim != self.embed_dim:
+                raise ValueError(
+                    'Phase 2 fixes relation_dim equal to the patch width')
+            if self.psl_num_background_latents != 1:
+                raise ValueError('Phase 2 requires exactly one background latent')
+            if self.psl_interaction_layers[-1] >= len(self.blocks):
+                raise ValueError('Persistent semantic interaction layer is out of range')
+            self.background_semantic_latent = nn.Parameter(
+                torch.zeros(1, 1, self.embed_dim))
+            trunc_normal_(self.background_semantic_latent, std=.02)
+            self.semantic_interactions = nn.ModuleDict({
+                str(layer): SemanticReadWrite(
+                    dim=self.embed_dim,
+                    relation_dim=self.psl_relation_dim,
+                    read=self.psl_spec.read,
+                    write=self.psl_spec.write,
+                )
+                for layer in self.psl_interaction_layers
+            })
+            self.semantic_interactions.apply(self._init_weights)
+        else:
+            self.register_parameter('background_semantic_latent', None)
+            self.semantic_interactions = nn.ModuleDict()
         
         self.decay_parameter=decay_parameter
 
     def interpolate_pos_encoding(self, x, w, h):
-        npatch = x.shape[1] - self.num_classes
+        npatch = (
+            x.shape[1] if self.psl_spec.enabled
+            else x.shape[1] - self.num_classes
+        )
         N = self.num_patches
         if npatch == N and w == h:
             return self.pos_embed_pat
@@ -118,7 +164,78 @@ class MCTformerPlus(VisionTransformer):
     def _patch_slice(self, patch_count):
         return slice(self.num_classes, self.num_classes + patch_count)
 
+    def _attention_patch_slice(self, patch_count):
+        if self.psl_spec.enabled:
+            return slice(0, patch_count)
+        return self._patch_slice(patch_count)
+
+    @torch.no_grad()
+    def initialize_psl_from_backbone(self):
+        """Initialize Phase 2 relations from the corresponding pretrained block."""
+        if not self.psl_spec.enabled:
+            return
+        for layer in self.psl_interaction_layers:
+            self.semantic_interactions[str(layer)].initialize_from_backbone_attention(
+                self.blocks[layer].attn)
+
+    def psl_configuration(self):
+        return {
+            'variant': self.psl_variant,
+            'interaction_layers_zero_based': list(self.psl_interaction_layers),
+            'semantic_dim': self.embed_dim,
+            'patch_dim': self.embed_dim,
+            'relation_dim': self.psl_relation_dim,
+            'num_background_latents': self.psl_num_background_latents,
+            'relation': 'shared',
+            'ordering': 'read_then_write',
+            'write_gate_initialization': 0.0,
+        }
+
+    def _forward_psl_features(self, x, return_aux):
+        batch, _, width, height = x.shape
+        patches = self.patch_embed(x)
+        if not self.training:
+            patches = patches + self.interpolate_pos_encoding(
+                patches, width, height)
+        else:
+            patches = patches + self.pos_embed_pat
+        patches = self.pos_drop(patches)
+
+        foreground = self.cls_token.expand(batch, -1, -1) + self.pos_embed_cls
+        background = self.background_semantic_latent.expand(batch, -1, -1)
+        semantic = torch.cat((foreground, background), dim=1)
+        attentions = []
+        all_foreground_latents = []
+        relations = []
+        for layer, block in enumerate(self.blocks):
+            patches, weights = block(patches)
+            attentions.append(weights)
+            if layer in self.psl_interaction_layers:
+                semantic, patches, relation = self.semantic_interactions[
+                    str(layer)](semantic, patches)
+                relation['layer'] = layer
+                relations.append(relation)
+            all_foreground_latents.append(semantic[:, :self.num_classes])
+
+        auxiliary = {
+            'variant': self.bcss_variant,
+            'patch_count': patches.shape[1],
+            'psl': self.psl_configuration(),
+            'psl_relations': relations,
+            'background_semantic_latents': semantic[:, self.num_classes:],
+            'semantic_latents': semantic,
+        }
+        result = (
+            semantic[:, :self.num_classes], patches, attentions,
+            all_foreground_latents,
+        )
+        if return_aux:
+            return result + (auxiliary,)
+        return result
+
     def forward_features(self, x, n=12, active_labels=None, return_aux=False):
+        if self.psl_spec.enabled:
+            return self._forward_psl_features(x, return_aux)
         B, nc, w, h = x.shape
         x = self.patch_embed(x)
         if not self.training:
@@ -247,6 +364,15 @@ class MCTformerPlusCam(MCTformerPlus):
         """
         super().__init__(decay_parameter, input_size, *args, **kwargs)
         self.n_layers = 3
+
+    def _psl_class_to_patch(self, auxiliary):
+        relations = auxiliary.get('psl_relations', ())
+        if not relations:
+            raise RuntimeError('Persistent semantic CAM requires relation outputs')
+        return torch.stack([
+            item['read_attention'][:, :self.num_classes]
+            for item in relations[-self.n_layers:]
+        ]).mean(dim=0)
     
     @torch.no_grad()
     def get_cam(self, x_patch, attn_weights, auxiliary=None):
@@ -254,9 +380,12 @@ class MCTformerPlusCam(MCTformerPlus):
         feature_map = F.relu(feature_map)
         
         n, c, h, w = feature_map.shape
-        patch_slice = self._patch_slice(h * w)
-        cls2pat = attn_weights[-self.n_layers:].mean(0)\
-            [:, 0:self.num_classes, patch_slice]
+        patch_slice = self._attention_patch_slice(h * w)
+        if self.psl_spec.enabled:
+            cls2pat = self._psl_class_to_patch(auxiliary)
+        else:
+            cls2pat = attn_weights[-self.n_layers:].mean(0)\
+                [:, 0:self.num_classes, patch_slice]
         if auxiliary is not None and 'class_ownership' in auxiliary:
             cls2pat = ownership_calibrate_attention(
                 cls2pat,
@@ -290,8 +419,11 @@ class MCTformerPlusCam(MCTformerPlus):
         feature_map = x_patch.detach().clone()  # B * C * 14 * 14
         feature_map = F.relu(feature_map)
         n, c, h, w = feature_map.shape
-        cls2pat = attn_weights[-self.n_layers:].mean(0)[
-            :, 0:self.num_classes, self._patch_slice(h * w)]
+        if self.psl_spec.enabled:
+            cls2pat = self._psl_class_to_patch(auxiliary)
+        else:
+            cls2pat = attn_weights[-self.n_layers:].mean(0)[
+                :, 0:self.num_classes, self._patch_slice(h * w)]
         if auxiliary is not None and 'class_ownership' in auxiliary:
             cls2pat = ownership_calibrate_attention(
                 cls2pat, auxiliary['class_ownership'], self.bcss_runtime['beta'])
@@ -371,9 +503,13 @@ class MCTformerPlusCam(MCTformerPlus):
     def _diagnostic_outputs(self, x_cls, x_patch, patch_cam, attn_weights,
                             auxiliary, final_cam, grid_size, head_attention):
         hp, wp = grid_size
-        patch_slice = self._patch_slice(hp * wp)
-        class_to_patch = attn_weights[-self.n_layers:].mean(0)[
-            :, :self.num_classes, patch_slice]
+        patch_slice = self._attention_patch_slice(hp * wp)
+        if self.psl_spec.enabled:
+            relations = auxiliary['psl_relations']
+            class_to_patch = self._psl_class_to_patch(auxiliary)
+        else:
+            class_to_patch = attn_weights[-self.n_layers:].mean(0)[
+                :, :self.num_classes, patch_slice]
         result = {
             'class_logits': x_cls.mean(-1),
             'patch_cam': F.relu(patch_cam),
@@ -381,11 +517,38 @@ class MCTformerPlusCam(MCTformerPlus):
                 x_cls.shape[0], self.num_classes, hp, wp),
             'final_cam': final_cam,
             'patch_feature_norm': x_patch.norm(dim=-1).reshape(x_cls.shape[0], hp, wp),
-            'class_to_patch_heads': head_attention[
-                :, :, :, :self.num_classes, patch_slice],
-            'patch_to_class_heads': head_attention[
-                :, :, :, patch_slice, :self.num_classes],
         }
+        if self.psl_spec.enabled:
+            result.update({
+                'psl_relations': relations,
+                'class_to_patch_layers': torch.stack([
+                    item['read_attention'][:, :self.num_classes]
+                    for item in relations
+                ]),
+                'patch_to_class_layers': torch.stack([
+                    item['write_attention'][:, :, :self.num_classes]
+                    for item in relations
+                ]),
+                'background_read_layers': torch.stack([
+                    item['read_attention'][:, self.num_classes:]
+                    for item in relations
+                ]),
+                'patch_to_background_layers': torch.stack([
+                    item['write_attention'][:, :, self.num_classes:]
+                    for item in relations
+                ]),
+                'semantic_latents': auxiliary['semantic_latents'],
+                'write_gates': torch.stack([
+                    item['write_gate'] for item in relations
+                ]),
+            })
+        else:
+            result.update({
+                'class_to_patch_heads': head_attention[
+                    :, :, :, :self.num_classes, patch_slice],
+                'patch_to_class_heads': head_attention[
+                    :, :, :, patch_slice, :self.num_classes],
+            })
         if 'register_tokens' in auxiliary:
             register_index = self.num_classes + hp * wp
             result['register_to_patch'] = head_attention[
@@ -430,7 +593,9 @@ class MCTformerPlusCam(MCTformerPlus):
             'pat2pat': patch-to-patch attention map
         """
         b, _, w, h = x.shape
-        x_cls_last, x_patch, attn_weights, class_embeddings = self.forward_features(x)
+        x_cls_last, x_patch, attn_weights, class_embeddings, auxiliary = (
+            self.forward_features(x, return_aux=True)
+        )
         # 12 * B * H * N * N -> 12 * B * N * N
         attn_weights = torch.mean(torch.stack(attn_weights), dim=2)
         if return_type == 'all':
@@ -446,7 +611,7 @@ class MCTformerPlusCam(MCTformerPlus):
         
         x_patch = x_patch.permute([0, 3, 1, 2]).contiguous()
         x_patch = self.head(x_patch)
-        outputs = self.get_cam(x_patch, attn_weights)
+        outputs = self.get_cam(x_patch, attn_weights, auxiliary)
         return outputs
 
         

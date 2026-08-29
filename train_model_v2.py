@@ -27,6 +27,7 @@ import models.mct_adapter
 import models.mctformer_plus
 from models.tgca import SUPPORTED_MODES
 from models.bcss import BCSS_VARIANTS
+from models.persistent_semantic import PSL_VARIANTS, parse_interaction_layers
 
 
 def get_args_parser():
@@ -55,6 +56,13 @@ def get_args_parser():
     parser.add_argument('--bcss-lambda-fg', default=0.5, type=float)
     parser.add_argument('--bcss-lambda-bg', default=0.1, type=float)
     parser.add_argument('--bcss-semantic-temperature', default=1.0, type=float)
+    parser.add_argument('--psl-variant', default='baseline', choices=PSL_VARIANTS)
+    parser.add_argument(
+        '--psl-interaction-layers', default=(11,),
+        type=parse_interaction_layers,
+        help='zero-based comma-separated semantic read/write layers')
+    parser.add_argument('--psl-relation-dim', default=384, type=int)
+    parser.add_argument('--psl-num-background-latents', default=1, type=int)
 
     parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
                         help='Dropout rate (default: 0.)')
@@ -281,7 +289,11 @@ def main(args):
         bcss_cls_threshold=args.bcss_cls_threshold,
         bcss_lambda_fg=args.bcss_lambda_fg,
         bcss_lambda_bg=args.bcss_lambda_bg,
-        bcss_semantic_temperature=args.bcss_semantic_temperature)
+        bcss_semantic_temperature=args.bcss_semantic_temperature,
+        psl_variant=args.psl_variant,
+        psl_interaction_layers=args.psl_interaction_layers,
+        psl_relation_dim=args.psl_relation_dim,
+        psl_num_background_latents=args.psl_num_background_latents)
 
     # Variant-specific parameter initialization consumes different amounts of
     # RNG. Reset before optimization so augmentation, dropout, and sampling use
@@ -301,6 +313,8 @@ def main(args):
     if args.finetune:
         checkpoint_model = load_model_weight(args, model)
         model.load_state_dict(checkpoint_model, strict=False)
+        if args.psl_variant != 'baseline' and args.finetune.startswith('https'):
+            model.initialize_psl_from_backbone()
 
     model.to(device)
 
@@ -359,6 +373,7 @@ def main(args):
                             'gamma': args.attention_gamma,
                             'relation_bias': args.attention_normalization == 'tgca_bias',
                         },
+                        'psl': model.psl_configuration(),
                         'epoch': epoch,
                        },
                        os.path.join(args.work_space, f'{args.model}_best.pth'))
@@ -396,6 +411,7 @@ def main(args):
             'gamma': args.attention_gamma,
             'relation_bias': args.attention_normalization == 'tgca_bias',
         },
+        'psl': model.psl_configuration(),
         'epoch': args.epochs - 1,
     }, work_space / f'{args.model}_final.pth')
 

@@ -17,6 +17,7 @@ from utils import create_cam_model, parse_scales
 from models.adapter_modules import resize_input_minbound
 from models.tgca import SUPPORTED_MODES
 from models.bcss import BCSS_VARIANTS
+from models.persistent_semantic import PSL_VARIANTS, parse_interaction_layers
 
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
@@ -42,6 +43,12 @@ def get_args_parser():
     parser.add_argument('--bcss-tau', default=0.5, type=float)
     parser.add_argument('--bcss-beta', default=0.5, type=float)
     parser.add_argument('--bcss-cls-threshold', default=0.5, type=float)
+    parser.add_argument('--psl-variant', default='baseline', choices=PSL_VARIANTS)
+    parser.add_argument(
+        '--psl-interaction-layers', default=(11,),
+        type=parse_interaction_layers)
+    parser.add_argument('--psl-relation-dim', default=384, type=int)
+    parser.add_argument('--psl-num-background-latents', default=1, type=int)
     parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
                         help='Dropout rate (default: 0.)')
     parser.add_argument('--drop-path', type=float, default=0.1, metavar='PCT',
@@ -407,6 +414,20 @@ if __name__ == '__main__':
 
     model = create_cam_model(args)
     checkpoint = torch.load(args.checkpoint, map_location='cpu')
+    checkpoint_psl = checkpoint.get('psl', {'variant': 'baseline'})
+    expected_psl = {
+        'variant': args.psl_variant,
+        'interaction_layers_zero_based': list(args.psl_interaction_layers),
+        'relation_dim': args.psl_relation_dim,
+        'num_background_latents': args.psl_num_background_latents,
+    }
+    psl_mismatches = {
+        key: (checkpoint_psl.get(key), value)
+        for key, value in expected_psl.items()
+        if checkpoint_psl.get(key, value if key != 'variant' else None) != value
+    }
+    if psl_mismatches:
+        raise ValueError(f"PSL checkpoint/CLI mismatch: {psl_mismatches}")
     if 'bcss' in checkpoint:
         bcss_checkpoint = checkpoint['bcss']
         checkpoint_variant = bcss_checkpoint.get('variant', 'e0')
