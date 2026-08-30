@@ -12,7 +12,7 @@ Last updated: **2026-08-30 (Asia/Tokyo)**
 > initialization, multi-latent, OT, or multi-seed studies until this gate is
 > reviewed.
 
-## Persistent Semantic Latent Phase 2 launch
+## Persistent Semantic Latent Phase 2 result
 
 The first Phase 2 screen is frozen in
 `docs/PERSISTENT_SEMANTIC_PHASE2.md`. It reuses the completed E0 seed-0 baseline
@@ -58,7 +58,7 @@ An actual one-epoch training smoke also completed with finite losses before the
 interaction depth was frozen; that smoke is mechanical validation only and is
 not a Phase 2 result.
 
-The authorized immutable queue identity is:
+The immutable queue identity is:
 
 ```text
 tmux:      tgca-psl-phase2
@@ -68,11 +68,54 @@ results:   results/persistent_semantic/phase2/voc/
 queue log: results/queues/persistent-semantic/20260830-012501-psl-phase2-<launch-commit>.log
 ```
 
-The queue must start only after the implementation checkpoint is committed and
-the tracked worktree is clean. While it is active, inspect it read-only and do
-not change tracked files, because every variant must retain the same source
-commit. The first scientific conclusion is available only after all three
-variants and the audited comparison complete.
+The queue ran from `2026-08-30T01:27:04+09:00` through
+`2026-08-30T05:22:14+09:00` at clean commit
+`2630473c16fc57a74ff3c4786cbc486d8dd04e64`. All three variants completed 45
+epochs, generated exactly 1464 CAM files, passed checkpoint hash validation,
+and completed the fixed 200-image relation diagnostic. No matching experiment
+or tmux session remains active.
+
+The fixed-threshold seed-0 screen is strongly negative:
+
+| Variant | Raw CAM mIoU | Delta | Final cls mAP | Semantic P/R | Background FPR |
+|---|---:|---:|---:|---:|---:|
+| E0 baseline | 70.063 | 0.000 | 96.410 | 80.735/85.817 | 6.756 |
+| Read-only | 43.592 | -26.471 | 95.722 | 47.907/60.581 | 23.341 |
+| Write-only | 36.658 | -33.405 | 30.529 | 70.427/39.920 | 5.124 |
+| Read then Write | 43.427 | -26.636 | 95.744 | 48.429/62.366 | 23.540 |
+
+Read then Write preserves image classification within the predeclared one-point
+band but is `0.165` CAM point below Read-only, so semantic feedback supplies no
+localization benefit. Its learned Write gate is nonzero (`-0.01516`), but its
+effect is not useful. The foreground/background error is systematic:
+Read-then-Write decreases IoU for all 21 evaluated classes, while Read-only
+improves only one class by a negligible amount.
+
+The relation diagnostic identifies a mechanism failure rather than an
+incomplete run. Read-then-Write patch-to-semantic foreground accuracy is only
+`2.85%`, background accuracy is `0.58%`, and relation mIoU is `0.24%`. Its mean
+background Write mass is only `0.54%`, despite VOC crops being predominantly
+background. Relation-logit standard deviation grows to `12.88`, normalized
+Write entropy falls to `0.097`, and the relation becomes overconfident without
+learning semantic ownership. Read-only shows the same localization failure;
+Write-only confirms that static latents cannot classify an image without first
+reading visual evidence.
+
+The machine-readable decision is `no_go_for_phase2_expansion`:
+
+```text
+results/persistent_semantic/phase2/voc/comparisons/20260830-012501-s0-2630473/comparison.json
+results/persistent_semantic/phase2/voc/comparisons/20260830-012501-s0-2630473/comparison.csv
+```
+
+This rejects the current minimal Late-1 shared-relation formulation. It does
+not by itself prove that every persistent-semantic-latent architecture is
+impossible, but the predeclared gate does not support more seeds, a depth
+sweep, width reduction, dynamic initialization, multi-latent variants, or OT.
+Any follow-up must first isolate whether the loss comes from replacing joint
+attention, using the Read relation directly as CAM, or unregularized relation
+scale/background allocation; it must not be presented as a routine Phase 2
+expansion.
 
 ## Persistent Semantic Latent Phase 0/1 implementation
 
@@ -933,11 +976,11 @@ Do not select a favorable method from only seed 0 and present it as final. After
 
 ## Immediate next sequence
 
-1. Run the predeclared Phase 2 seed-0 queue without changing its configuration or tracked source commit.
-2. Wait for all three active variants and the audited comparison before deciding whether the architecture passes Gate B.
-3. Treat Phase 1 as positive for intrinsic strict patch-to-class semantic attribution, not as proof of primary-threshold Region C complementarity.
-4. Do not rerun Phase 0/1 or select a separate favorable threshold per layer or method.
-5. Do not start Late-3/depth, independent-relation, width, dynamic-initialization, multi-latent, OT, extra-background-loss, or multi-seed experiments unless the seed-0 gate supports expansion.
+1. Treat the minimal Late-1 shared-relation Phase 2 screen as a no-go for expansion.
+2. Do not start more seeds, Late-3/depth, independent-relation, width, dynamic-initialization, multi-latent, OT, or extra-background-loss experiments from this result.
+3. If the research direction is retained, first run a frozen-checkpoint diagnostic that separates patch-feature quality, Read-map quality, relation-scale collapse, and background allocation without retraining.
+4. Treat Phase 1 as positive for intrinsic strict patch-to-class semantic attribution, not as proof that the new Phase 2 relation preserves that information.
+5. Do not select a separate favorable threshold per layer or method to rescue the negative fixed-threshold result.
 
 ## Risks that can invalidate or weaken the hypothesis
 
