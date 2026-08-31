@@ -68,7 +68,7 @@ META
 python --version > "$run_dir/environment.txt" 2>&1
 python -c "import torch,torchvision,timm; print('torch',torch.__version__,'torchvision',torchvision.__version__,'timm',timm.__version__,'cuda',torch.version.cuda)" >> "$run_dir/environment.txt"
 python -m pip freeze > "$run_dir/pip_freeze.txt"
-conda list --explicit > "$run_dir/conda_explicit.txt"
+"${CONDA_EXE:?Activated Conda must provide CONDA_EXE}" list --explicit > "$run_dir/conda_explicit.txt"
 nvidia-smi --query-gpu=index,name,driver_version,memory.total --format=csv,noheader > "$run_dir/hardware.txt"
 sha256sum "$train_list" "$val_list" "$cam_list" "$voc_root/ImageLabel/cls_labels.npy" > "$run_dir/dataset_manifest.txt"
 sha256sum "$pretrain" > "$run_dir/pretrained_manifest.txt"

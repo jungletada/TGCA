@@ -10,8 +10,13 @@ runner is `experiments/baselines/run_cti_bgt_voc.sh`. See the new full-validatio
 section in `docs/CTI_BGT_PORT.md` for the frozen settings and stages. Run exactly
 one matched seed-0 45-epoch VOC screen; do not expand to other variants/seeds or
 COCO automatically. The runner uses a clean linked checkout and preserves the
-parent tree's unrelated document changes. Live launch details will be recorded
-in the result directory and this handoff after tmux starts.
+parent tree's unrelated document changes. The first launch
+`20260831-cti-bgt-voc-s0-2f0fab6` stopped before tests/training while recording
+Conda packages: the child shell did not inherit the `conda` function. Its
+exit-status and logs remain intact. The runner now invokes `$CONDA_EXE` for the
+package manifest. A new immutable run ID is required for the retry; do not
+restart into or overwrite the failed run directory. Live launch details follow
+after successful tmux startup.
 
 ## CTI BGT-only port (2026-08-31)
 
