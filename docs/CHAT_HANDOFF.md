@@ -2,6 +2,39 @@
 
 Last updated: **2026-08-31 (Asia/Tokyo)**
 
+## CTI BGT full VOC run: active
+
+The full seed-0 screen successfully started training at
+`2026-08-31T12:20:07+09:00` after all 99 tests passed in the clean checkout.
+
+```text
+run ID:        20260831-cti-bgt-voc-s0-03a40cf
+source commit: 03a40cf26b7017c6d00c78960b14cddb6efb1bd6
+tmux:          tgca-cti-bgt-voc-s0
+source tree:   results/cti_bgt/checkouts/20260831-voc-s0-03a40cf
+result dir:    results/mctformerplus/voc/20260831-cti-bgt-voc-s0-03a40cf
+queue record:  results/queues/cti-bgt/20260831-cti-bgt-voc-s0-03a40cf
+GPU:           0, NVIDIA RTX A6000
+```
+
+The source commit was pushed to `origin/research/mctformerplus-cti-bgt` before
+launch. LHR has no HTTPS GitHub credential; the user's existing local SSH
+identity pushed the exact server commits through a temporary bare transfer repo,
+without moving credentials to LHR or changing the origin URL. Later launch-record
+commits change documentation only; the running worktree remains fixed at 03a40cf.
+
+Training is 45 epochs, batch 32, input 448, seed 0, vanilla attention, BCSS E0,
+PSL baseline, BGT weight 0.1. First batch: total loss 5.1397 and L_bcam 0.5061,
+both finite. GPU allocation was approximately 30 GiB. Completion and accuracy
+are pending. Do not start a duplicate run. After training, the same queue exports
+1464 CAMs, evaluates fixed threshold 0.45 and writes `comparison.json/csv` versus
+the completed E0 baseline. `exit_status.json` records the process result and
+`completion.json` appears only after every stage succeeds.
+
+The prior 2f0fab6 attempt failed before training during environment capture; its
+logs/results are retained. Parent-checkout historical document deletions and two
+untracked diffusion notes remain untouched.
+
 ## CTI BGT full VOC launch authorization (2026-08-31)
 
 The user has now explicitly authorized committing, pushing, and launching the
