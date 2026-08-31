@@ -1,6 +1,39 @@
 # TGCA research handoff
 
-Last updated: **2026-08-30 (Asia/Tokyo)**
+Last updated: **2026-08-31 (Asia/Tokyo)**
+
+## CTI BGT-only port (2026-08-31)
+
+The user requested an isolated, optional official-CTI BGT baseline on the
+existing MCTformer+ host. Implementation is on
+`research/mctformerplus-cti-bgt`, based on
+`5a689926f86b6fe344b00631d86cd1f42c946842`; no new commit or push was requested.
+See `docs/CTI_BGT_PORT.md` for the exact official-source mapping and commands.
+
+Enable with `--cti-bgt --cti-bgt-weight 0.1` in `train_model_v2.py` and
+`make_cam.py`. Default is off. BGT adds one joint-attention BG token and one
+patch-head channel, but all ordinary classification and token regularization
+remain foreground-only. Its auxiliary loss uses CTI's min–max normalization,
+masked foreground union before propagation, last-six class attention and
+layers 4:12 patch affinity. No infusion, swapping, tokenizer, memory bank,
+BCSS/PSL combination or new attention normalization was added.
+
+Verification: 99 tests passed; default outputs/gradients/CAMs are bitwise equal
+to the pre-port host. The 448-resolution two-image VOC AMP smoke completed seven
+optimizer updates after one initial GradScaler overflow skip, and strict CAM
+loading/multi-scale shapes plus the actual 20-image training-CAM export passed (the legacy progress logger
+requires at least 20 images per GPU; see the port note).
+This is not a full experiment or mIoU result. No experiment queue was launched.
+Results, commands and the port-only patch are under
+`results/cti_bgt/validation/20260831-120656-bgt-port-amp-check/`.
+
+The starting tree already had five deleted historical documents and two
+untracked diffusion notes. These changes remain untouched. The official CTI
+submodule is clean at `1c6fdb4d14e6843e3d861ebd4580468e30598859`.
+The pre-existing `codex-tgca` tmux session was not interrupted. Historical
+research conclusions below are retained; the present request does not authorize
+restarting the previous negative experiments.
+
 
 > **Research direction status.** TGCA, BCSS, and token-role specialization are
 > completed negative explorations retained for provenance. The active research

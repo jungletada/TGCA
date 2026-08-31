@@ -25,6 +25,7 @@ from datasets_cam import build_dataset
 import models.srmct
 import models.mct_adapter
 import models.mctformer_plus
+from models.cti_bgt import add_cti_bgt_arguments, adapt_cti_bgt_finetune
 from models.tgca import SUPPORTED_MODES
 from models.bcss import BCSS_VARIANTS
 from models.persistent_semantic import PSL_VARIANTS, parse_interaction_layers
@@ -63,6 +64,7 @@ def get_args_parser():
         help='zero-based comma-separated semantic read/write layers')
     parser.add_argument('--psl-relation-dim', default=384, type=int)
     parser.add_argument('--psl-num-background-latents', default=1, type=int)
+    add_cti_bgt_arguments(parser)
 
     parser.add_argument('--drop', type=float, default=0.0, metavar='PCT',
                         help='Dropout rate (default: 0.)')
@@ -178,6 +180,13 @@ def load_model_weight(args, model):
     Returns:
         A state dictionary of the model with loaded weights.
     """
+    if getattr(model, 'cti_bgt', False):
+        if args.finetune.startswith('https'):
+            checkpoint = torch.hub.load_state_dict_from_url(
+                args.finetune, map_location='cpu', check_hash=True)
+        else:
+            checkpoint = torch.load(args.finetune, map_location='cpu')
+        return adapt_cti_bgt_finetune(checkpoint, model)
     nc = args.nb_classes
     model_npatches = model.patch_embed.num_patches
     if args.finetune.startswith('https'):
@@ -293,7 +302,11 @@ def main(args):
         psl_variant=args.psl_variant,
         psl_interaction_layers=args.psl_interaction_layers,
         psl_relation_dim=args.psl_relation_dim,
-        psl_num_background_latents=args.psl_num_background_latents)
+        psl_num_background_latents=args.psl_num_background_latents,
+        cti_bgt=args.cti_bgt,
+        cti_bgt_weight=args.cti_bgt_weight,
+        cti_bgt_n_layers=args.cti_bgt_n_layers,
+        cti_bgt_affinity_start=args.cti_bgt_affinity_start)
 
     # Variant-specific parameter initialization consumes different amounts of
     # RNG. Reset before optimization so augmentation, dropout, and sampling use
@@ -373,6 +386,7 @@ def main(args):
                             'gamma': args.attention_gamma,
                             'relation_bias': args.attention_normalization == 'tgca_bias',
                         },
+                        'cti_bgt': model.cti_bgt_configuration(),
                         'psl': model.psl_configuration(),
                         'epoch': epoch,
                        },
@@ -412,6 +426,7 @@ def main(args):
             'relation_bias': args.attention_normalization == 'tgca_bias',
         },
         'psl': model.psl_configuration(),
+        'cti_bgt': model.cti_bgt_configuration(),
         'epoch': args.epochs - 1,
     }, work_space / f'{args.model}_final.pth')
 

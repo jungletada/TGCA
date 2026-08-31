@@ -14,6 +14,7 @@ from typing import Iterable
 import torch.nn.functional as F
 import torch.distributed as dist
 from sklearn.metrics import average_precision_score
+from models.cti_bgt import cti_bcam_loss
 
 
 def train_one_epoch_mctta(model, data_loader, optimizer, device, 
@@ -169,6 +170,10 @@ def train_one_epoch_mctplus(model: torch.nn.Module, data_loader: Iterable,
                 loss = loss + ploss
 
             if bcss_auxiliary is not None:
+                if 'cti_bgt' in bcss_auxiliary:
+                    bcam_loss = cti_bcam_loss(bcss_auxiliary['cti_bgt'])
+                    metric_logger.update(cti_bcam_loss=bcam_loss.item())
+                    loss = loss + model_without_ddp.cti_bgt_weight * bcam_loss
                 if 'class_ownership' in bcss_auxiliary:
                     active = targets.to(bcss_auxiliary['class_ownership'].dtype)
                     foreground_ownership = (

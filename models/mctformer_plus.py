@@ -20,6 +20,8 @@ from models.persistent_semantic import (
     validate_psl_variant,
 )
 
+from models.cti_bgt import cti_bgt_maps, validate_cti_bgt
+
 __all__ = ['mctformerplus']
 
 class MCTformerPlus(VisionTransformer):
@@ -30,9 +32,23 @@ class MCTformerPlus(VisionTransformer):
             bcss_lambda_fg=0.5, bcss_lambda_bg=0.1,
             bcss_semantic_temperature=1.0, psl_variant='baseline',
             psl_interaction_layers=(11,), psl_relation_dim=384,
-            psl_num_background_latents=1, *args, **kwargs):
+            psl_num_background_latents=1, cti_bgt=False, cti_bgt_weight=0.1,
+            cti_bgt_n_layers=6, cti_bgt_affinity_start=4, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.head = nn.Conv2d(self.embed_dim, self.num_classes, kernel_size=3, stride=1, padding=1)
+        self.cti_bgt = bool(cti_bgt)
+        self.cti_bgt_weight = cti_bgt_weight
+        self.cti_bgt_n_layers = cti_bgt_n_layers
+        self.cti_bgt_affinity_start = cti_bgt_affinity_start
+        validate_cti_bgt(
+            self.cti_bgt, cti_bgt_weight, cti_bgt_n_layers,
+            cti_bgt_affinity_start, len(self.blocks), bcss_variant, psl_variant,
+            self.attention_normalization)
+        # num_classes continues to mean foreground labels, never C+1.
+        self.num_class_tokens = self.num_classes + int(self.cti_bgt)
+        if self.cti_bgt:
+            for block in self.blocks:
+                block.attn.num_classes = self.num_class_tokens
+        self.head = nn.Conv2d(self.embed_dim, self.num_class_tokens, kernel_size=3, stride=1, padding=1)
         self.head.apply(self._init_weights)
 
         img_size = to_2tuple(input_size)
@@ -47,6 +63,13 @@ class MCTformerPlus(VisionTransformer):
         trunc_normal_(self.cls_token, std=.02)
         trunc_normal_(self.pos_embed_cls, std=.02)
         trunc_normal_(self.pos_embed_pat, std=.02)
+
+        if self.cti_bgt:
+            self.bg_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
+            self.pos_embed_bg = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
+        else:
+            self.register_parameter('bg_token', None)
+            self.register_parameter('pos_embed_bg', None)
 
         self.bcss_variant = bcss_variant.lower()
         self.bcss_spec = validate_bcss_variant(self.bcss_variant)
@@ -161,8 +184,26 @@ class MCTformerPlus(VisionTransformer):
         self.bcss_runtime = bcss_schedule(
             epoch, self.bcss_final_tau, self.bcss_final_beta)
 
+    def _foreground_slice(self):
+        return slice(int(self.cti_bgt), self.num_class_tokens)
+
     def _patch_slice(self, patch_count):
-        return slice(self.num_classes, self.num_classes + patch_count)
+        return slice(self.num_class_tokens, self.num_class_tokens + patch_count)
+
+    def cti_bgt_configuration(self):
+        return {
+            'enabled': self.cti_bgt,
+            'weight': self.cti_bgt_weight,
+            'n_layers': self.cti_bgt_n_layers,
+            'affinity_start': self.cti_bgt_affinity_start,
+        }
+
+    def _cti_bgt_maps(self, patch_cam, attentions, labels=None):
+        return cti_bgt_maps(
+            patch_cam, attentions, labels,
+            n_layers=self.cti_bgt_n_layers,
+            affinity_start=self.cti_bgt_affinity_start)
+
 
     def _attention_patch_slice(self, patch_count):
         if self.psl_spec.enabled:
@@ -248,6 +289,10 @@ class MCTformerPlus(VisionTransformer):
         cls_tokens = cls_tokens + self.pos_embed_cls
 
         patch_count = x.shape[1]
+        # BGT joins every joint self-attention block in [BG, FG, patches] order.
+        if self.cti_bgt:
+            bg = self.bg_token.expand(B, -1, -1) + self.pos_embed_bg
+            cls_tokens = torch.cat((bg, cls_tokens), dim=1)
         token_parts = [cls_tokens, x]
         if self.bcss_spec.backbone_register:
             register = self.register_token.expand(B, -1, -1) + self.pos_embed_register
@@ -263,9 +308,9 @@ class MCTformerPlus(VisionTransformer):
         for i, blk in enumerate(self.blocks):
             x, weights_i = blk(x)
             attn_weights.append(weights_i)
-            all_x_cls.append(x[:, :self.num_classes])
+            all_x_cls.append(x[:, self._foreground_slice()])
             
-        x_cls = x[:, :self.num_classes]
+        x_cls = x[:, self._foreground_slice()]
         x_patch = x[:, self._patch_slice(patch_count)]
         auxiliary = {
             'variant': self.bcss_variant,
@@ -309,7 +354,7 @@ class MCTformerPlus(VisionTransformer):
 
     def forward(self, x, active_labels=None):
         w, h = x.shape[2:]
-        x_cls, x_patch, _, all_x_cls, auxiliary = self.forward_features(
+        x_cls, x_patch, attentions, all_x_cls, auxiliary = self.forward_features(
             x, active_labels=active_labels, return_aux=True)
 
         n, p, c = x_patch.shape
@@ -322,6 +367,12 @@ class MCTformerPlus(VisionTransformer):
         
         x_patch = x_patch.permute([0, 3, 1, 2]).contiguous()
         x_patch = self.head(x_patch)
+        if self.cti_bgt:
+            if active_labels is not None:
+                auxiliary['cti_bgt'] = self._cti_bgt_maps(
+                    x_patch, attentions, active_labels)
+            # BG has no image-level label and no GWRP classification loss.
+            x_patch = x_patch[:, 1:]
         x_patch_flattened = x_patch.view(x_patch.shape[0], x_patch.shape[1], -1).permute(0, 2, 1)
         sorted_patch_token, indices = torch.sort(x_patch_flattened, -2, descending=True)
         weights = torch.logspace(start=0, end=x_patch_flattened.size(-2) - 1,
@@ -334,7 +385,7 @@ class MCTformerPlus(VisionTransformer):
         output.append(x_cls_logits)
         output.append(torch.stack(all_x_cls))
         output.append(x_patch_logits)
-        if self.bcss_spec.competitive_ownership:
+        if self.bcss_spec.competitive_ownership or 'cti_bgt' in auxiliary:
             output.append(auxiliary)
         return output
 
@@ -376,7 +427,7 @@ class MCTformerPlusCam(MCTformerPlus):
     
     @torch.no_grad()
     def get_cam(self, x_patch, attn_weights, auxiliary=None):
-        feature_map = x_patch.detach().clone()  # B * C * 14 * 14
+        feature_map = x_patch[:, self._foreground_slice()].detach().clone()  # FG only
         feature_map = F.relu(feature_map)
         
         n, c, h, w = feature_map.shape
@@ -385,7 +436,7 @@ class MCTformerPlusCam(MCTformerPlus):
             cls2pat = self._psl_class_to_patch(auxiliary)
         else:
             cls2pat = attn_weights[-self.n_layers:].mean(0)\
-                [:, 0:self.num_classes, patch_slice]
+                [:, self._foreground_slice(), patch_slice]
         if auxiliary is not None and 'class_ownership' in auxiliary:
             cls2pat = ownership_calibrate_attention(
                 cls2pat,
@@ -416,14 +467,14 @@ class MCTformerPlusCam(MCTformerPlus):
     
     @torch.no_grad()
     def get_cls2pat(self, x_patch, attn_weights, auxiliary=None):
-        feature_map = x_patch.detach().clone()  # B * C * 14 * 14
+        feature_map = x_patch[:, self._foreground_slice()].detach().clone()  # FG only
         feature_map = F.relu(feature_map)
         n, c, h, w = feature_map.shape
         if self.psl_spec.enabled:
             cls2pat = self._psl_class_to_patch(auxiliary)
         else:
             cls2pat = attn_weights[-self.n_layers:].mean(0)[
-                :, 0:self.num_classes, self._patch_slice(h * w)]
+                :, self._foreground_slice(), self._patch_slice(h * w)]
         if auxiliary is not None and 'class_ownership' in auxiliary:
             cls2pat = ownership_calibrate_attention(
                 cls2pat, auxiliary['class_ownership'], self.bcss_runtime['beta'])
@@ -462,7 +513,7 @@ class MCTformerPlusCam(MCTformerPlus):
         cls_label = torch.ones(b, self.num_classes).to(x.device)
         cls_label[cls_logits <= 0] = 0
 
-        x_logits = self.gwrp(x_patch)
+        x_logits = self.gwrp(x_patch[:, self._foreground_slice()])
         patch_label = torch.ones(b, self.num_classes).to(x.device)
         patch_label[x_logits <= 0] = 0
         outputs = self.get_cam(x_patch, attn_weights, auxiliary)
@@ -495,6 +546,9 @@ class MCTformerPlusCam(MCTformerPlus):
         patch_cam = self.head(patch_grid)
         outputs = self.get_cam(patch_cam, attn_weights, auxiliary)
         if return_diagnostics:
+            if self.cti_bgt:
+                auxiliary['cti_bgt'] = self._cti_bgt_maps(
+                    patch_cam, head_attention, active_labels)
             return self._diagnostic_outputs(
                 x_cls_last, x_patch_tokens, patch_cam, attn_weights,
                 auxiliary, outputs, patch_grid.shape[-2:], head_attention)
@@ -509,10 +563,10 @@ class MCTformerPlusCam(MCTformerPlus):
             class_to_patch = self._psl_class_to_patch(auxiliary)
         else:
             class_to_patch = attn_weights[-self.n_layers:].mean(0)[
-                :, :self.num_classes, patch_slice]
+                :, self._foreground_slice(), patch_slice]
         result = {
             'class_logits': x_cls.mean(-1),
-            'patch_cam': F.relu(patch_cam),
+            'patch_cam': F.relu(patch_cam[:, self._foreground_slice()]),
             'class_to_patch': class_to_patch.reshape(
                 x_cls.shape[0], self.num_classes, hp, wp),
             'final_cam': final_cam,
@@ -545,10 +599,15 @@ class MCTformerPlusCam(MCTformerPlus):
         else:
             result.update({
                 'class_to_patch_heads': head_attention[
-                    :, :, :, :self.num_classes, patch_slice],
+                    :, :, :, self._foreground_slice(), patch_slice],
                 'patch_to_class_heads': head_attention[
-                    :, :, :, patch_slice, :self.num_classes],
+                    :, :, :, patch_slice, self._foreground_slice()],
             })
+        if 'cti_bgt' in auxiliary:
+            result['cti_bgt'] = auxiliary['cti_bgt']
+            result['background_cam'] = F.relu(patch_cam[:, :1])
+            result['background_to_patch'] = head_attention[:, :, :, 0, patch_slice]
+            result['patch_to_background'] = head_attention[:, :, :, patch_slice, 0]
         if 'register_tokens' in auxiliary:
             register_index = self.num_classes + hp * wp
             result['register_to_patch'] = head_attention[

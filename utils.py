@@ -196,7 +196,11 @@ def create_cam_model(args):
                 args, 'psl_interaction_layers', (11,)),
             psl_relation_dim=getattr(args, 'psl_relation_dim', 384),
             psl_num_background_latents=getattr(
-                args, 'psl_num_background_latents', 1))
+                args, 'psl_num_background_latents', 1),
+            cti_bgt=getattr(args, 'cti_bgt', False),
+            cti_bgt_weight=getattr(args, 'cti_bgt_weight', 0.1),
+            cti_bgt_n_layers=getattr(args, 'cti_bgt_n_layers', 6),
+            cti_bgt_affinity_start=getattr(args, 'cti_bgt_affinity_start', 4))
         
     elif 'srmctformer' in args.model.lower():
         model = SRMCTformerCam(
