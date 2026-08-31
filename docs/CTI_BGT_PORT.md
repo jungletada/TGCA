@@ -190,3 +190,25 @@ results/cti_bgt/validation/20260831-120656-bgt-port-amp-check/train20_cam_export
 results/cti_bgt/validation/20260831-120656-bgt-port-amp-check/implementation.patch
 results/cti_bgt/validation/20260831-120656-bgt-port-amp-check/DIFF_SUMMARY.md
 ```
+
+
+## Authorized full VOC validation (2026-08-31)
+
+After the port, the user explicitly requested commit, push, then full BGT
+validation. Runner: `experiments/baselines/run_cti_bgt_voc.sh`.
+It requires a clean checkout, the exact pushed commit and a new run directory;
+it repeats the tests, trains 45 epochs at 448/batch 32/seed 0, evaluates image
+classification each epoch on 1449 validation images, exports 1464 train-split
+CAMs at scales 1.0/0.75/1.25, and evaluates at fixed threshold 0.45 without CRF.
+It writes JSON/CSV mIoU, foreground precision/recall, background FPR and a matched
+comparison against completed E0 run
+`20260827-190911-mctformerplus-voc-bcss-e0-s0-4147fc3` (no baseline retraining).
+This is one complete seed-0 VOC screen, not multi-seed, COCO or downstream
+segmentation training. BGT weight remains 0.1; no new tuning is introduced.
+
+The parent checkout's unrelated document changes remain untouched. Execution
+uses a linked clean worktree inside `results/cti_bgt/checkouts/` in the same
+LHR repository, with output directed to the parent's `results/mctformerplus/voc/`.
+All launches use tmux and record source commit, environment, datasets, pretrained
+and trained checkpoint hashes, commands and stage/exit/completion markers.
+The user's explicit push authorization covers the implementation and this runner.

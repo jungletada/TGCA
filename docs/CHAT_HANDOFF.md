@@ -2,6 +2,17 @@
 
 Last updated: **2026-08-31 (Asia/Tokyo)**
 
+## CTI BGT full VOC launch authorization (2026-08-31)
+
+The user has now explicitly authorized committing, pushing, and launching the
+full CTI-BGT validation. The port is committed at `2b3ef79`; the reproducible
+runner is `experiments/baselines/run_cti_bgt_voc.sh`. See the new full-validation
+section in `docs/CTI_BGT_PORT.md` for the frozen settings and stages. Run exactly
+one matched seed-0 45-epoch VOC screen; do not expand to other variants/seeds or
+COCO automatically. The runner uses a clean linked checkout and preserves the
+parent tree's unrelated document changes. Live launch details will be recorded
+in the result directory and this handoff after tmux starts.
+
 ## CTI BGT-only port (2026-08-31)
 
 The user requested an isolated, optional official-CTI BGT baseline on the
