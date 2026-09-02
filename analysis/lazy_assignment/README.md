@@ -40,36 +40,38 @@ This is the final checkpoint actually used by the run's fixed-threshold CAM
 evaluation.  The analysis loader uses `strict=True` and records any explicit
 removal of a uniform `module.` prefix.
 
-## Stage status on LHR (2026-09-01)
+## Stage status on LHR (2026-09-02)
 
-The implementation and MCTformer+ mechanical smoke are complete; the full VOC
-validation run has not been launched.
+The implementation, MCTformer+ mechanical smoke, and full VOC validation run
+are complete.  The result-critical implementation commit is
+`fec86b719a62c55c0aaf15d9b45bb2d0f74d3e8e`.
 
 ```text
-repository tests: 108 passed
-checkpoint strict load: passed, no missing or unexpected keys
-smoke images: 50 / 50
-positive-class maps: 81
-saved score files: 50
+run ID: 20260902-mctformerplus-exp1-voc-val-full-fec86b7
+VOC val images: 1449 / 1449
+positive-class maps: 2147
+saved score files / manifest rows: 1449 / 1449
 visualization files: 24
+checkpoint strict load: passed, no missing or unexpected keys
 hook effect on forward_features: max absolute difference 0
 layer-12 hook/final-token difference: 0 for class and patch tokens
-saved raw-cosine range: [-0.9854874611, 0.9683833122]
+saved raw-cosine range: [-0.9929999709, 0.9888190031]
 NaN / Inf: 0 / 0
 independent NPZ reload: passed
+queue and tmux exit status: 0 / 0
 ```
 
-Smoke result:
+Full result:
 
 ```text
 results/lazy_assignment/experiment1_class_patch_score/mctformer_plus/
-  20260901-mctformerplus-exp1-smoke50-d863677/
+  20260902-mctformerplus-exp1-voc-val-full-fec86b7/
 ```
 
-This directory is explicitly marked `run_kind=smoke` and
-`uncommitted_source_explicitly_allowed=true`; it is mechanical validation, not
-a paper result.  The runtime source must be reviewed and committed before the
-1449-image full run can pass the source-provenance gate.
+The earlier `micro1` and `smoke50` result directories were removed from the
+repository result tree after the full result passed its independent audit, as
+requested.  They were moved to the user's system Trash and were not used as
+scientific evidence.
 
 ## Mechanical smoke
 
