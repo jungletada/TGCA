@@ -42,6 +42,12 @@ CHECKPOINT = Path(
     "mctformerplus_final.pth"
 )
 
+MCTFORMERV2_CHECKPOINT = Path(
+    "results/mctformerv2/voc/"
+    "20260901-mctformerv2-voc-mctplus-default-s0-e6389f2/"
+    "mctformerv2_final.pth"
+)
+
 
 @pytest.mark.skipif(not CHECKPOINT.is_file(), reason="LHR result checkpoint unavailable")
 def test_lhr_mctformerplus_checkpoint_strict_loads_into_current_host():
@@ -51,5 +57,19 @@ def test_lhr_mctformerplus_checkpoint_strict_loads_into_current_host():
     assert model.__class__.__name__ == "MCTformerPlusCam"
     assert configuration["attention"]["mode"] == "vanilla"
     assert configuration["bcss"].get("variant", "e0") == "e0"
+    assert info["missing_keys"] == []
+    assert info["unexpected_keys"] == []
+
+
+@pytest.mark.skipif(
+    not MCTFORMERV2_CHECKPOINT.is_file(),
+    reason="LHR MCTformer V2 result checkpoint unavailable",
+)
+def test_lhr_mctformerv2_checkpoint_strict_loads_into_current_host():
+    payload = torch.load(MCTFORMERV2_CHECKPOINT, map_location="cpu")
+    args = Namespace(model="mctformerv2", input_size=448)
+    model, configuration, info = create_frozen_model(args, payload)
+    assert model.__class__.__name__ == "MCTformerV2Cam"
+    assert configuration["attention"]["mode"] == "vanilla"
     assert info["missing_keys"] == []
     assert info["unexpected_keys"] == []

@@ -25,7 +25,9 @@ Score at commit `cdeb884af65e7774f2da80f666d95cf09a76b717`, extended from one
 CLS/pooled token to all class tokens.  LAST-ViT's frequency selector and
 selective aggregation are intentionally not included.
 
-## MCTformer+ checkpoint selected for Stage 1
+## Checkpoints selected for Experiment 1
+
+MCTformer+:
 
 ```text
 results/mctformerplus/voc/
@@ -40,11 +42,27 @@ This is the final checkpoint actually used by the run's fixed-threshold CAM
 evaluation.  The analysis loader uses `strict=True` and records any explicit
 removal of a uniform `module.` prefix.
 
+MCTformer V2:
+
+```text
+results/mctformerv2/voc/
+  20260901-mctformerv2-voc-mctplus-default-s0-e6389f2/
+  mctformerv2_final.pth
+
+SHA-256:
+fafe0459f528233dc3ea86cecae91ef9ad3d2ebd5bd601bea0826889e4419ebc
+```
+
+This is likewise the final checkpoint recorded by that run's fixed-threshold
+CAM evaluation manifest.
+
 ## Stage status on LHR (2026-09-02)
 
-The implementation, MCTformer+ mechanical smoke, and full VOC validation run
-are complete.  The result-critical implementation commit is
+The implementation and both hosts' mechanical smoke and full VOC validation
+runs are complete.  The result-critical implementation commit is
 `fec86b719a62c55c0aaf15d9b45bb2d0f74d3e8e`.
+
+MCTformer+:
 
 ```text
 run ID: 20260902-mctformerplus-exp1-voc-val-full-fec86b7
@@ -68,10 +86,34 @@ results/lazy_assignment/experiment1_class_patch_score/mctformer_plus/
   20260902-mctformerplus-exp1-voc-val-full-fec86b7/
 ```
 
-The earlier `micro1` and `smoke50` result directories were removed from the
-repository result tree after the full result passed its independent audit, as
-requested.  They were moved to the user's system Trash and were not used as
-scientific evidence.
+MCTformer V2:
+
+```text
+run ID: 20260902-mctformerv2-exp1-voc-val-full-6aca9bc
+VOC val images: 1449 / 1449
+positive-class maps: 2147
+saved score files / manifest rows: 1449 / 1449
+visualization files: 24
+checkpoint strict load: passed, no missing or unexpected keys
+hook effect on forward_features: max absolute difference 0
+layer-12 hook/final-token difference: 0 for class and patch tokens
+saved raw-cosine range: [-0.7154812217, 0.9059177637]
+NaN / Inf: 0 / 0
+independent NPZ reload: passed
+queue and tmux exit status: 0 / 0
+```
+
+Full result:
+
+```text
+results/lazy_assignment/experiment1_class_patch_score/mctformer/
+  20260902-mctformerv2-exp1-voc-val-full-6aca9bc/
+```
+
+The earlier MCTformer+ `micro1`/`smoke50` and MCTformer V2 `smoke50`
+directories were removed from the repository result tree after their
+corresponding full results passed independent audits, as requested.  They were
+moved to the user's system Trash and were not used as scientific evidence.
 
 ## Mechanical smoke
 
@@ -102,7 +144,24 @@ python analysis/lazy_assignment/run_class_specific_patch_score.py \
   --output-dir results/lazy_assignment/experiment1_class_patch_score/mctformer_plus/RUN_ID
 ```
 
-## Full MCTformer+ run
+For MCTformer V2, use the same protocol with its pinned checkpoint:
+
+```bash
+python analysis/lazy_assignment/run_class_specific_patch_score.py \
+  --model mctformerv2 \
+  --checkpoint results/mctformerv2/voc/20260901-mctformerv2-voc-mctplus-default-s0-e6389f2/mctformerv2_final.pth \
+  --expected-checkpoint-sha256 fafe0459f528233dc3ea86cecae91ef9ad3d2ebd5bd601bea0826889e4419ebc \
+  --voc-root data/VOCdevkit/VOC2012 \
+  --list-path data/VOCdevkit/VOC2012/ImageLists/val_id.txt \
+  --input-size 448 \
+  --batch-size 4 \
+  --num-workers 4 \
+  --limit 50 \
+  --save-visualizations \
+  --output-dir results/lazy_assignment/experiment1_class_patch_score/mctformer/RUN_ID
+```
+
+## Full runs
 
 A full run refuses untracked runtime source or any tracked Git diff.  After the
 implementation has been reviewed and checkpointed in Git, omit both `--limit`
@@ -120,6 +179,22 @@ python analysis/lazy_assignment/run_class_specific_patch_score.py \
   --num-workers 8 \
   --save-visualizations \
   --output-dir results/lazy_assignment/experiment1_class_patch_score/mctformer_plus/RUN_ID
+```
+
+MCTformer V2:
+
+```bash
+python analysis/lazy_assignment/run_class_specific_patch_score.py \
+  --model mctformerv2 \
+  --checkpoint results/mctformerv2/voc/20260901-mctformerv2-voc-mctplus-default-s0-e6389f2/mctformerv2_final.pth \
+  --expected-checkpoint-sha256 fafe0459f528233dc3ea86cecae91ef9ad3d2ebd5bd601bea0826889e4419ebc \
+  --voc-root data/VOCdevkit/VOC2012 \
+  --list-path data/VOCdevkit/VOC2012/ImageLists/val_id.txt \
+  --input-size 448 \
+  --batch-size 8 \
+  --num-workers 8 \
+  --save-visualizations \
+  --output-dir results/lazy_assignment/experiment1_class_patch_score/mctformer/RUN_ID
 ```
 
 Every output directory is immutable and must not already exist.  A valid run
