@@ -1,1113 +1,2007 @@
-# Token-Group Calibrated Attention (TGCA): Design and Validation Plan
+可以。我这次按你的要求，**不先设计新方法**，而是先把 LaST-ViT 的源码里“怎么验证 lazy aggregation”拆清楚，再严格映射到 **MCTformer / MCTformer+**，目标只有一个：
 
-**Status:** implementation-ready research design; no result in this document is claimed as observed
+$$
+\boxed{\text{先验证 MCTformer 系列到底有没有更严重的 lazy semantic assignment}}
+$$
 
-**Target:** ICASSP 2027 Computer Vision
+我读完 `ChengShiest/LAST-ViT` 当前公开源码后，觉得这个验证非常值得做，而且 MCTformer 比普通单 `[CLS]` ViT 其实能做出**更强的 class-specific 版本验证**。
 
-**Last updated:** 2026-08-10
-**Working title:** *Token-Group Calibrated Attention for Weakly Supervised Semantic Segmentation*
+---
 
-## 1. Purpose
+# 1. LaST-ViT 源码真正公开了哪些验证工具
 
-This document is the implementation and validation source of truth for Token-Group Calibrated Attention (TGCA). It translates the research hypothesis into:
-
-- a precise mathematical operator;
-- a common software interface for every normalization baseline;
-- integration plans for MCTformer+ and Know Your Attention Maps (KYAM);
-- deterministic unit and mechanism tests;
-- a staged VOC-first experiment program;
-- machine-readable logging and reproducibility requirements;
-- explicit falsification criteria and stopping gates.
-
-TGCA code, tests, experiment configurations, and generated metrics must remain inside this `TGCA/` repository. The rejected MCTTA manuscript and its legacy files are records only and must not be overwritten.
-
-## 2. Decisions fixed before implementation
-
-### 2.1 Method and host roles
-
-| Method | Role in the TGCA project | TGCA implemented? |
-|---|---|---:|
-| MCTformer+ | Primary host and cleanest mechanism test | Yes |
-| Know Your Attention Maps, ICCV 2025 | Required independent host | Yes |
-| DiCLIP, IEEE T-IP 2026 | Recent external comparison baseline | No |
-| MoRe | Optional supplementary host | Optional |
-| CTI | Optional supplementary host | Optional |
-| Hierarchical MCTTA | Optional diagnostic host for self- and cross-attention | Optional |
-
-Primary external sources:
-
-- [MCTformer+ paper](https://arxiv.org/abs/2308.03005) and [official repository](https://github.com/xulianuwa/MCTformer)
-- [Know Your Attention Maps paper](https://openaccess.thecvf.com/content/ICCV2025/html/Hanna_Know_Your_Attention_Maps_Class-specific_Token_Masking_for_Weakly_Supervised_ICCV_2025_paper.html) and [official repository](https://github.com/HSG-AIML/TokenMasking-WSSS)
-- [DiCLIP paper](https://doi.org/10.1109/TIP.2026.3692055) and [official repository](https://github.com/zwyang6/DiCLIP)
-
-### 2.2 Required normalization variants
-
-Every core comparison must use the same attention implementation, Q/K/V projections, value path, output projection, dropout placement, training schedule, and CAM pipeline. Only the normalization mode may change.
-
-1. Vanilla joint softmax.
-2. Original split weighted softmax `(1, 1)`.
-3. Normalized split weighted softmax `(0.5, 0.5)`.
-4. Count-only TGCA (`gamma=1`, no relation bias).
-5. TGCA with zero-initialized relation bias.
-
-The partial correction `gamma=0.5` is a contingency ablation, not a default method and not a hyperparameter to tune extensively.
-
-### 2.3 Dataset and execution order
-
-1. Unit and synthetic tests.
-2. PASCAL VOC 2012 baseline reproduction.
-3. VOC mechanism and one-seed pilot experiments.
-4. VOC three-seed core ablation.
-5. KYAM independent-host validation.
-6. MS COCO only after all mechanism and generality gates pass.
-
-### 2.4 Claims that are out of scope
-
-TGCA is not an adapter, graph module, CAM post-processor, boundary method, prototype method, or foundation-model contribution. Do not claim:
-
-- global state of the art across unmatched supervision or pretraining;
-- that MCTTA is a universal adapter;
-- that graph blocks are inherently superior;
-- that rapid classification-loss convergence proves localization quality;
-- that the old MCTTA pipeline is single-stage;
-- exact resolution invariance from finite empirical tests.
-
-The strongest permissible empirical phrasing is “less resolution-sensitive” or “more scale-robust,” and only after the planned measurements support it.
-
-## 3. Research questions and falsifiable hypotheses
-
-### RQ1 — Does joint softmax mix semantic evidence with token-group cardinality?
-
-**H1:** In trained class-token attention, the aggregate class/patch group mass under vanilla softmax changes measurably when patch count changes, even when the semantic content is held as constant as practical.
-
-**Evidence required:**
-
-- exact synthetic token-replication behavior;
-- group mass by layer and head at input resolutions `224`, `320`, `448`, and `512`;
-- a paired image-level association between patch count and group mass;
-- corresponding CAM or cross-scale consistency changes.
-
-**Hypothesis failure:** the trained model's semantic logit changes fully cancel the count effect, or observed scale changes are unrelated to group mass and are explained by positional interpolation, receptive field, or other scale effects.
-
-### RQ2 — Does TGCA remove the intended count effect without changing the attention contract?
-
-**H2:** TGCA preserves unit row sums and is invariant to exact replication of all key/value pairs within one group.
-
-**Evidence required:** deterministic unit tests in full and mixed precision, including forward output and backward gradients.
-
-**Hypothesis failure:** replication changes aggregate group mass or the attention output beyond numerical tolerance, or masks/dtypes produce unstable rows.
-
-### RQ3 — Does calibration improve useful WSSS behavior rather than only output magnitude?
-
-**H3:** TGCA improves or stabilizes raw CAM quality and cross-scale consistency beyond both unnormalized split `(1,1)` and normalized fixed split `(0.5,0.5)`.
-
-**Evidence required:** matched Q/K/V and value paths, fixed thresholds, raw CAM metrics, group-mass diagnostics, and classification metrics.
-
-**Hypothesis failure:** the gain is reproduced by row-mass doubling, fixed 50/50 group allocation, per-method threshold selection, or changed CAM post-processing.
-
-### RQ4 — Is the effect independent of the original MCTTA engineering stack?
-
-**H4:** TGCA produces a positive mechanism or CAM effect in both MCTformer+ and KYAM.
-
-**Hypothesis failure:** the effect occurs only in MCTTA, only with its cross-attention, or only after unrelated host modifications.
-
-## 4. Notation and token layouts
-
-For attention head `h`:
-
-\[
-s_{ij}^{h}=\frac{(q_i^h)^\top k_j^h}{\sqrt{d_h}},
-\]
-
-where `i` indexes queries, `j` indexes keys, and `g_q(i)` and `g_k(j)` identify query and key groups.
-
-Group IDs are semantic roles, not token positions. Implementations may use integer IDs internally, but logs and configurations must use stable names.
-
-### 4.1 MCTformer+ self-attention
-
-Token order is:
+当前 repo 主要分成：
 
 ```text
-[class_1, ..., class_C, patch_1, ..., patch_P]
+LAST-ViT/
+├── cls_pretrain/
+│   └── conf.py
+└── visualization/
+    ├── patch_score.py
+    ├── evaluate_patch_hit.py
+    ├── visualize_patch_score_distribution.py
+    └── visualize_token_selection.py
 ```
 
-Groups are:
+官方 README 明确把核心问题定义成：
+
+> ViT uses semantically irrelevant background patches as shortcuts to represent global semantics, driven by global attention and coarse-grained semantic supervision.
+
+而 LaST 的 solution 是 selectively integrate patch features into global representation。
+
+对我们来说，现在**先不要搬它的 solution**。最重要的是搬它的 diagnosis。
+
+---
+
+# 2. LaST 的第一个关键量不是 attention，而是 Patch Score
+
+这是最容易误解的地方。
+
+`visualization/patch_score.py` 里，它没有使用：
+
+$$
+A_{\mathrm{CLS}\rightarrow p}.
+$$
+
+而是使用最终层 feature：
+
+$$
+q_{\mathrm{CLS}}
+$$
+
+与每一个 patch feature：
+
+$$
+p_j
+$$
+
+之间的 cosine similarity：
+
+$$
+\boxed{
+S_j
+=
+\cos(p_j,q_{\mathrm{CLS}})
+}
+$$
+
+代码就是：
+
+```python
+similarity = torch.cosine_similarity(
+    patch_tokens,
+    cls_token_expanded.expand(-1, num_patches, -1),
+    dim=-1
+)
+```
+
+所以 LaST 在问的不是：
+
+> CLS 当前 attention 到哪里？
+
+而是：
+
+> **哪些 patch representation 已经变得最像 global semantic representation？**
+
+这是一个 representation-level diagnosis。
+
+---
+
+# 3. 这一点搬到 MCTformer 后会非常有意思
+
+普通 ViT 只有：
+
+$$
+q_{\mathrm{CLS}}.
+$$
+
+但 MCTformer 有：
+
+$$
+C=
+[c_1,c_2,\ldots,c_K].
+$$
+
+因此 LaST 的 Patch Score 可以自然升级成：
+
+$$
+\boxed{
+S_{c,j}^{(l)}
+=
+\cos
+\left(
+c_c^{(l)},
+p_j^{(l)}
+\right)
+}
+$$
+
+其中：
+
+* \(c\)：类别；
+* \(j\)：patch；
+* \(l\)：Transformer layer。
+
+这其实比 LaST 原来的定义更有信息。
+
+LaST 只能问：
+
+> 哪些 background patches 变得像“整张图”？
+
+我们可以问：
+
+> 哪些 background patches 变得像 **dog class token**？
+
+> 哪些 background patches 变得像 **train class token**？
+
+> 哪些 background patches 变得像 **boat class token**？
+
+所以普通 LaST 的：
+
+$$
+\text{background}\rightarrow\text{global semantics}
+$$
+
+到了 MCTformer，就可以变成：
+
+$$
+\boxed{
+\text{background}
+\rightarrow
+\text{class-specific global semantics}
+}
+$$
+
+这正是你说的核心问题。
+
+---
+
+# 4. LaST 的第二个验证：最高 Patch Score 是否真的落在物体上
+
+源码 `evaluate_patch_hit.py` 很简单。
+
+对：
+
+$$
+S_j
+$$
+
+取：
+
+$$
+j^*=\arg\max_jS_j.
+$$
+
+然后检查：
+
+$$
+j^*
+$$
+
+是否在 GT bounding box 中。
+
+源码就是：
+
+```python
+top1 = scores.argmax(dim=1)
+```
+
+然后：
+
+```python
+if int(top1[i]) in patch_set:
+    hit += 1
+```
+
+最终报告：
 
 ```text
-0: class
-1: patch
+Top-1 Patch in BBox
 ```
 
-Both query and key layouts use these groups. VOC normally has `C=20`; COCO normally has `C=80`. With patch size 16:
+这个指标实际上就是论文里的 Point-in-Box 思想。
 
-| Input | Patch grid | `P` |
-|---:|---:|---:|
-| 224 | 14 × 14 | 196 |
-| 320 | 20 × 20 | 400 |
-| 448 | 28 × 28 | 784 |
-| 512 | 32 × 32 | 1024 |
+---
 
-### 4.2 MCTTA cross-attention
+# 5. 在 MCTformer 上，我们可以定义更强的 Class-specific Point-in-Mask
 
-MCTTA is not a required publication host, but the reusable operator must support it.
+我们没必要用 bbox。
 
-Typical query order:
+VOC / COCO val 本来就有 segmentation GT，所以反而比 LaST 的 ImageNet evaluation 条件更好。
+
+对图像中真实存在的类别：
+
+$$
+c\in Y^+,
+$$
+
+计算：
+
+$$
+j_c^*
+=
+\arg\max_j
+S_{c,j}.
+$$
+
+然后判断：
+
+$$
+GT(j_c^*)=c.
+$$
+
+定义：
+
+$$
+\boxed{
+\mathrm{C\text{-}PiM}
+=
+\frac{
+\sum_{i,c\in Y_i^+}
+\mathbf1[
+GT_i(j_c^*)=c
+]
+}{
+\sum_i|Y_i^+|
+}
+}
+$$
+
+即：
+
+> **Class-specific Point-in-Mask。**
+
+这个指标我觉得应该是第一优先级。
+
+因为它直接回答：
+
+> `dog` class token 最像的 patch，到底是不是 dog？
+
+---
+
+# 6. 但只做二分类 FG/BG 还不够
+
+MCTformer 是多类别模型。
+
+所以对每个正类别：
+
+$$
+c,
+$$
+
+我们应该把 patches 分成三组，而不是 LaST 的两组：
+
+$$
+\Omega_c
+=
+\{\text{target-class patches}\},
+$$
+
+$$
+\Omega_{\mathrm{other}}
+=
+\{\text{other foreground-class patches}\},
+$$
+
+$$
+\Omega_{\mathrm{bg}}
+=
+\{\text{background patches}\}.
+$$
+
+例如一张：
 
 ```text
-[class tokens, spatial-query tokens]
+person + bicycle + road
 ```
 
-Typical key/value order:
+的图。
+
+对于：
+
+$$
+c=\mathrm{person},
+$$
+
+三个集合分别是：
 
 ```text
-[class tokens, patch tokens]
+person patches
+bicycle patches
+road/background patches
 ```
 
-The count correction always uses **key-group cardinality**. Query groups are needed only for relation-bias lookup and diagnostics.
+这样我们可以区分两种完全不同的问题：
 
-### 4.3 KYAM self-attention
+$$
+\boxed{
+\text{Foreground class confusion}
+}
+$$
 
-The audited official implementation uses:
+和：
 
-```text
-[class_1, ..., class_C, patch_1, ..., patch_P, register]
+$$
+\boxed{
+\text{Background semantic leakage}
+}
+$$
+
+这比 LaST 原来的 foreground/background 二分更加适合 WSSS。
+
+---
+
+# 7. LaST 源码已经有 FG/BG distribution 的完整实现
+
+`visualize_patch_score_distribution.py` 后来专门加入了 Figure 2 风格的分析。
+
+它使用：
+
+* ImageNet bbox；
+* SAM2 从 bbox refinement 出前景 mask；
+* patch majority overlap > 0.5 判定前景；
+* 剩下全部 patch 作为 background。
+
+源码随后把：
+
+```python
+foreground_scores
+background_scores
 ```
 
-The primary, predeclared grouping is:
+分别收集起来，再统计：
 
-```text
-0: global = class tokens + singleton register token
-1: patch
-```
+* mean；
+* median；
+* q90；
+* density histogram。
 
-Rationale:
+我们在 VOC 上完全不需要 SAM2。
 
-- it keeps the primary method as a two-group normalization;
-- class and register tokens are both global/non-spatial tokens;
-- making the singleton register a third TGCA group would grant it a full evidence-driven group prior and could over-weight one token;
-- merging the register into the patch group would mix a global token with spatial evidence.
+直接：
 
-This choice must not remain untested. Run one predeclared register-sensitivity comparison on the best count-only configuration:
+$$
+GT_{\mathrm{VOC}}
+$$
 
-1. `global`: register grouped with class tokens — primary;
-2. `patch`: register grouped with patch tokens;
-3. `singleton`: register is a third group, without relation bias.
+下采样到：
 
-Do not remove the register token, because that changes the host architecture. If the TGCA conclusion depends strongly on register grouping, report this as a limitation and weaken the generality claim.
+$$
+28\times28
+$$
 
-## 5. Mathematical design
+即可。
 
-### 5.1 Vanilla group mass
+而且可以比 LaST 更干净地统计：
 
-Vanilla attention is:
+$$
+P(S_{c,j}\mid j\in\Omega_c),
+$$
 
-\[
-A_{ij}^{h}=\frac{\exp(s_{ij}^{h})}{\sum_k\exp(s_{ik}^{h})}.
-\]
+$$
+P(S_{c,j}\mid j\in\Omega_{\mathrm{other}}),
+$$
 
-The aggregate mass assigned by query `i` to key group `g` is:
+$$
+P(S_{c,j}\mid j\in\Omega_{\mathrm{bg}}).
+$$
 
-\[
-m_{i,g}^{h}=\sum_{j:g_k(j)=g}A_{ij}^{h}.
-\]
+---
 
-Define group sum evidence:
+# 8. 第一组我认为最重要的实验
 
-\[
-Z_{i,g}^{h}=\sum_{j:g_k(j)=g}\exp(s_{ij}^{h}).
-\]
+针对 **MCTformer 与 MCTformer+ 都做**：
 
-Then:
+$$
+S_{c,j}^{(L)}
+=
+\cos
+(c_c^{(L)},p_j^{(L)}).
+$$
 
-\[
-m_{i,g}^{h}=\frac{Z_{i,g}^{h}}{\sum_r Z_{i,r}^{h}}.
-\]
+报告三个 distribution：
 
-Under equal logits, vanilla group mass is exactly proportional to cardinality:
+| Region            | Score                                   |
+| ----------------- | --------------------------------------- |
+| Target foreground | \(S_{c,j},j\in\Omega_c\)                |
+| Other foreground  | \(S_{c,j},j\in\Omega_{\mathrm{other}}\) |
+| Background        | \(S_{c,j},j\in\Omega_{\mathrm{bg}}\)    |
 
-\[
-m_{i,g}^{h}=\frac{N_g}{\sum_r N_r}.
-\]
+除了 mean，至少看：
 
-For VOC with 20 class tokens, the equal-logit vanilla class-group mass decreases from approximately `0.0926` at 224 input to `0.0192` at 512 input.
+$$
+Q_{50},
+\quad
+Q_{90},
+\quad
+Q_{95}.
+$$
 
-This equal-logit example establishes a mechanism, not an empirical claim about trained networks. Trained logits may compensate for, amplify, or ignore the effect; that is why direct measurement is mandatory.
+因为 lazy assignment 最可能出现在 background distribution 的 **right tail**，均值未必明显。
 
-### 5.2 TGCA formulation
+尤其可以定义：
 
-TGCA corrects each key logit by its valid key-group count:
+$$
+\boxed{
+\mathrm{BG\text{-}Tail@q}
+=
+\frac{
+|\operatorname{Top}_q(S_c)\cap\Omega_{\mathrm{bg}}|
+}{
+|\operatorname{Top}_q(S_c)|
+}
+}
+$$
 
-\[
-\widetilde{s}_{ij}^{h}
-=s_{ij}^{h}
--\gamma\log N_{g_k(j)}
-+b_{g_q(i),g_k(j)}^{h}.
-\]
+例如：
 
-The primary method fixes `gamma=1`. Attention is one ordinary row softmax:
+$$
+q=5\%,10\%.
+$$
 
-\[
-A_{ij}^{h}
-=\frac{\exp(\widetilde{s}_{ij}^{h})}
-{\sum_k\exp(\widetilde{s}_{ik}^{h})}.
-\]
+如果：
 
-Count-only TGCA uses `b=0` and adds no learned parameters. TGCA+bias uses one small relation table per attention layer and head.
+$$
+\mathrm{BG\text{-}Tail@10\%}
+$$
 
-### 5.3 Hierarchical interpretation
+非常大，那就是很强的证据。
 
-Define group mean evidence in log space:
+---
 
-\[
-e_{i,g}^{h}
-=\operatorname{LogSumExp}_{j:g_k(j)=g}(s_{ij}^{h})-\log N_g.
-\]
+# 9. Point-in-Mask 应该进一步拆成三种 outcome
 
-TGCA group mass is:
+不要只报告：
 
-\[
-\pi_{i,g}^{h}
-=\operatorname{Softmax}_{g}\left(e_{i,g}^{h}+b_{g_q(i),g}^{h}\right).
-\]
+$$
+C\text{-}PiM.
+$$
 
-Within group `g`, the conditional token distribution is:
+对于：
 
-\[
-\rho_{i,j\mid g}^{h}
-=\operatorname{Softmax}_{j:g_k(j)=g}(s_{ij}^{h}).
-\]
+$$
+j^*=\arg\max_jS_{c,j},
+$$
 
-The final probability factorizes as:
+报告：
 
-\[
-A_{ij}^{h}=\pi_{i,g_k(j)}^{h}\rho_{i,j\mid g_k(j)}^{h}.
-\]
+$$
+P(j^*\in\Omega_c),
+$$
 
-This makes the comparison precise:
+$$
+P(j^*\in\Omega_{\mathrm{other}}),
+$$
 
-- vanilla softmax uses group **sum evidence**;
-- normalized split `(0.5,0.5)` fixes group mass independently of evidence;
-- TGCA uses group **mean evidence**, then allocates within-group mass normally.
+$$
+P(j^*\in\Omega_{\mathrm{bg}}).
+$$
 
-### 5.4 Replication-invariance proposition
+也就是：
 
-**Proposition.** If every key/value pair in one group `g` is duplicated exactly `r` times, count-only TGCA leaves aggregate group mass and the attention output unchanged, up to floating-point error.
+| Outcome           | Meaning                        |
+| ----------------- | ------------------------------ |
+| Target hit ↑      | 正常 class semantic localization |
+| Other-class hit ↓ | class confusion                |
+| Background hit ↓  | lazy background assignment     |
 
-**Proof sketch.** After replication, the corrected unnormalized weight for each duplicate is divided by `rN_g` instead of `N_g`. Summing the `r` identical copies cancels the factor `r`:
+这样我们第一次就可以把：
 
-\[
-\sum_{t=1}^{r}\frac{\exp(s_{ij})}{rN_g}
-=\frac{\exp(s_{ij})}{N_g}.
-\]
+$$
+\boxed{
+\text{class confusion}
+}
+$$
 
-Therefore the group contribution to the global denominator is unchanged. Each duplicated value receives `1/r` of its original token weight, so the `r` identical value contributions sum to the original attention output.
+和：
 
-This property applies to **exact duplicates**. It does not claim invariance when higher resolution introduces distinct patches, new positional encodings, different receptive fields, or genuinely new evidence.
+$$
+\boxed{
+\text{background leakage}
+}
+$$
 
-### 5.5 Relation bias
+真正分离开。
 
-For two groups, each head has:
+---
 
-\[
-B^h=\begin{bmatrix}
-b_{0\rightarrow0}^{h} & b_{0\rightarrow1}^{h}\\
-b_{1\rightarrow0}^{h} & b_{1\rightarrow1}^{h}
+# 10. 我尤其建议不要只分析最后一层
+
+这一点是 MCTformer 相比 LaST 原实验最值得扩展的地方。
+
+对所有层：
+
+$$
+l=1,\ldots,12
+$$
+
+提取：
+
+$$
+c_c^{(l)},
+\qquad
+p_j^{(l)}.
+$$
+
+然后：
+
+$$
+S_{c,j}^{(l)}
+=
+\cos(c_c^{(l)},p_j^{(l)}).
+$$
+
+画：
+
+$$
+C\text{-}PiM(l),
+$$
+
+$$
+BG\text{-}Tail(l),
+$$
+
+$$
+TargetMean(l),
+$$
+
+$$
+BGMean(l).
+$$
+
+这样我们就可以回答：
+
+> **Lazy semantic assignment 是什么时候形成的？**
+
+如果出现：
+
+$$
+l=1\sim4:
+\quad
+S_{bg}\ll S_{fg},
+$$
+
+但：
+
+$$
+l=8\sim12:
+\quad
+S_{bg}\uparrow,
+$$
+
+那就是非常漂亮的 evidence：
+
+$$
+\boxed{
+\text{background semantics 是在 global Transformer interaction 中逐层形成的，}
+}
+$$
+
+而不是 patch embedding 一开始就有。
+
+---
+
+# 11. 而且 MCTformer 有一个 LaST 没有的优势：Attention Matrix
+
+这是非常关键的地方。
+
+LaST 的 Patch Score 是：
+
+$$
+S_{c,j}^{feat}
+=
+\cos(c_c,p_j).
+$$
+
+但 MCTformer 同时直接产生：
+
+$$
+A_{c2p}(c,j).
+$$
+
+而 MCTformer+ 的 CAM 本来就是用 class-to-patch attention 和 patch-to-patch attention refine；你现有稿件也明确写出了 \(A_{c2p}\) 和 \(A_{p2p}\) 的使用方式。
+
+因此我们应该**同时测三个东西**：
+
+$$
+\boxed{
+S_{c,j}^{feat}
+=
+\cos(c_c,p_j)
+}
+$$
+
+representation semantic alignment；
+
+$$
+\boxed{
+S_{c,j}^{attn}
+=
+A_{c2p}(c,j)
+}
+$$
+
+attention routing；
+
+以及：
+
+$$
+\boxed{
+S_{c,j}^{cam}
+=
+CAM_c(j)
+}
+$$
+
+最终 localization。
+
+这三个不要混在一起。
+
+---
+
+# 12. 这会产生非常有价值的四种结果
+
+假设某个 background patch：
+
+### 情况 A
+
+$$
+S^{feat}_{bg}\uparrow,
+\qquad
+A_{c2p,bg}\uparrow.
+$$
+
+说明：
+
+> patch 本身已经获得 class semantics，而且 class token 又主动读取它。
+
+这是最严重的 semantic leakage。
+
+---
+
+### 情况 B
+
+$$
+S^{feat}_{bg}\uparrow,
+\qquad
+A_{c2p,bg}\downarrow.
+$$
+
+说明：
+
+> patch representation 已经被污染，但 class attention 暂时还能抑制它。
+
+这是 representation pollution。
+
+---
+
+### 情况 C
+
+$$
+S^{feat}_{bg}\downarrow,
+\qquad
+A_{c2p,bg}\uparrow.
+$$
+
+说明：
+
+> attention routing 错了，但 patch representation 本身还正常。
+
+这更接近 MoRe 的问题。
+
+---
+
+### 情况 D
+
+两者都低。
+
+正常。
+
+这会把我们前面讨论的：
+
+$$
+\text{storage pollution}
+$$
+
+$$
+\text{aggregation pollution}
+$$
+
+$$
+\text{semantic assignment pollution}
+$$
+
+第一次真正变成可测量东西。
+
+---
+
+# 13. 如何验证它是不是“class-specific global semantics”而不仅仅是 generic global semantics
+
+这是我觉得最重要的新实验之一。
+
+对 class token \(c\)，比较：
+
+$$
+S_{c,j}
+$$
+
+在两种图像中的 background patches：
+
+### 图像中 class \(c\) 存在
+
+$$
+y_c=1.
+$$
+
+### 图像中 class \(c\) 不存在
+
+$$
+y_c=0.
+$$
+
+定义：
+
+$$
+\boxed{
+\Delta_{\mathrm{presence}}(c)
+=
+\mathbb E[
+S_{c,j}
+\mid
+j\in BG,y_c=1
+]
+-
+\mathbb E[
+S_{c,j}
+\mid
+j\in BG,y_c=0
+].
+}
+$$
+
+如果：
+
+$$
+\Delta_{\mathrm{presence}}(c)\gg0,
+$$
+
+说明同一个 `car` class token：
+
+> 只有在 car 真正出现在图像中时，background patches 才开始变得像 car。
+
+这比单纯说 background 有 global semantics 强得多。
+
+它真正说明：
+
+$$
+\boxed{
+\text{foreground class semantics 已经扩散进 background patch representation。}
+}
+$$
+
+也就是：
+
+$$
+\boxed{
+\text{background}\rightarrow
+\text{class-specific global semantics}.
+}
+$$
+
+---
+
+# 14. MCTformer 和 MCTformer+ 的比较特别有意义
+
+MCTformer+ 相比 MCTformer 增加了更强的 class-token discrimination，例如 CCT，以及改进后的 classification/CAM generation。你现有稿件也把 MCTformer+ 的 class-token discrimination 作为基础。
+
+这里存在两个相反的可能性。
+
+### Hypothesis A
+
+CCT 让：
+
+$$
+c_{\mathrm{dog}},
+c_{\mathrm{cat}}
+$$
+
+更可分，因此：
+
+$$
+\text{other-class confusion}\downarrow.
+$$
+
+这是好事。
+
+但同时更强 class semantics 可能通过 global self-attention 更容易传播到 patches：
+
+$$
+\text{BG semantic leakage}\uparrow.
+$$
+
+也就是：
+
+$$
+\boxed{
+\text{class specificity improved,
+but semantic diffusion worsened}.
+}
+$$
+
+---
+
+### Hypothesis B
+
+更好的 class-token representation 同时提高：
+
+$$
+C\text{-}PiM
+$$
+
+并降低 background confusion。
+
+到底是哪一种不能猜。
+
+这正是实验应该回答的问题。
+
+如果结果是 A，我觉得会非常有研究价值。
+
+---
+
+# 15. 第二个关键验证：High-score patch 是否真的对分类有贡献？
+
+LaST 论文一个很强的 causal test 是：
+
+> 删除 Patch Score 最高的 patches，classification 几乎不下降；删除低分 patches 反而掉得厉害。
+
+值得注意的是，我检查了当前公开 repo：目前公开了 Patch Score、Point-in-BBox、FG/BG score distribution 和 token-selection visualization；**没有找到论文中这个 masking accuracy experiment 的现成脚本**。所以这部分我们要自己实现。
+
+但搬到 MCTformer 后反而可以做得更细。
+
+---
+
+# 16. Class-specific causal masking
+
+对一个正类别：
+
+$$
+c,
+$$
+
+先在原图计算：
+
+$$
+S_{c,j}.
+$$
+
+然后固定这些 patch indices，不重新排序。
+
+分别删除：
+
+$$
+\operatorname{TopK}_{BG}(S_c),
+$$
+
+$$
+\operatorname{Random}_{BG},
+$$
+
+$$
+\operatorname{TopK}_{FG}(S_c),
+$$
+
+$$
+\operatorname{Random}_{FG}.
+$$
+
+删除方式可以先统一使用：
+
+* ImageNet mean；
+* 或 zero after normalization。
+
+然后重新 forward。
+
+测：
+
+$$
+\Delta z_c
+=
+z_c(x)-z_c(x_{\mathrm{masked}}).
+$$
+
+---
+
+# 17. 这组实验的解释比 LaST 还能更细
+
+假设某个 background patch：
+
+$$
+S_{c,j}
+$$
+
+非常高。
+
+可能有两种情况。
+
+### 类型 1：Representational leakage
+
+高 score background 被删除以后：
+
+$$
+\Delta z_c\approx0.
+$$
+
+说明它虽然“长得像 class token”，但分类不真正依赖它。
+
+这接近 LaST 原来的现象：
+
+$$
+\boxed{
+\text{semantic information 被懒惰地写进了 background，}
+}
+$$
+
+但它只是冗余 representation。
+
+---
+
+### 类型 2：Causal background shortcut
+
+高 score background 被删除后：
+
+$$
+\Delta z_c\gg0.
+$$
+
+说明：
+
+> 模型不仅在 background 中编码了 class semantics，而且真的依赖它分类。
+
+这其实比 LaST 原始现象更危险：
+
+$$
+\boxed{
+\text{background is a decision shortcut}.
+}
+$$
+
+所以我们不应该预设 masking high-score background 一定“不影响分类”。
+
+两种结果都有研究意义。
+
+---
+
+# 18. 我建议正式把这两个概念分开
+
+这是我觉得比照搬 LaST 更好的地方。
+
+### Representational Lazy Assignment
+
+$$
+\boxed{
+\text{Background patch becomes class-semantic}
+}
+$$
+
+测：
+
+$$
+S_{c,j}^{feat},
+\quad
+C\text{-}PiM,
+\quad
+BG\text{-}Tail.
+$$
+
+### Decision Shortcut
+
+$$
+\boxed{
+\text{Classification depends on background semantics}
+}
+$$
+
+测：
+
+$$
+\Delta z_c
+$$
+
+以及 background removal/context swap。
+
+这样论文不会把：
+
+$$
+\text{semantic alignment}
+$$
+
+和：
+
+$$
+\text{causal importance}
+$$
+
+混成一个概念。
+
+这也正好规避 Register/[CLS] decoupling 工作对 attention faithfulness 的批评。
+
+---
+
+# 19. 第三个实验：把 LaST 的“global dependency”验证搬过来
+
+这一步对 MCTformer 特别关键。
+
+标准 MCTformer attention 实际包含四个区域：
+
+$$
+A=
+\begin{bmatrix}
+A_{c2c} & A_{c2p}\\
+A_{p2c} & A_{p2p}
 \end{bmatrix}.
-\]
-
-Design rules:
-
-- shape per attention module: `[num_heads, num_query_groups, num_key_groups]`;
-- initialize every element to zero;
-- apply before the one global softmax;
-- do not rescale values or attention output;
-- report learned biases after centering over key groups for each query group, because adding one constant to a full query-group row is softmax-unidentifiable;
-- add no bias regularizer unless a failure is observed and a new ablation is approved.
-
-For DeiT-S with 12 layers, 6 heads, and 2×2 relations, the total is 288 scalar parameters.
-
-## 6. Baseline semantics
-
-| Mode | Operation | Pre-dropout row sum | Count-corrected? | Evidence-driven group mass? |
-|---|---|---:|---:|---:|
-| `vanilla` | one joint softmax | 1 | No | Yes, sum evidence |
-| `split_11` | per-group softmax × `(1,1)` | 2 | Heuristic | No, fixed `(1,1)` |
-| `split_05` | per-group softmax × `(0.5,0.5)` | 1 | Heuristic | No, fixed `(0.5,0.5)` |
-| `tgca` | subtract `log N_g`, one softmax | 1 | Yes | Yes, mean evidence |
-| `tgca_bias` | TGCA + relation bias | 1 | Yes | Yes, mean evidence + learned prior |
-| `tgca_gamma05` | subtract `0.5 log N_g` | 1 | Partial | Yes |
-
-`tgca_gamma05` is permitted only if full correction clearly over-corrects. The only planned gamma values are `{0, 0.5, 1}`, where `0` is vanilla. Do not tune gamma per dataset, host, resolution, or seed.
-
-The split baselines are defined only for two groups. KYAM register-sensitivity mode `singleton` is evaluated only with vanilla or TGCA, not split softmax.
-
-## 7. Software architecture
-
-### 7.1 Current repository facts
-
-The current code is an MCTTA/MCTG-derived repository, not a finished TGCA implementation.
-
-Relevant existing normalization sites include:
-
-- `models/vit.py::Attention` — vanilla joint softmax used by `models/mctformer_plus.py`;
-- `models/mct_vit.py::Attention` — old split `(1,1)` self-attention;
-- `models/adapter_modules.py` — two old split cross-attention paths;
-- `models/modules.py` — one active split cross-attention path and other vanilla paths.
-
-Do not compare variants by switching between these files. They contain other architectural differences. The core ablation must select normalization modes inside one shared attention path.
-
-KYAM is not currently present under `hosts/`. Before implementation, pin its official repository commit and record it in the baseline registry. The repository currently has no declared license; do not redistribute a modified copy until licensing or author permission is resolved.
-
-### 7.2 Planned files
-
-```text
-TGCA/
-├── docs/
-│   └── design.md
-├── models/
-│   └── tgca.py
-├── experiments/
-│   ├── configs/
-│   │   ├── mctformerplus/
-│   │   └── kyam/
-│   ├── hosts/
-│   │   ├── mctformerplus.py
-│   │   └── kyam.py
-│   └── run_experiment.py
-├── tests/
-│   ├── test_tgca_normalization.py
-│   ├── test_tgca_replication.py
-│   ├── test_tgca_masks_and_dtypes.py
-│   ├── test_mctformerplus_attention.py
-│   └── test_kyam_attention.py
-├── tools/
-│   ├── analyze_attention_groups.py
-│   ├── test_token_replication.py
-│   ├── evaluate_scale_consistency.py
-│   ├── collect_cam_metrics.py
-│   └── export_paper_tables.py
-└── results/
-    └── <host>/<dataset>/<run_id>/...
-```
-
-These paths are planned, not authorization to implement them before the design is approved.
-
-### 7.3 Pure function and module API
-
-Implement one pure normalization function and one `nn.Module` wrapper.
-
-Conceptual API:
-
-```python
-def token_group_normalize(
-    logits,                    # [B, H, Nq, Nk]
-    key_group_ids,             # [Nk] or [B, Nk]
-    query_group_ids=None,      # [Nq] or [B, Nq]
-    key_valid_mask=None,       # broadcastable to [B, H, Nq, Nk]
-    mode="tgca",
-    gamma=1.0,
-    split_weights=None,
-    relation_bias=None,        # [H, Gq, Gk]
-):
-    """Return pre-dropout attention probabilities."""
-```
-
-```python
-class TokenGroupNormalizer(nn.Module):
-    def __init__(
-        self,
-        num_heads,
-        num_query_groups,
-        num_key_groups,
-        mode="vanilla",
-        gamma=1.0,
-        split_weights=(1.0, 1.0),
-        learn_relation_bias=False,
-    ):
-        ...
-```
+$$
 
-The module must return only the probability tensor by default so it can replace `nn.Softmax(dim=-1)` without changing host call signatures. Diagnostics should be collected with hooks or a separate stateless helper, not a mutable `last_stats` field that is unsafe under distributed execution.
+你之前的 MCTTA 稿件 Fig. 2 也清楚画出了这四部分。
 
-### 7.4 Group layout builders
+这里：
 
-Token positions are host-specific. Keep them outside the mathematical operator:
+$$
+A_{c2p}
+$$
 
-```python
-build_mctformer_groups(num_classes, num_patches)
-build_mctta_cross_groups(num_classes, num_spatial, num_patches)
-build_kyam_groups(num_classes, num_patches, register_policy="global")
-```
+表示：
 
-Each builder returns named query/key group layouts and validates total sequence length. Never infer semantic groups from tensor length alone when a host exposes explicit token metadata.
+> class token 读取 patches；
 
-### 7.5 Numerical behavior
+而：
 
-Requirements:
+$$
+A_{p2c}
+$$
 
-1. Compute group counts from valid keys, not nominal padded length.
-2. Require at least one valid key per attention row; fail loudly on fully masked rows.
-3. Form count logs in float32.
-4. For FP16/BF16, perform correction and softmax accumulation in float32, then cast probabilities back to the intended attention dtype.
-5. Apply invalid-key masks after correction and bias, immediately before softmax.
-6. Preserve exact zero probability for invalid keys.
-7. Apply attention dropout **after** normalization, as in the host baseline.
-8. Measure row sums before dropout; dropout intentionally changes the realized row sum during training.
-9. Do not use `nan_to_num` to conceal invalid rows.
-10. Do not clamp logits except where the unchanged host already does so.
+表示：
 
-### 7.6 Masked group counts
+> patch token 读取 class tokens。
 
-With per-sample valid mask `M_bj`, use:
+这第二条路径非常值得怀疑。
 
-\[
-N_{b,g}=\sum_j M_{bj}\mathbf{1}[g_k(j)=g].
-\]
+---
 
-The correction for key `j` in sample `b` is `log N_{b,g_k(j)}`. A group with zero valid keys contributes no logits to softmax. The implementation must never take `log(0)` for an active key.
+# 20. MCTformer 的“语义写回”路径
 
-### 7.7 Checkpoint compatibility
+如果：
 
-- `vanilla`, `split_11`, `split_05`, and count-only `tgca` add no parameters.
-- `tgca_bias` adds only relation-bias parameters.
-- Old checkpoints must load in count-only mode with no missing or unexpected keys.
-- In bias mode, only the documented relation-bias keys may be missing, and they must be zero-initialized.
-- Save normalization configuration inside every checkpoint and result manifest; a checkpoint filename is not sufficient provenance.
+$$
+p_j
+$$
 
-### 7.8 Configuration contract
+通过：
 
-Example:
+$$
+A_{p2c}
+$$
 
-```yaml
-attention_normalization:
-  mode: tgca
-  gamma: 1.0
-  relation_bias: false
-  split_weights: [1.0, 1.0]
-  key_groups: class_patch
-  kyam_register_policy: global
-  diagnostics:
-    enabled: true
-    save_full_attention: false
-    aggregate_by_layer_head: true
-```
+大量读取：
 
-Unknown modes or group policies must raise configuration errors. Do not silently fall back to vanilla.
+$$
+c_{\mathrm{dog}},
+$$
 
-## 8. Host integration design
+那么 patch feature 更新后：
 
-### 8.1 MCTformer+
+$$
+p'_j
+$$
 
-Primary path:
+自然会越来越像：
 
-```text
-models/mctformer_plus.py
-    -> imports VisionTransformer from models/vit.py
-    -> models/vit.py::Attention
-```
+$$
+c_{\mathrm{dog}}.
+$$
 
-Implementation sequence:
+即使 patch \(j\) 本身是 grass/background。
 
-1. Reproduce the existing vanilla path before editing.
-2. Add `TokenGroupNormalizer` to `models/vit.py::Attention` with default `mode="vanilla"`.
-3. Build the two-group layout from `self.num_classes` and runtime sequence length.
-4. Route all five normalization modes through this same class.
-5. Preserve returned `weights` as pre-dropout normalized weights.
-6. Preserve Q/K/V, `attn_drop`, value aggregation, output projection, and residual paths exactly.
-7. Add a host smoke test showing default vanilla output and gradients match the pre-change implementation within strict tolerance under a fixed seed.
+所以：
 
-CAM extraction in `models/mctformer_plus.py` consumes class-to-patch and patch-to-patch attention. Log both the probabilities used for CAMs and their group aggregates. Do not add CAM rescaling that differs by normalization mode.
+$$
+\boxed{
+A_{p2c}
+}
+$$
 
-### 8.2 Know Your Attention Maps (KYAM)
+实际上提供了一条非常直接的：
 
-Initial audited official commit:
+$$
+\boxed{
+\text{class semantic}
+\rightarrow
+\text{patch feature}
+}
+$$
 
-```text
-3daaec734700a4c9578dd8ce7bedef7f917aed66
-```
+写入通道。
 
-Re-verify and pin the commit immediately before baseline reproduction.
+普通单 `[CLS]` ViT 只有一个 global token；
 
-The official `Attention` class stores `self.attend = nn.Softmax(dim=-1)`, and its recorder attaches hooks to `module.attend`. Preserve this interface by injecting a `TokenGroupNormalizer` module in place of `self.attend`; do not replace it with an unhookable inline function.
+MCTformer 有：
 
-Prefer a parent-repository integration wrapper under `experiments/hosts/kyam.py` that:
+$$
+20/80
+$$
 
-1. imports the pinned official host;
-2. finds each KYAM attention module;
-3. replaces only its `attend` normalizer;
-4. derives `[global, patch]` groups using class count, patch count, and final register position;
-5. leaves all Q/K/V and CAM logic in the host untouched;
-6. exposes inserted bias parameters to the optimizer and checkpoint state.
+个 class-specific global tokens。
 
-This overlay approach minimizes source redistribution while the upstream repository has no declared license.
+因此这可能就是：
 
-KYAM contains optional post-softmax Concrete head gating. The clean normalization experiment uses `prune=False`, because post-softmax gating can change row sums and confound the operator contract. Use two tracks if official baseline parity requires pruning:
+$$
+\boxed{
+\text{MCTformer 更容易发生 class-specific lazy assignment}
+}
+$$
 
-- `KYAM-core`: `prune=False`; primary TGCA generality result;
-- `KYAM-full`: official pruning setting; optional robustness result with vanilla and TGCA compared under identical gating.
+的结构原因之一。
 
-For `KYAM-full`, row-normalization claims apply to the pre-gate attention returned by the normalizer, not the gated output.
+---
 
-KYAM's label-driven class-token dropout is applied after the Transformer output in the audited code, so it does not change attention key counts. Confirm this again at the pinned commit.
+# 21. 可以做一个很干净的 inference-time causal intervention
 
-### 8.3 MCTTA self- and cross-attention
+先完全不训练新模型。
 
-MCTTA is optional and must be integrated only after the two required hosts pass.
+只在 forward 时修改 attention。
 
-Potential sites:
+### Original
 
-- `models/mct_vit.py::Attention` for self-attention;
-- split paths in `models/adapter_modules.py`;
-- split/vanilla paths in `models/modules.py`.
+$$
+A_{p2c}
+$$
 
-Before any MCTTA result, resolve the legacy cross-attention token-order and output-slicing inconsistency against executable shapes. The integration must use explicit query and key layouts rather than assuming both axes have the same group order.
+保持原样。
 
-### 8.4 DiCLIP comparison policy
+### Block-P2C
 
-DiCLIP is not a TGCA host. Its custom attention combines independently normalized attention maps with unequal coefficients and injects diffusion-derived patch affinity. This prevents a clean one-variable normalization comparison.
+设置：
 
-Use DiCLIP in the recent-method comparison table with:
+$$
+A_{p2c}=0,
+$$
 
-- venue/year: IEEE T-IP 2026;
-- backbone and pretraining;
-- image-level supervision and external diffusion prior;
-- author-reported versus locally reproduced status;
-- VOC/COCO result definition and post-processing.
+然后对每个 patch query 剩余的：
 
-Do not imply that a DiCLIP number is directly matched to ImageNet-only class-token hosts.
+$$
+A_{p2p}
+$$
 
-## 9. Attention diagnostics
+重新归一化：
 
-### 9.1 Quantities collected before dropout
+$$
+A'_{p2p}
+=
+\frac{A_{p2p}}
+{\sum_kA_{p2p}(j,k)}.
+$$
 
-For each layer, head, query group, and key group:
+其他：
 
-- mean aggregate group mass;
-- standard deviation across query rows and images;
-- group mean log evidence `e_{i,g}`;
-- attention entropy;
-- maximum row-sum error;
-- valid key count per group;
-- relation bias, when enabled.
+$$
+A_{c2p},
+A_{c2c}
+$$
 
-Required directional summaries include:
+全部不变。
 
-- class-query → class-key mass;
-- class-query → patch-key mass;
-- patch-query → class-key mass;
-- patch-query → patch-key mass.
+也就是说：
 
-For KYAM, use `global` in the primary logs and additionally separate class and register query rows in diagnostic summaries even though they share one correction group.
+$$
+\boxed{
+\text{class token can still read patches,}
+}
+$$
 
-### 9.2 Online aggregation
+但：
 
-Full attention storage scales quadratically with token count and should be disabled by default. Aggregate within the forward hook and save sufficient statistics.
+$$
+\boxed{
+\text{patches cannot read class tokens.}
+}
+$$
 
-Required CSV columns:
+这正对应你说的：
 
-```text
-run_id,dataset,split,image_id,resolution,patch_count,class_count,
-layer,head,query_group,key_group,mean_mass,std_mass,
-mean_entropy,max_row_sum_error,mean_group_log_evidence
-```
+> **直接保护 patch local feature。**
 
-For synthetic tests, full matrices may be saved because sequence lengths are small.
+---
 
-### 9.3 Distributed behavior
+# 22. 如果这个 intervention 出现以下结果，会非常漂亮
 
-- each rank writes a rank-specific temporary file;
-- aggregation occurs once after a barrier;
-- sort final rows deterministically;
-- include world size and rank count in the run manifest;
-- never average head IDs or layer IDs together before raw per-head data is saved.
+例如：
 
-## 10. Unit and synthetic validation
+$$
+\text{classification mAP}
+\approx
+\text{unchanged},
+$$
 
-### 10.1 Required deterministic unit tests
+但：
 
-1. **Vanilla parity:** `mode=vanilla` matches `torch.softmax(logits, dim=-1)`.
-2. **One-group reduction:** TGCA equals vanilla when all valid keys share one group.
-3. **Row sum:** vanilla, normalized split, TGCA, and TGCA+bias rows sum to one before dropout.
-4. **Old split row sum:** `split_11` rows sum to two and `split_05` rows sum to one.
-5. **Group replication:** duplicating one entire key group preserves TGCA aggregate mass.
-6. **Output replication:** duplicating the corresponding keys and values preserves `A @ V`.
-7. **Vanilla non-invariance:** the same replication changes vanilla aggregate group mass in a controlled equal-logit case.
-8. **Relation lookup:** each query/key group pair receives the intended bias.
-9. **Zero-bias reduction:** TGCA+bias with a zero table equals count-only TGCA.
-10. **Mask correctness:** invalid keys receive exactly zero probability and do not contribute to counts.
-11. **Batch-specific masks:** two samples with different valid counts obtain the correct per-sample correction.
-12. **Rectangular attention:** support `Nq != Nk` for MCTTA cross-attention.
-13. **Gradient check:** finite gradients for logits, Q/K/V-derived inputs, and relation bias.
-14. **Device/dtype:** CPU FP32; CUDA FP32/FP16/BF16 when supported.
-15. **Checkpoint loading:** only expected relation-bias keys differ.
-16. **No input mutation:** logits, values, masks, and group-ID tensors remain unchanged.
+$$
+BG\text{-}Tail\downarrow,
+$$
 
-Suggested FP32 tolerances:
+$$
+C\text{-}PiM\uparrow,
+$$
 
-```text
-row sum max error <= 1e-6
-replicated group mass max error <= 1e-6
-replicated output max absolute error <= 1e-5
-vanilla parity max absolute error <= 1e-7
-```
+$$
+CAM\ mIoU\uparrow.
+$$
 
-Mixed-precision tolerances must be defined by dtype in the tests and must not be loosened after inspecting method outcomes.
+这将提供非常强的机制证据：
 
-### 10.2 Synthetic mechanism grid
+> MCTformer 的 class tokens 并不需要反向写入 patches 才能完成 image classification，但这种写入导致 dense patch representation 获得 class-specific background semantics。
 
-Use controlled Gaussian logits plus exact duplicates:
+这几乎直接支持你的第 2 点：
 
-```text
-class counts:  [1, 20, 80]
-patch counts:  [49, 196, 400, 784, 1024]
-heads:         [1, 6]
-logit regimes: equal, iid normal, class-favored, patch-favored
-replication:   [1, 2, 4, 8]
-```
+$$
+\boxed{
+\text{Patch local feature 需要直接保护。}
+}
+$$
 
-Produce:
+---
 
-- group mass versus patch count;
-- group mass versus replication factor;
-- attention-output error versus replication factor;
-- row-sum error by dtype;
-- gradient-norm distributions.
+# 23. 还可以按 layer 做 P2C blocking
 
-The first mechanism figure should be generated from this script, not manually drawn.
+不用一次全 block。
 
-### 10.3 Host smoke tests
+分别：
 
-For both required hosts:
+$$
+L=1\sim4,
+$$
 
-- construct the smallest supported model;
-- run one forward/backward batch;
-- verify sequence layout and group IDs;
-- verify pre-dropout row sums;
-- verify attention and CAM shapes;
-- load the vanilla checkpoint;
-- confirm default vanilla logits/CAMs are unchanged after the integration wrapper is added.
+$$
+5\sim8,
+$$
 
-## 11. Experiment program
+$$
+9\sim12.
+$$
 
-### Stage A — Baseline registry and environment freeze
+或者逐层：
 
-Before modifying host behavior, create a baseline manifest containing:
+$$
+block(l).
+$$
 
-```text
-host repository URL
-host commit SHA
-TGCA repository commit SHA and diff status
-environment name and package lock
-Python/PyTorch/CUDA/cuDNN/GPU versions
-dataset roots and file-list hashes
-pretrained-weight URL and SHA256
-training/evaluation commands
-seed
-expected and reproduced metrics
-```
+然后重新计算：
 
-Environment policy after adding KYAM:
+$$
+S_{c,j}^{feat}.
+$$
 
-- `tgca-repro`: MCTformer+/current TGCA code;
-- `kyam-repro`: pinned KYAM reproduction;
-- `diclip-repro`: only if DiCLIP is locally reproduced;
-- `more-repro` and `cti-repro`: optional and remain independent.
+这样可以回答：
 
-Do not force hosts into one environment before each official baseline is reproduced. The existing README environment section will need a separate update before KYAM execution.
+> class-specific semantic leakage 是从哪一阶段开始写入 patch stream 的？
 
-Baseline acceptance targets:
+如果例如：
 
-- MCTformer+: within `±0.3` raw CAM mIoU of the pinned official protocol;
-- KYAM: within `±0.5` pseudo-mask/raw-attention mIoU of the pinned official protocol, unless an upstream issue documents a wider reproducibility range.
+$$
+block\ A_{p2c}^{9:12}
+$$
 
-If the target is missed, diagnose the baseline; do not compensate by tuning TGCA.
+就能明显降低 background similarity，那么说明 leakage 主要来自 late semantic blocks。
 
-### Stage B — Mechanism-only evaluation on a vanilla checkpoint
+如果：
 
-Use a reproduced vanilla MCTformer+ checkpoint. Evaluate the same images without retraining at:
+$$
+block\ A_{p2c}^{1:4}
+$$
 
-```text
-224, 320, 448, 512
-```
+影响最大，则说明很早就发生了 token-role contamination。
 
-Collect all attention diagnostics, classification metrics, raw CAM metrics, and cross-scale consistency. This stage determines whether the proposed failure mode is present in trained attention.
+---
 
-Separate two experiments:
+# 24. 第四个实验：Global Patch-to-Patch Dependency
 
-1. **Resolution stress:** normal image resizing and positional interpolation; realistic but confounded.
-2. **Exact token replication:** fixed synthetic logits/keys/values; isolates the mathematical property.
+LaST 的理论里另一半是：
 
-Do not describe the realistic resolution test as a pure cardinality intervention.
+$$
+\text{global attention}.
+$$
 
-### Stage C — One-seed normalization pilot
+即使不经过 class token：
 
-On VOC, train or fine-tune one seed for:
+$$
+p_i
+\rightarrow p_j
+$$
 
-```text
-vanilla
-split_11
-split_05
-tgca
-tgca_bias
-```
+也能把 foreground semantics 扩散到 distant background。
 
-Use one shared configuration template with only the normalization fields changed. The pilot answers:
+因此我们还可以单独处理：
 
-- does count-only TGCA train stably?
-- does it change classification quality materially?
-- does it improve raw CAM or scale stability?
-- does relation bias add value beyond count correction?
+$$
+A_{p2p}.
+$$
 
-Do not proceed to three seeds if count-only TGCA fails unit tests, materially degrades classification, or shows no mechanism effect.
+不是立即训练 window Transformer。
 
-### Stage D — VOC core experiment
+先在 inference 时设置 locality mask：
 
-Canonical seeds:
+$$
+A_{p2p}(i,j)=0
+$$
 
-```text
-0, 1, 2
-```
+如果：
 
-If an official host requires a specific historical seed, reproduce it separately as `official_seed`; do not substitute it for the three canonical seeds.
+$$
+d(i,j)>r.
+$$
 
-Run the five required modes with identical:
+再重新归一化。
 
-- initialization and pretrained checkpoint;
-- image lists and augmentation;
-- optimizer and schedule;
-- number of updates and gradient accumulation;
-- checkpoint selection rule;
-- multi-scale CAM generation;
-- thresholds and post-processing.
+分别测试：
 
-Report mean, standard deviation, and per-seed values.
+$$
+r=1,2,4,\infty.
+$$
 
-### Stage E — Resolution and patch-count stress
+同时 class-to-patch：
 
-Evaluate the selected checkpoint from every core mode at all four resolutions. The checkpoint-selection rule must be fixed before scale evaluation.
+$$
+A_{c2p}
+$$
 
-Also run, if compute permits:
+保持 global。
 
-- patch-size change with fixed image content;
-- controlled patch subsampling;
-- exact patch-key/value replication at an isolated attention layer.
+这能区分：
 
-Patch subsampling and patch-size changes are secondary because they modify information content or positional structure.
+$$
+\boxed{
+\text{class-token semantic writing}
+}
+$$
 
-### Stage F — KYAM generality
+与：
 
-1. Pin and reproduce official KYAM.
-2. Run `KYAM-core` with `prune=False` for vanilla and count-only TGCA.
-3. If positive, add `tgca_bias` and the normalized split baseline.
-4. Run the register-policy sensitivity comparison.
-5. Run the four-resolution stress test.
-6. If the official best setting uses pruning, optionally repeat vanilla and best TGCA in `KYAM-full` with identical gating.
-7. Expand to three seeds if the one-seed mechanism and CAM results are positive.
+$$
+\boxed{
+\text{patch-to-patch global diffusion}
+}
+$$
 
-KYAM counts as a positive independent host only if the improvement is observed without changing its loss, token masking, CAM construction, backbone, or evaluation pipeline.
+谁是主要来源。
 
-### Stage G — COCO and downstream segmentation
+---
 
-Proceed only after the VOC mechanism and KYAM gates pass.
+# 25. 于是可以得到一个非常干净的 2×2 diagnosis
 
-Use one fixed downstream pipeline:
+|                   | Global \(P\rightarrow P\) |      Local \(P\rightarrow P\) |
+| ----------------- | ------------------------: | ----------------------------: |
+| Patches 可读 class  |                  baseline |         isolate P2P diffusion |
+| Patches 不可读 class | isolate P2C contamination | strongest locality protection |
 
-1. train the image-level classifier;
-2. generate CAMs using identical scales;
-3. apply one fixed refinement/pseudo-label process;
-4. train one fixed segmentation network;
-5. evaluate with the same code and checkpoint rule.
+不需要先提出新方法。
 
-Raw CAM evidence remains primary. Downstream segmentation is validation, not a substitute for mechanism evidence.
+这只是 mechanism intervention。
 
-### Stage H — Recent external comparison
+如果：
 
-Include DiCLIP and verified 2025–2026 methods in a setting-aware table. Required columns:
+$$
+\text{Block P2C}
+$$
 
-```text
-method, venue/year, backbone, pretraining, language supervision,
-foundation/diffusion prior, image-level labels, post-processing,
-VOC val/test, COCO val, author-reported/reproduced
-```
+已经解决大部分 leakage，那么问题主要来自：
 
-Do not rank incomparable rows as one undifferentiated leaderboard.
+$$
+class\rightarrow patch
+$$
 
-## 12. Metrics and evaluation definitions
+semantic contamination。
 
-### 12.1 Raw CAM and pseudo-mask metrics
+如果 local P2P 影响更大，则更接近 LaST：
 
-Report:
+$$
+global dependency
+\rightarrow
+lazy aggregation.
+$$
 
-- raw CAM/seed mIoU;
-- foreground pixel precision and recall;
-- false-positive rate or a precisely defined confusion ratio;
-- pseudo-mask mIoU after one fixed refinement pipeline;
-- downstream segmentation mIoU.
+---
 
-If using MoRe's “confusion ratio,” reproduce its exact published definition and cite it. Otherwise use an explicitly defined false-positive diagnostic rather than reusing the name.
+# 26. 第五个实验：Registers 能不能解决 MCTformer 的问题？
 
-### 12.2 Threshold policy
+这一步也值得做，但应该在确认 baseline 现象之后。
 
-Threshold selection can invalidate the comparison. Use this policy:
+Registers 的作用主要是：
 
-1. choose the background/CAM threshold on a fixed development split using vanilla only;
-2. freeze it for every normalization mode, seed, and resolution;
-3. report a threshold sweep as a diagnostic, not as the headline result;
-4. add a threshold-free consistency metric so robustness is not determined by one binarization point;
-5. never select thresholds on the test set.
+$$
+\boxed{
+\text{提供 explicit scratch space。}
+}
+$$
 
-### 12.3 Classification metrics
+因此在 MCTformer+ 中加：
 
-Use the host's standard multi-label classification metric and add mAP where feasible. Report any change in class-token classification independently of CAM changes.
+$$
+K=4
+$$
 
-### 12.4 Group-mass stability
+generic registers。
 
-For each image, layer, and head, compute variance over scales:
+然后比较：
 
-\[
-V_{i,l,h,g}=\operatorname{Var}_{s\in\{224,320,448,512\}}m_{i,l,h,g}^{(s)}.
-\]
+### High-norm artifact
 
-Report:
+$$
+\|p_j\|_2.
+$$
 
-- mean and median variance;
-- interquartile range;
-- last-layer and all-layer summaries;
-- per-head heatmaps;
-- slope of group mass versus `log(patch_count)`.
+### Class-specific semantic leakage
 
-### 12.5 Cross-scale CAM consistency
+$$
+S_{c,j}.
+$$
 
-Resize all CAMs to the original image coordinates. For scale `s` and reference scale `448`:
+如果出现：
 
-\[
-C_{\mathrm{soft}}(s)=
-\frac{\langle \widehat M_s,\widehat M_{448}\rangle}
-{\|\widehat M_s\|_2\|\widehat M_{448}\|_2+\epsilon}.
-\]
+$$
+\text{high-norm outlier}\downarrow,
+$$
 
-Also report binarized IoU at the frozen threshold. Normalize CAMs using one common rule before comparison and do not normalize differently by method.
+但：
 
-### 12.6 Efficiency
+$$
+BG\text{-}Tail
+\approx
+\text{unchanged},
+$$
 
-Measure at the native host resolution and batch size 1 plus one representative training batch:
+$$
+C\text{-}PiM
+\approx
+\text{unchanged},
+$$
 
-- parameters;
-- MACs/FLOPs;
-- images per second;
-- inference latency after warm-up;
-- peak GPU memory;
-- training iteration time.
+那我们就几乎在 MCTformer+ 上复现了 LaST 的核心观点：
 
-Count correction should add no parameters, but its runtime overhead must be measured rather than asserted.
+$$
+\boxed{
+\text{Register solves storage artifact, not semantic shortcut.}
+}
+$$
 
-## 13. Statistical analysis
+这对后面的研究定位非常重要。
 
-- Core VOC ablations use three seeds.
-- Report mean ± standard deviation and every individual seed.
-- Use paired image-level bootstrap confidence intervals for CAM and consistency differences, with 10,000 resamples and a fixed bootstrap seed.
-- Treat images, not pixels, as bootstrap units.
-- Do not claim significance from head-level samples because heads within one model are not independent experimental replicates.
-- Report effect sizes even when confidence intervals overlap.
-- Do not discard failed seeds unless a host-independent infrastructure failure is documented before metrics are inspected.
+---
 
-## 14. Result and provenance layout
+# 27. 还可以联合 Patch Norm 与 Class Semantic Score
 
-Each run writes:
+这是判断：
 
-```text
-results/<host>/<dataset>/<run_id>/
-├── config.yaml
-├── command.txt
-├── git_state.json
-├── environment.txt
-├── dataset_manifest.json
-├── train.log
-├── metrics.json
-├── metrics_by_class.csv
-├── attention_group_mass.csv
-├── scale_consistency.csv
-├── efficiency.json
-└── checkpoint_manifest.json
-```
+$$
+\text{Registers 问题}
+$$
 
-Large checkpoints and datasets must not be committed. `checkpoint_manifest.json` stores the path/URL, SHA256, selection metric, epoch/step, and producing run ID.
+和：
 
-Suggested run ID:
+$$
+\text{LaST 问题}
+$$
 
-```text
-<date>-<host>-<dataset>-<mode>-s<seed>-<short_commit>
-```
+是否为同一批 patches 的最好方式。
 
-Every paper table must be generated from these files by script. Do not manually transcribe terminal numbers.
+对每一个 background patch 计算：
 
-## 15. Go/no-go gates
+$$
+N_j=\|p_j\|_2,
+$$
 
-### Gate 0 — Baseline integrity
+和：
 
-Pass only when the host baseline is within the predeclared tolerance and all provenance fields are recorded.
+$$
+G_j
+=
+\max_{c\in Y^+}
+S_{c,j}.
+$$
 
-### Gate 1 — Operator correctness
+然后把 patches 分成四类：
 
-Pass only when all unit tests, replication invariance, mask tests, and gradient tests succeed. Row normalization is non-negotiable for vanilla, normalized split, and TGCA variants.
+| Norm | Class similarity | Interpretation                |
+| ---- | ---------------- | ----------------------------- |
+| 高    | 高                | scratchpad + semantic leakage |
+| 高    | 低                | computational artifact        |
+| 低    | 高                | **pure semantic shortcut**    |
+| 低    | 低                | normal background             |
 
-### Gate 2 — Phenomenon exists in trained attention
+我觉得特别值得看：
 
-Pass when:
+$$
+\boxed{
+\text{Low-norm / High-class-similarity background patches}
+}
+$$
 
-- the paired bootstrap interval for the vanilla group-mass slope across patch counts excludes zero in the CAM-relevant layers or heads; and
-- group-mass changes co-occur with a measurable CAM or cross-scale consistency change.
+有多少。
 
-Synthetic vanilla drift alone is insufficient to pass this gate.
+如果大量存在，那么：
 
-### Gate 3 — TGCA is more than rescaling
+> Register 从理论上就不可能完全解决 MCTformer background semantics。
 
-Pass when count-only TGCA improves raw CAM quality or scale consistency relative to both vanilla and normalized split, while:
+---
 
-- retaining unit row sums;
-- avoiding material classification degradation;
-- using the same thresholds and CAM pipeline;
-- showing lower group-mass slope or variance.
+# 28. MCTformer 的一个特别关键指标：P2C mass
 
-The practical target remains roughly `+0.8 to +1.0` raw CAM mIoU on MCTformer+, but a smaller gain is acceptable when the invariance and scale-stability evidence is unusually strong.
+因为我们已经可以拿到 attention matrix，所以每层可以统计：
 
-### Gate 4 — Independent host
+$$
+m_{p\rightarrow c}^{(l)}
+=
+\frac1N
+\sum_i
+\sum_{c}
+A_{p2c}^{(l)}(i,c).
+$$
 
-Pass only when KYAM shows a positive effect under the clean `KYAM-core` comparison. MoRe, CTI, or MCTTA cannot replace this required result without revising the approved research plan.
+然后和：
 
-### Gate 5 — COCO authorization
+$$
+BG\text{-}Tail^{(l)}
+$$
 
-Start expensive COCO training only after Gates 0–4 pass, overhead is negligible, and no unresolved threshold or checkpoint confound remains.
+做相关性：
 
-### Stop or reframe
+$$
+\rho
+\left(
+m_{p\rightarrow c}^{(l)},
+BG\text{-}Tail^{(l)}
+\right).
+$$
 
-Stop the TGCA paper framing if:
+如果随着 layer：
 
-- trained attention shows no meaningful cardinality association;
-- TGCA helps only because another baseline has non-unit output scale;
-- benefits disappear under a fixed threshold;
-- relation bias, rather than count correction, accounts for all gains;
-- results occur only in MCTTA;
-- KYAM results depend on an arbitrary register grouping;
-- classification degrades enough to explain the CAM tradeoff;
-- different post-processing is required per method.
+$$
+m_{p\rightarrow c}\uparrow
+$$
 
-## 16. Risks and confounds
+同时：
 
-### 16.1 Scientific risks
+$$
+BG\text{-}Tail\uparrow,
+$$
 
-1. **Exchangeable-logit assumption may be irrelevant.** Trained logits can learn offsets that compensate for group size.
-2. **More tokens may represent more evidence.** Correcting cardinality can over-compensate when additional distinct patches genuinely improve coverage.
-3. **Effective sample size differs from token count.** Nearby patches are correlated; `N_g` may not equal the number of independent evidence units.
-4. **Log-mean-exp is not invariant to new distinct samples.** TGCA guarantees exact-duplication invariance, not invariance to every resolution change.
-5. **Residual networks can absorb normalization changes.** Later layers may learn around either vanilla or TGCA, hiding the intended mechanism.
-6. **Benefits may come from regularization.** Any CAM gain must be tied to group-mass behavior rather than merely a changed optimization landscape.
+然后 P2C blocking 又能让 BG-Tail 降低，那么我们就从：
 
-### 16.2 Resolution confounds
+$$
+\text{correlation}
+$$
 
-Changing input size also changes:
+走到了：
 
-- positional-embedding interpolation;
-- apparent object scale;
-- boundary sampling;
-- patch receptive fields;
-- augmentation statistics;
-- memory pressure and possibly batch size.
+$$
+\text{intervention}.
+$$
 
-Therefore, resolution stress is realistic evidence but not a pure causal intervention. Exact replication is the pure operator test.
+这就非常有说服力。
 
-### 16.3 Host confounds
+---
 
-- KYAM includes a register token with ambiguous semantic grouping.
-- KYAM's optional post-softmax head gate can break unit row sums.
-- KYAM's code release lacks a declared license and complete environment specification.
-- MCTTA contains several duplicated attention implementations and known token-order inconsistencies.
-- Existing MoRe/CTI environments differ substantially and must not be used to “fix” a failed primary baseline.
+# 29. 还有一个我认为很强的 class-specific context experiment
 
-### 16.4 Measurement confounds
+以 VOC 为例。
 
-- Per-method CAM normalization or thresholds can create artificial gains.
-- Averaging heads/layers too early can hide opposite effects.
-- Saving attention after dropout or gating can misstate the normalized distribution.
-- Full attention logging can cause OOM and alter batch size or throughput.
-- Choosing only visually favorable scales, heads, or images creates selection bias.
+对于：
 
-### 16.5 Relation-bias risks
+$$
+boat,
+train,
+cow,
+aeroplane
+$$
 
-- relation bias may learn back a cardinality prior;
-- bias parameters are identifiable only up to a row-wise additive constant;
-- bias can dominate count correction with little parameter cost;
-- a positive result only with bias weakens the claim that cardinality correction is sufficient.
+这些典型 context-biased classes。
 
-Always report count-only TGCA as the primary mechanistic variant.
+分别统计：
 
-## 17. Implementation sequence
+$$
+S_{\mathrm{boat},j},
+\quad j\in water,
+$$
 
-### Phase 1 — Infrastructure
+$$
+S_{\mathrm{train},j},
+\quad j\in railway/background,
+$$
 
-- [ ] Create `models/tgca.py` with pure function and module wrapper.
-- [ ] Add all deterministic unit tests.
-- [ ] Add synthetic replication and plotting tools.
-- [ ] Add result manifests and config validation.
-- [ ] Confirm no source file outside `TGCA/` is modified.
+$$
+S_{\mathrm{cow},j},
+\quad j\in grass,
+$$
 
-### Phase 2 — MCTformer+ baseline and instrumentation
+等等。
 
-- [ ] Pin official repository/checkpoint references.
-- [ ] Reproduce vanilla VOC result.
-- [ ] Add normalization module in default-vanilla mode.
-- [ ] Prove pre/post integration vanilla parity.
-- [ ] Add online group-mass diagnostics.
-- [ ] Run four-resolution phenomenon test.
+VOC 没有 stuff label，不能直接知道 water/grass，但可以用：
 
-### Phase 3 — MCTformer+ ablation
+* GT object mask 的 complement；
+* 再按图像类别分组。
 
-- [ ] Run one-seed five-mode pilot.
-- [ ] Evaluate all metrics with frozen threshold policy.
-- [ ] Make Gate 3 decision.
-- [ ] Run three seeds for passing variants.
-- [ ] Measure efficiency.
+例如：
 
-### Phase 4 — KYAM generality
+$$
+\text{boat-present images}
+$$
 
-- [ ] Resolve license/redistribution approach.
-- [ ] Pin official code and construct `kyam-repro` environment.
-- [ ] Reproduce vanilla baseline.
-- [ ] Inject hook-compatible normalizer overlay.
-- [ ] Validate primary register grouping.
-- [ ] Run one-seed vanilla/TGCA pilot and scale test.
-- [ ] Run register-policy sensitivity.
-- [ ] Expand positive result to required ablations/seeds.
+中所有非-boat patch。
 
-### Phase 5 — COCO and recent comparison
+比较：
 
-- [ ] Approve COCO only after all gates pass.
-- [ ] Run the selected primary variants under one fixed pipeline.
-- [ ] Verify DiCLIP publication metadata and comparison settings.
-- [ ] Separate author-reported and reproduced external results.
-- [ ] Generate setting-aware paper tables from raw files.
+$$
+\text{boat absent images}
+$$
 
-## 18. Definition of done
+中的 background。
 
-The TGCA experimental package is complete only when:
+如果 boat-present 图的 background 明显更像：
 
-- [ ] vanilla baseline reproduction is documented for both required hosts;
-- [ ] all normalization modes share one Q/K/V and value path;
-- [ ] row-sum, mask, dtype, gradient, and replication tests pass;
-- [ ] trained vanilla cardinality sensitivity is measured;
-- [ ] count-only TGCA reduces the intended sensitivity;
-- [ ] old split `(1,1)` and normalized split `(0.5,0.5)` are fairly isolated;
-- [ ] core VOC results include three seeds;
-- [ ] KYAM provides a positive independent-host result;
-- [ ] register-token handling is reported and does not determine the conclusion;
-- [ ] raw CAM, precision, recall, false-positive, classification, and consistency metrics are saved;
-- [ ] downstream segmentation uses one fixed pipeline;
-- [ ] parameters, FLOPs, latency, memory, and throughput are measured;
-- [ ] DiCLIP appears only as a transparent external comparison;
-- [ ] every result has a config, command, seed, checkpoint hash, environment, and commit;
-- [ ] every paper number and plot is generated from machine-readable results;
-- [ ] limitations and negative results are retained rather than hidden.
+$$
+c_{\mathrm{boat}},
+$$
 
-## 19. Immediate next action after approval
+这就是 class-specific context imprinting。
 
-Implement only the pure `models/tgca.py` operator and its deterministic tests. Do not modify MCTformer+, download KYAM, or begin training until the operator tests and the group-layout decisions in this document are approved.
+COCO 更适合，因为类别共现更复杂。
+
+---
+
+# 30. Context-only / Object-only 可以作为更强的因果验证
+
+这不是 LaST repo 当前直接提供的，但和其理论非常一致。
+
+利用 VOC val GT：
+
+### Object-only
+
+保留 class \(c\) 对象：
+
+$$
+x_{\mathrm{obj}}.
+$$
+
+### Context-only
+
+移除 class \(c\) 对象：
+
+$$
+x_{\mathrm{ctx}}.
+$$
+
+然后分别观察：
+
+$$
+z_c,
+$$
+
+以及：
+
+$$
+S_{c,j}^{bg}.
+$$
+
+最值得看的不是只有 classification score。
+
+而是：
+
+> 移除 foreground object 后，background patch 是否仍然保持对 class token 的高 similarity？
+
+如果：
+
+$$
+S_{c,bg}(x_{\mathrm{ctx}})
+$$
+
+仍然非常高，那么 background semantics 更可能是：
+
+$$
+\boxed{\text{context-based class representation}}
+$$
+
+而不只是 foreground semantic diffusion。
+
+如果移除对象后迅速消失，则说明它更可能是：
+
+$$
+\boxed{\text{foreground semantics 经 global attention 扩散进 background。}}
+$$
+
+这两个机制也是不一样的。
+
+---
+
+# 31. 所以“Lazy Semantic Assignment”最好先不要定义成一个单一 score
+
+我目前不建议马上人为构造：
+
+$$
+LSA=\alpha A+\beta B+\gamma C.
+$$
+
+先保留几个物理意义清楚的原始指标：
+
+| Metric               | 问题                                      |
+| -------------------- | --------------------------------------- |
+| C-PiM ↑              | class token 最相关 patch 是否属于正确类别？         |
+| Other-FG Hit ↓       | 是否混淆其他前景类别？                             |
+| BG Hit ↓             | 最相关 patch 是否落在背景？                       |
+| BG-Tail@10 ↓         | 高 class-semantic patches 中有多少背景？        |
+| FG–BG Margin ↑       | target patches 与背景的 semantic separation |
+| \(m_{p2c}\)          | patches 读取多少 class semantics？           |
+| Patch Norm           | 是否出现 scratchpad artifact？               |
+| Masked Logit Drop    | high-score patch 是否有因果作用？               |
+| Context-only Score ↓ | 是否依赖 context shortcut？                  |
+
+等看到结果后，再决定是否需要一个统一的 Lazy Semantic Assignment Index。
+
+---
+
+# 32. 第一阶段我会怎么排列实验优先级
+
+先只做**不改训练方法**的验证，我建议顺序就是下面这一组：
+
+1. **MCTformer 与 MCTformer+ layer-wise Class-Patch Score**
+
+   $$
+   S_{c,j}^{(l)}
+   =
+   \cos(c_c^{(l)},p_j^{(l)}).
+   $$
+
+   输出 target / other-FG / BG 三分布，以及 C-PiM、BG-Hit、BG-Tail。
+
+2. **Feature score vs Attention score vs CAM**
+
+   同时对比：
+
+   $$
+   \cos(c_c,p_j),
+   \quad
+   A_{c2p},
+   \quad
+   CAM_c.
+   $$
+
+3. **Patch Norm × Class Similarity**
+
+   区分：
+
+   $$
+   \text{register-style artifact}
+   $$
+
+   和：
+
+   $$
+   \text{semantic shortcut}.
+   $$
+
+4. **Class-specific causal masking**
+
+   分别删除：
+
+   $$
+   TopBG,\ RandomBG,\ TopFG,\ RandomFG.
+   $$
+
+5. **P2C blocking**
+
+   只禁止：
+
+   $$
+   patch\rightarrow class
+   $$
+
+   读取，观察 patch semantic leakage 是否下降。
+
+6. **Global P2P locality intervention**
+
+   判断：
+
+   $$
+   class\rightarrow patch
+   $$
+
+   与：
+
+   $$
+   patch\rightarrow patch
+   $$
+
+   哪条 global pathway 是主要污染源。
+
+这六组实验已经足够判断：
+
+$$
+\boxed{
+\text{MCTformer(+)
+是否真的比普通 ViT 更容易形成 lazy semantic assignment}
+}
+$$
+
+而且几乎全都是 **evaluation/inference-time analysis**，前四项不需要重新训练模型。
+
+---
+
+# 33. 什么结果才能支持你的核心假设？
+
+我会认为下面这样的证据链最强：
+
+$$
+\boxed{
+\textbf{Observation 1}
+}
+$$
+
+MCTformer+ 中：
+
+$$
+S_{c,bg}
+$$
+
+在深层逐渐升高，并且：
+
+$$
+BG\text{-}Tail
+$$
+
+高于普通 ViT 或 MCTformer。
+
+然后：
+
+$$
+\boxed{
+\textbf{Observation 2}
+}
+$$
+
+这些 background patches 与**当前存在的 class token**高度相关，而不是 generic CLS/global representation。
+
+然后：
+
+$$
+\boxed{
+\textbf{Observation 3}
+}
+$$
+
+它们并不只是 high-norm artifacts：
+
+$$
+\text{大量 Low-Norm / High-Class-Sim BG patches 存在}.
+$$
+
+然后：
+
+$$
+\boxed{
+\textbf{Observation 4}
+}
+$$
+
+禁止：
+
+$$
+A_{p2c}
+$$
+
+或限制：
+
+$$
+A_{p2p}
+$$
+
+global propagation 后：
+
+$$
+S_{c,bg}\downarrow,
+$$
+
+$$
+C\text{-}PiM\uparrow,
+$$
+
+而 classification 基本保持。
+
+最后：
+
+$$
+\boxed{
+\textbf{Observation 5}
+}
+$$
+
+generic registers 可以消除 high-norm artifacts，却不能显著改善：
+
+$$
+BG\text{-}Tail
+$$
+
+或：
+
+$$
+C\text{-}PiM.
+$$
+
+如果真的出现这五项，我觉得就可以比较有把握地说：
+
+> **MCTformer 的 coarse image-level supervision 与 multi-class global interaction 导致了一种比普通 ViT 更细粒度的 lazy semantic assignment：class-specific semantics 被写入与目标类别无关的 patches，尤其是背景 patches。**
+
+这会比单纯说：
+
+> WSSS 有 background noise
+
+强很多。
+
+---
+
+# 34. 最关键的研究概念我会暂时这样定义
+
+LaST 的：
+
+$$
+\boxed{
+\text{Lazy Aggregation}
+}
+$$
+
+重点是：
+
+> global representation 懒惰地从 semantic shortcut patches 聚合信息。
+
+而我们真正要验证的可能是：
+
+$$
+\boxed{
+\text{Lazy Semantic Assignment}
+}
+$$
+
+即：
+
+> Under coarse image-level supervision, multi-class global interaction allows class-specific semantics to be assigned to spatial patches without respecting their true semantic ownership.
+
+这里的“assigned”不一定意味着模型最终 classification 依赖这些 patches。
+
+它首先意味着：
+
+$$
+\boxed{
+p_j^{bg}
+\approx
+c_c
+}
+$$
+
+即 patch representation 本身获得了不属于它的 class semantics。
+
+如果进一步：
+
+$$
+z_c
+$$
+
+也依赖它，那就是更强的：
+
+$$
+\boxed{
+\text{Class-specific Background Shortcut}.
+}
+$$
+
+我觉得这两个层级最好从一开始就区分开。
+
+---
+
+另外还有一个很重要的源码细节：LaST 当前发布的 `visualize_patch_score_distribution.py` 其实同时保留了 `"repo"` 和 `"paper"` 两种 stability-score formula，实际训练代码 `conf.py` 使用的是 `patch / |lowpass-patch|`，并且按 **embedding channel** 在 patch 维度做 `topk`，再把选中的 patch values 汇聚为 global token。  这意味着后面如果真要把 LaST 的 **solution** 搬到 MCTformer+，必须先解决“一个 CLS 的 channel-wise selection 如何变成 C 个 class-specific tokens 的 selection”这个问题；但目前验证 lazy semantic assignment 完全不需要碰这一部分。
+
+如果按实验优先级，我建议下一步先只实现 **1–3：class-specific patch score、三区域 distribution、layer-wise C-PiM/BG-Tail，以及 feature score vs \(A_{c2p}\) vs CAM**。这些结果出来以后，再决定是否值得做 P2C causal blocking。这样最省训练时间，也最先回答我们的核心假设。
