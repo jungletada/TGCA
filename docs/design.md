@@ -1,7 +1,7 @@
 可以。我这次按你的要求，**不先设计新方法**，而是先把 LaST-ViT 的源码里“怎么验证 lazy aggregation”拆清楚，再严格映射到 **MCTformer / MCTformer+**，目标只有一个：
 
 $$
-\boxed{\text{先验证 MCTformer 系列到底有没有更严重的 lazy semantic assignment}}
+\text{先验证 MCTformer 系列到底有没有更严重的 lazy semantic assignment}
 $$
 
 我读完 `ChengShiest/LAST-ViT` 当前公开源码后，觉得这个验证非常值得做，而且 MCTformer 比普通单 `[CLS]` ViT 其实能做出**更强的 class-specific 版本验证**。
@@ -33,6 +33,8 @@ LAST-ViT/
 
 ---
 
+
+
 # 2. LaST 的第一个关键量不是 attention，而是 Patch Score
 
 这是最容易误解的地方。
@@ -56,14 +58,7 @@ p_j
 $$
 
 之间的 cosine similarity：
-
-$$
-\boxed{
-S_j
-=
-\cos(p_j,q_{\mathrm{CLS}})
-}
-$$
+$$ S_j=\cos(p_j,q_{\mathrm{CLS}})  $$
 
 代码就是：
 
@@ -87,6 +82,8 @@ similarity = torch.cosine_similarity(
 
 ---
 
+
+
 # 3. 这一点搬到 MCTformer 后会非常有意思
 
 普通 ViT 只有：
@@ -105,7 +102,6 @@ $$
 因此 LaST 的 Patch Score 可以自然升级成：
 
 $$
-\boxed{
 S_{c,j}^{(l)}
 =
 \cos
@@ -113,14 +109,13 @@ S_{c,j}^{(l)}
 c_c^{(l)},
 p_j^{(l)}
 \right)
-}
 $$
 
 其中：
 
-* \(c\)：类别；
-* \(j\)：patch；
-* \(l\)：Transformer layer。
+- c：类别；
+- j：patch；
+- l：Transformer layer。
 
 这其实比 LaST 原来的定义更有信息。
 
@@ -145,16 +140,16 @@ $$
 到了 MCTformer，就可以变成：
 
 $$
-\boxed{
 \text{background}
 \rightarrow
 \text{class-specific global semantics}
-}
 $$
 
 这正是你说的核心问题。
 
 ---
+
+
 
 # 4. LaST 的第二个验证：最高 Patch Score 是否真的落在物体上
 
@@ -203,6 +198,8 @@ Top-1 Patch in BBox
 
 ---
 
+
+
 # 5. 在 MCTformer 上，我们可以定义更强的 Class-specific Point-in-Mask
 
 我们没必要用 bbox。
@@ -233,7 +230,6 @@ $$
 定义：
 
 $$
-\boxed{
 \mathrm{C\text{-}PiM}
 =
 \frac{
@@ -243,7 +239,6 @@ GT_i(j_c^*)=c
 ]
 }{
 \sum_i|Y_i^+|
-}
 }
 $$
 
@@ -258,6 +253,8 @@ $$
 > `dog` class token 最像的 patch，到底是不是 dog？
 
 ---
+
+
 
 # 6. 但只做二分类 FG/BG 还不够
 
@@ -274,19 +271,19 @@ $$
 $$
 \Omega_c
 =
-\{\text{target-class patches}\},
+\text{target-class patches},
 $$
 
 $$
 \Omega_{\mathrm{other}}
 =
-\{\text{other foreground-class patches}\},
+\text{other foreground-class patches},
 $$
 
 $$
 \Omega_{\mathrm{bg}}
 =
-\{\text{background patches}\}.
+\text{background patches}.
 $$
 
 例如一张：
@@ -314,22 +311,20 @@ road/background patches
 这样我们可以区分两种完全不同的问题：
 
 $$
-\boxed{
 \text{Foreground class confusion}
-}
 $$
 
 和：
 
 $$
-\boxed{
 \text{Background semantic leakage}
-}
 $$
 
 这比 LaST 原来的 foreground/background 二分更加适合 WSSS。
 
 ---
+
+
 
 # 7. LaST 源码已经有 FG/BG distribution 的完整实现
 
@@ -337,10 +332,10 @@ $$
 
 它使用：
 
-* ImageNet bbox；
-* SAM2 从 bbox refinement 出前景 mask；
-* patch majority overlap > 0.5 判定前景；
-* 剩下全部 patch 作为 background。
+- ImageNet bbox；
+- SAM2 从 bbox refinement 出前景 mask；
+- patch majority overlap > 0.5 判定前景；
+- 剩下全部 patch 作为 background。
 
 源码随后把：
 
@@ -351,10 +346,10 @@ background_scores
 
 分别收集起来，再统计：
 
-* mean；
-* median；
-* q90；
-* density histogram。
+- mean；
+- median；
+- q90；
+- density histogram。
 
 我们在 VOC 上完全不需要 SAM2。
 
@@ -388,6 +383,8 @@ $$
 
 ---
 
+
+
 # 8. 第一组我认为最重要的实验
 
 针对 **MCTformer 与 MCTformer+ 都做**：
@@ -401,11 +398,13 @@ $$
 
 报告三个 distribution：
 
-| Region            | Score                                   |
-| ----------------- | --------------------------------------- |
-| Target foreground | \(S_{c,j},j\in\Omega_c\)                |
-| Other foreground  | \(S_{c,j},j\in\Omega_{\mathrm{other}}\) |
-| Background        | \(S_{c,j},j\in\Omega_{\mathrm{bg}}\)    |
+
+| Region            | Score                               |
+| ----------------- | ----------------------------------- |
+| Target foreground | S_{c,j},j\in\Omega_c                |
+| Other foreground  | S_{c,j},j\in\Omega_{\mathrm{other}} |
+| Background        | S_{c,j},j\in\Omega_{\mathrm{bg}}    |
+
 
 除了 mean，至少看：
 
@@ -422,7 +421,6 @@ $$
 尤其可以定义：
 
 $$
-\boxed{
 \mathrm{BG\text{-}Tail@q}
 =
 \frac{
@@ -430,24 +428,25 @@ $$
 }{
 |\operatorname{Top}_q(S_c)|
 }
-}
 $$
 
 例如：
 
 $$
-q=5\%,10\%.
+q=5,10.
 $$
 
 如果：
 
 $$
-\mathrm{BG\text{-}Tail@10\%}
+\mathrm{BG\text{-}Tail@10}
 $$
 
 非常大，那就是很强的证据。
 
 ---
+
+
 
 # 9. Point-in-Mask 应该进一步拆成三种 outcome
 
@@ -479,31 +478,31 @@ $$
 
 也就是：
 
+
 | Outcome           | Meaning                        |
 | ----------------- | ------------------------------ |
 | Target hit ↑      | 正常 class semantic localization |
 | Other-class hit ↓ | class confusion                |
 | Background hit ↓  | lazy background assignment     |
 
+
 这样我们第一次就可以把：
 
 $$
-\boxed{
 \text{class confusion}
-}
 $$
 
 和：
 
 $$
-\boxed{
 \text{background leakage}
-}
 $$
 
 真正分离开。
 
 ---
+
+
 
 # 10. 我尤其建议不要只分析最后一层
 
@@ -572,14 +571,14 @@ $$
 那就是非常漂亮的 evidence：
 
 $$
-\boxed{
 \text{background semantics 是在 global Transformer interaction 中逐层形成的，}
-}
 $$
 
 而不是 patch embedding 一开始就有。
 
 ---
+
+
 
 # 11. 而且 MCTformer 有一个 LaST 没有的优势：Attention Matrix
 
@@ -599,26 +598,22 @@ $$
 A_{c2p}(c,j).
 $$
 
-而 MCTformer+ 的 CAM 本来就是用 class-to-patch attention 和 patch-to-patch attention refine；你现有稿件也明确写出了 \(A_{c2p}\) 和 \(A_{p2p}\) 的使用方式。
+而 MCTformer+ 的 CAM 本来就是用 class-to-patch attention 和 patch-to-patch attention refine；你现有稿件也明确写出了 A_{c2p} 和 A_{p2p} 的使用方式。
 
 因此我们应该**同时测三个东西**：
 
 $$
-\boxed{
 S_{c,j}^{feat}
 =
 \cos(c_c,p_j)
-}
 $$
 
 representation semantic alignment；
 
 $$
-\boxed{
 S_{c,j}^{attn}
 =
 A_{c2p}(c,j)
-}
 $$
 
 attention routing；
@@ -626,11 +621,9 @@ attention routing；
 以及：
 
 $$
-\boxed{
 S_{c,j}^{cam}
 =
 CAM_c(j)
-}
 $$
 
 最终 localization。
@@ -638,6 +631,8 @@ $$
 这三个不要混在一起。
 
 ---
+
+
 
 # 12. 这会产生非常有价值的四种结果
 
@@ -659,6 +654,8 @@ $$
 
 ---
 
+
+
 ### 情况 B
 
 $$
@@ -675,6 +672,8 @@ $$
 
 ---
 
+
+
 ### 情况 C
 
 $$
@@ -690,6 +689,8 @@ $$
 这更接近 MoRe 的问题。
 
 ---
+
+
 
 ### 情况 D
 
@@ -715,11 +716,13 @@ $$
 
 ---
 
+
+
 # 13. 如何验证它是不是“class-specific global semantics”而不仅仅是 generic global semantics
 
 这是我觉得最重要的新实验之一。
 
-对 class token \(c\)，比较：
+对 class token c，比较：
 
 $$
 S_{c,j}
@@ -727,13 +730,13 @@ $$
 
 在两种图像中的 background patches：
 
-### 图像中 class \(c\) 存在
+### 图像中 class c 存在
 
 $$
 y_c=1.
 $$
 
-### 图像中 class \(c\) 不存在
+### 图像中 class c 不存在
 
 $$
 y_c=0.
@@ -742,21 +745,19 @@ $$
 定义：
 
 $$
-\boxed{
 \Delta_{\mathrm{presence}}(c)
 =
-\mathbb E[
+\mathbb{E}[
 S_{c,j}
 \mid
 j\in BG,y_c=1
 ]
 -
-\mathbb E[
+\mathbb{E}[
 S_{c,j}
 \mid
 j\in BG,y_c=0
 ].
-}
 $$
 
 如果：
@@ -774,21 +775,19 @@ $$
 它真正说明：
 
 $$
-\boxed{
 \text{foreground class semantics 已经扩散进 background patch representation。}
-}
 $$
 
 也就是：
 
 $$
-\boxed{
 \text{background}\rightarrow
 \text{class-specific global semantics}.
-}
 $$
 
 ---
+
+
 
 # 14. MCTformer 和 MCTformer+ 的比较特别有意义
 
@@ -822,13 +821,13 @@ $$
 也就是：
 
 $$
-\boxed{
 \text{class specificity improved,
 but semantic diffusion worsened}.
-}
 $$
 
 ---
+
+
 
 ### Hypothesis B
 
@@ -848,6 +847,8 @@ $$
 
 ---
 
+
+
 # 15. 第二个关键验证：High-score patch 是否真的对分类有贡献？
 
 LaST 论文一个很强的 causal test 是：
@@ -859,6 +860,8 @@ LaST 论文一个很强的 causal test 是：
 但搬到 MCTformer 后反而可以做得更细。
 
 ---
+
+
 
 # 16. Class-specific causal masking
 
@@ -896,8 +899,8 @@ $$
 
 删除方式可以先统一使用：
 
-* ImageNet mean；
-* 或 zero after normalization。
+- ImageNet mean；
+- 或 zero after normalization。
 
 然后重新 forward。
 
@@ -910,6 +913,8 @@ z_c(x)-z_c(x_{\mathrm{masked}}).
 $$
 
 ---
+
+
 
 # 17. 这组实验的解释比 LaST 还能更细
 
@@ -936,14 +941,14 @@ $$
 这接近 LaST 原来的现象：
 
 $$
-\boxed{
 \text{semantic information 被懒惰地写进了 background，}
-}
 $$
 
 但它只是冗余 representation。
 
 ---
+
+
 
 ### 类型 2：Causal background shortcut
 
@@ -960,9 +965,7 @@ $$
 这其实比 LaST 原始现象更危险：
 
 $$
-\boxed{
 \text{background is a decision shortcut}.
-}
 $$
 
 所以我们不应该预设 masking high-score background 一定“不影响分类”。
@@ -971,6 +974,8 @@ $$
 
 ---
 
+
+
 # 18. 我建议正式把这两个概念分开
 
 这是我觉得比照搬 LaST 更好的地方。
@@ -978,9 +983,7 @@ $$
 ### Representational Lazy Assignment
 
 $$
-\boxed{
 \text{Background patch becomes class-semantic}
-}
 $$
 
 测：
@@ -996,9 +999,7 @@ $$
 ### Decision Shortcut
 
 $$
-\boxed{
 \text{Classification depends on background semantics}
-}
 $$
 
 测：
@@ -1027,6 +1028,8 @@ $$
 
 ---
 
+
+
 # 19. 第三个实验：把 LaST 的“global dependency”验证搬过来
 
 这一步对 MCTformer 特别关键。
@@ -1036,7 +1039,7 @@ $$
 $$
 A=
 \begin{bmatrix}
-A_{c2c} & A_{c2p}\\
+A_{c2c} & A_{c2p}
 A_{p2c} & A_{p2p}
 \end{bmatrix}.
 $$
@@ -1066,6 +1069,8 @@ $$
 这第二条路径非常值得怀疑。
 
 ---
+
+
 
 # 20. MCTformer 的“语义写回”路径
 
@@ -1099,24 +1104,20 @@ $$
 c_{\mathrm{dog}}.
 $$
 
-即使 patch \(j\) 本身是 grass/background。
+即使 patch j 本身是 grass/background。
 
 所以：
 
 $$
-\boxed{
 A_{p2c}
-}
 $$
 
 实际上提供了一条非常直接的：
 
 $$
-\boxed{
 \text{class semantic}
 \rightarrow
 \text{patch feature}
-}
 $$
 
 写入通道。
@@ -1134,14 +1135,14 @@ $$
 因此这可能就是：
 
 $$
-\boxed{
 \text{MCTformer 更容易发生 class-specific lazy assignment}
-}
 $$
 
 的结构原因之一。
 
 ---
+
+
 
 # 21. 可以做一个很干净的 inference-time causal intervention
 
@@ -1192,17 +1193,13 @@ $$
 也就是说：
 
 $$
-\boxed{
 \text{class token can still read patches,}
-}
 $$
 
 但：
 
 $$
-\boxed{
 \text{patches cannot read class tokens.}
-}
 $$
 
 这正对应你说的：
@@ -1210,6 +1207,8 @@ $$
 > **直接保护 patch local feature。**
 
 ---
+
+
 
 # 22. 如果这个 intervention 出现以下结果，会非常漂亮
 
@@ -1242,12 +1241,12 @@ $$
 这几乎直接支持你的第 2 点：
 
 $$
-\boxed{
 \text{Patch local feature 需要直接保护。}
-}
 $$
 
 ---
+
+
 
 # 23. 还可以按 layer 做 P2C blocking
 
@@ -1300,6 +1299,8 @@ $$
 影响最大，则说明很早就发生了 token-role contamination。
 
 ---
+
+
 
 # 24. 第四个实验：Global Patch-to-Patch Dependency
 
@@ -1357,29 +1358,29 @@ $$
 这能区分：
 
 $$
-\boxed{
 \text{class-token semantic writing}
-}
 $$
 
 与：
 
 $$
-\boxed{
 \text{patch-to-patch global diffusion}
-}
 $$
 
 谁是主要来源。
 
 ---
 
+
+
 # 25. 于是可以得到一个非常干净的 2×2 diagnosis
 
-|                   | Global \(P\rightarrow P\) |      Local \(P\rightarrow P\) |
-| ----------------- | ------------------------: | ----------------------------: |
-| Patches 可读 class  |                  baseline |         isolate P2P diffusion |
+
+|                   | Global P\rightarrow P     | Local P\rightarrow P          |
+| ----------------- | ------------------------- | ----------------------------- |
+| Patches 可读 class  | baseline                  | isolate P2P diffusion         |
 | Patches 不可读 class | isolate P2C contamination | strongest locality protection |
+
 
 不需要先提出新方法。
 
@@ -1409,6 +1410,8 @@ $$
 
 ---
 
+
+
 # 26. 第五个实验：Registers 能不能解决 MCTformer 的问题？
 
 这一步也值得做，但应该在确认 baseline 现象之后。
@@ -1416,9 +1419,7 @@ $$
 Registers 的作用主要是：
 
 $$
-\boxed{
 \text{提供 explicit scratch space。}
-}
 $$
 
 因此在 MCTformer+ 中加：
@@ -1466,14 +1467,14 @@ $$
 那我们就几乎在 MCTformer+ 上复现了 LaST 的核心观点：
 
 $$
-\boxed{
 \text{Register solves storage artifact, not semantic shortcut.}
-}
 $$
 
 这对后面的研究定位非常重要。
 
 ---
+
+
 
 # 27. 还可以联合 Patch Norm 与 Class Semantic Score
 
@@ -1508,6 +1509,7 @@ $$
 
 然后把 patches 分成四类：
 
+
 | Norm | Class similarity | Interpretation                |
 | ---- | ---------------- | ----------------------------- |
 | 高    | 高                | scratchpad + semantic leakage |
@@ -1515,12 +1517,11 @@ $$
 | 低    | 高                | **pure semantic shortcut**    |
 | 低    | 低                | normal background             |
 
+
 我觉得特别值得看：
 
 $$
-\boxed{
 \text{Low-norm / High-class-similarity background patches}
-}
 $$
 
 有多少。
@@ -1531,6 +1532,8 @@ $$
 
 ---
 
+
+
 # 28. MCTformer 的一个特别关键指标：P2C mass
 
 因为我们已经可以拿到 attention matrix，所以每层可以统计：
@@ -1538,7 +1541,7 @@ $$
 $$
 m_{p\rightarrow c}^{(l)}
 =
-\frac1N
+\frac{1}{N}
 \sum_i
 \sum_{c}
 A_{p2c}^{(l)}(i,c).
@@ -1588,6 +1591,8 @@ $$
 
 ---
 
+
+
 # 29. 还有一个我认为很强的 class-specific context experiment
 
 以 VOC 为例。
@@ -1624,8 +1629,8 @@ $$
 
 VOC 没有 stuff label，不能直接知道 water/grass，但可以用：
 
-* GT object mask 的 complement；
-* 再按图像类别分组。
+- GT object mask 的 complement；
+- 再按图像类别分组。
 
 例如：
 
@@ -1655,6 +1660,8 @@ COCO 更适合，因为类别共现更复杂。
 
 ---
 
+
+
 # 30. Context-only / Object-only 可以作为更强的因果验证
 
 这不是 LaST repo 当前直接提供的，但和其理论非常一致。
@@ -1663,7 +1670,7 @@ COCO 更适合，因为类别共现更复杂。
 
 ### Object-only
 
-保留 class \(c\) 对象：
+保留 class c 对象：
 
 $$
 x_{\mathrm{obj}}.
@@ -1671,7 +1678,7 @@ $$
 
 ### Context-only
 
-移除 class \(c\) 对象：
+移除 class c 对象：
 
 $$
 x_{\mathrm{ctx}}.
@@ -1704,7 +1711,7 @@ $$
 仍然非常高，那么 background semantics 更可能是：
 
 $$
-\boxed{\text{context-based class representation}}
+\text{context-based class representation}
 $$
 
 而不只是 foreground semantic diffusion。
@@ -1712,12 +1719,14 @@ $$
 如果移除对象后迅速消失，则说明它更可能是：
 
 $$
-\boxed{\text{foreground semantics 经 global attention 扩散进 background。}}
+\text{foreground semantics 经 global attention 扩散进 background。}
 $$
 
 这两个机制也是不一样的。
 
 ---
+
+
 
 # 31. 所以“Lazy Semantic Assignment”最好先不要定义成一个单一 score
 
@@ -1729,6 +1738,7 @@ $$
 
 先保留几个物理意义清楚的原始指标：
 
+
 | Metric               | 问题                                      |
 | -------------------- | --------------------------------------- |
 | C-PiM ↑              | class token 最相关 patch 是否属于正确类别？         |
@@ -1736,33 +1746,31 @@ $$
 | BG Hit ↓             | 最相关 patch 是否落在背景？                       |
 | BG-Tail@10 ↓         | 高 class-semantic patches 中有多少背景？        |
 | FG–BG Margin ↑       | target patches 与背景的 semantic separation |
-| \(m_{p2c}\)          | patches 读取多少 class semantics？           |
+| m_{p2c}              | patches 读取多少 class semantics？           |
 | Patch Norm           | 是否出现 scratchpad artifact？               |
 | Masked Logit Drop    | high-score patch 是否有因果作用？               |
 | Context-only Score ↓ | 是否依赖 context shortcut？                  |
 
+
 等看到结果后，再决定是否需要一个统一的 Lazy Semantic Assignment Index。
 
 ---
+
+
 
 # 32. 第一阶段我会怎么排列实验优先级
 
 先只做**不改训练方法**的验证，我建议顺序就是下面这一组：
 
 1. **MCTformer 与 MCTformer+ layer-wise Class-Patch Score**
-
-   $$
+  $$
    S_{c,j}^{(l)}
    =
    \cos(c_c^{(l)},p_j^{(l)}).
    $$
-
    输出 target / other-FG / BG 三分布，以及 C-PiM、BG-Hit、BG-Tail。
-
 2. **Feature score vs Attention score vs CAM**
-
-   同时对比：
-
+  同时对比：
    $$
    \cos(c_c,p_j),
    \quad
@@ -1770,76 +1778,56 @@ $$
    \quad
    CAM_c.
    $$
-
 3. **Patch Norm × Class Similarity**
-
-   区分：
-
+  区分：
    $$
    \text{register-style artifact}
    $$
-
    和：
-
    $$
    \text{semantic shortcut}.
    $$
-
 4. **Class-specific causal masking**
-
-   分别删除：
-
+  分别删除：
    $$
    TopBG,\ RandomBG,\ TopFG,\ RandomFG.
    $$
-
 5. **P2C blocking**
-
-   只禁止：
-
+  只禁止：
    $$
    patch\rightarrow class
    $$
-
    读取，观察 patch semantic leakage 是否下降。
-
 6. **Global P2P locality intervention**
-
-   判断：
-
+  判断：
    $$
    class\rightarrow patch
    $$
-
    与：
-
    $$
    patch\rightarrow patch
    $$
-
    哪条 global pathway 是主要污染源。
 
 这六组实验已经足够判断：
 
 $$
-\boxed{
 \text{MCTformer(+)
 是否真的比普通 ViT 更容易形成 lazy semantic assignment}
-}
 $$
 
 而且几乎全都是 **evaluation/inference-time analysis**，前四项不需要重新训练模型。
 
 ---
 
+
+
 # 33. 什么结果才能支持你的核心假设？
 
 我会认为下面这样的证据链最强：
 
 $$
-\boxed{
 \textbf{Observation 1}
-}
 $$
 
 MCTformer+ 中：
@@ -1859,9 +1847,7 @@ $$
 然后：
 
 $$
-\boxed{
 \textbf{Observation 2}
-}
 $$
 
 这些 background patches 与**当前存在的 class token**高度相关，而不是 generic CLS/global representation。
@@ -1869,9 +1855,7 @@ $$
 然后：
 
 $$
-\boxed{
 \textbf{Observation 3}
-}
 $$
 
 它们并不只是 high-norm artifacts：
@@ -1883,9 +1867,7 @@ $$
 然后：
 
 $$
-\boxed{
 \textbf{Observation 4}
-}
 $$
 
 禁止：
@@ -1915,9 +1897,7 @@ $$
 最后：
 
 $$
-\boxed{
 \textbf{Observation 5}
-}
 $$
 
 generic registers 可以消除 high-norm artifacts，却不能显著改善：
@@ -1944,14 +1924,14 @@ $$
 
 ---
 
+
+
 # 34. 最关键的研究概念我会暂时这样定义
 
 LaST 的：
 
 $$
-\boxed{
 \text{Lazy Aggregation}
-}
 $$
 
 重点是：
@@ -1961,9 +1941,7 @@ $$
 而我们真正要验证的可能是：
 
 $$
-\boxed{
 \text{Lazy Semantic Assignment}
-}
 $$
 
 即：
@@ -1975,11 +1953,9 @@ $$
 它首先意味着：
 
 $$
-\boxed{
 p_j^{bg}
 \approx
 c_c
-}
 $$
 
 即 patch representation 本身获得了不属于它的 class semantics。
@@ -1993,15 +1969,9 @@ $$
 也依赖它，那就是更强的：
 
 $$
-\boxed{
 \text{Class-specific Background Shortcut}.
-}
 $$
 
 我觉得这两个层级最好从一开始就区分开。
 
 ---
-
-另外还有一个很重要的源码细节：LaST 当前发布的 `visualize_patch_score_distribution.py` 其实同时保留了 `"repo"` 和 `"paper"` 两种 stability-score formula，实际训练代码 `conf.py` 使用的是 `patch / |lowpass-patch|`，并且按 **embedding channel** 在 patch 维度做 `topk`，再把选中的 patch values 汇聚为 global token。  这意味着后面如果真要把 LaST 的 **solution** 搬到 MCTformer+，必须先解决“一个 CLS 的 channel-wise selection 如何变成 C 个 class-specific tokens 的 selection”这个问题；但目前验证 lazy semantic assignment 完全不需要碰这一部分。
-
-如果按实验优先级，我建议下一步先只实现 **1–3：class-specific patch score、三区域 distribution、layer-wise C-PiM/BG-Tail，以及 feature score vs \(A_{c2p}\) vs CAM**。这些结果出来以后，再决定是否值得做 P2C causal blocking。这样最省训练时间，也最先回答我们的核心假设。
