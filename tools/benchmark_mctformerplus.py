@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import platform
 import statistics
@@ -18,13 +19,21 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from models.mctformer_plus import MCTformerPlusCam
+from models.mctformer_plus import (
+    build_mctformerplus,
+    model_spec_from_instance,
+    resolve_mctformerplus_checkpoint_variant,
+)
 from models.tgca import SUPPORTED_MODES
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=Path, required=True)
+    parser.add_argument(
+        "--model", choices=(
+            "mctformerplus_tiny", "mctformerplus", "mctformerplus_base"),
+        default="mctformerplus")
     parser.add_argument("--mode", choices=sorted(SUPPORTED_MODES), required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--input-size", type=int, default=448)
@@ -55,10 +64,15 @@ def main():
         raise ValueError(
             f"Checkpoint mode {config.get('mode')!r} does not match {args.mode!r}"
         )
+    resolution = resolve_mctformerplus_checkpoint_variant(
+        checkpoint, args.model
+    )
     state_dict = checkpoint["model"] if "model" in checkpoint else checkpoint
-    model = MCTformerPlusCam(
+    model = build_mctformerplus(
+        resolution['variant'],
+        cam=True,
         num_classes=20,
-        input_size=448,
+        input_size=args.input_size,
         attention_normalization=args.mode,
         attention_gamma=1.0,
     )
@@ -92,10 +106,18 @@ def main():
         for name, parameter in model.named_parameters()
         if name.endswith("relation_bias")
     )
+    digest = hashlib.sha256()
+    with args.checkpoint.open('rb') as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(chunk)
     metrics = {
         "host": "MCTformer+",
+        "model_spec": model_spec_from_instance(model),
+        "variant_resolution": resolution,
         "normalization": args.mode,
         "checkpoint": str(args.checkpoint.resolve()),
+        "checkpoint_sha256": digest.hexdigest(),
+        "checkpoint_size_bytes": args.checkpoint.stat().st_size,
         "device": torch.cuda.get_device_name(device),
         "python": platform.python_version(),
         "torch": torch.__version__,
@@ -117,12 +139,20 @@ def main():
         ),
         "baseline_allocated_memory_mb": baseline_allocated / (1024 ** 2),
         "peak_allocated_memory_mb": torch.cuda.max_memory_allocated(device) / (1024 ** 2),
+        "peak_reserved_memory_mb": torch.cuda.max_memory_reserved(device) / (1024 ** 2),
         "incremental_peak_allocated_memory_mb": (
             torch.cuda.max_memory_allocated(device) - baseline_allocated
         ) / (1024 ** 2),
         "output_shape": list(output.shape),
         "latency_samples_ms": durations_ms,
-        "notes": "Current commit implementation; MACs/FLOPs not measured by this tool.",
+        "flops_macs": {
+            "status": "not_measured",
+            "reason": (
+                "No already-installed counter was validated to include both "
+                "attention matrix products and the native CAM propagation path"
+            ),
+        },
+        "notes": "Current commit implementation; measured latency and memory are primary efficiency evidence.",
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(

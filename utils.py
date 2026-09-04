@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from collections import defaultdict, deque
 
 from models.mctformer import MCTformerV2Cam
-from models.mctformer_plus import MCTformerPlusCam
+from models.mctformer_plus import build_mctformerplus, resolve_mctformerplus_variant
 from models.mct_adapter import mcta_cam
 from models.srmct import SRMCTformerCam
 
@@ -180,8 +180,12 @@ def create_cam_model(args):
             num_classes=args.num_classes,
             input_size=args.input_size,)
         
-    elif 'mctformerplus' in args.model.lower():
-        model = MCTformerPlusCam(
+    elif args.model.lower() in {
+            'mctformerplus_tiny', 'mctformerplus', 'mctformerplus_base'}:
+        variant = resolve_mctformerplus_variant(args.model)
+        model = build_mctformerplus(
+            variant,
+            cam=True,
             num_classes=args.num_classes,
             input_size=args.input_size,
             attention_normalization=getattr(args, 'attention_normalization', 'vanilla'),

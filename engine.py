@@ -17,6 +17,30 @@ from sklearn.metrics import average_precision_score
 from models.cti_bgt import cti_bcam_loss
 
 
+class FixedLengthBatchSampler:
+    """Expose exactly the pre-registered number of full micro-batches."""
+
+    def __init__(self, batch_sampler, num_batches):
+        self.batch_sampler = batch_sampler
+        self.num_batches = int(num_batches)
+        if self.num_batches < 1:
+            raise ValueError('num_batches must be positive')
+        if self.num_batches > len(batch_sampler):
+            raise ValueError(
+                f'Requested {self.num_batches} batches from only '
+                f'{len(batch_sampler)} available batches'
+            )
+
+    def __iter__(self):
+        for index, batch in enumerate(self.batch_sampler):
+            if index >= self.num_batches:
+                break
+            yield batch
+
+    def __len__(self):
+        return self.num_batches
+
+
 def train_one_epoch_mctta(model, data_loader, optimizer, device, 
     epoch, loss_scaler, clip_grad, set_training_mode=True, rank=0, args=None):
     """
@@ -116,6 +140,87 @@ def train_one_epoch_basic(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}  
 
 
+def accumulation_spec(num_samples, micro_batch_size, accum_iter, world_size=1):
+    """Return the fixed effective-batch/update contract for one epoch."""
+    values = {
+        'num_samples': int(num_samples),
+        'micro_batch_size': int(micro_batch_size),
+        'accum_iter': int(accum_iter),
+        'world_size': int(world_size),
+    }
+    if any(value < 1 for value in values.values()):
+        raise ValueError(f'Accumulation inputs must be positive: {values}')
+    effective_batch_size = (
+        values['micro_batch_size'] * values['accum_iter'] * values['world_size']
+    )
+    optimizer_updates = values['num_samples'] // effective_batch_size
+    if optimizer_updates < 1:
+        raise ValueError(
+            f'Dataset size {num_samples} is smaller than effective batch '
+            f'{effective_batch_size}'
+        )
+    micro_batches = optimizer_updates * values['accum_iter']
+    consumed_samples_global = optimizer_updates * effective_batch_size
+    return {
+        **values,
+        'effective_batch_size': effective_batch_size,
+        'optimizer_updates_per_epoch': optimizer_updates,
+        'micro_batches_per_epoch': micro_batches,
+        'consumed_samples_per_epoch_global': consumed_samples_global,
+        'discarded_samples_per_epoch_global': (
+            values['num_samples'] - consumed_samples_global
+        ),
+    }
+
+
+def linear_scaled_learning_rate(nominal_lr, effective_batch_size, reference=512):
+    if nominal_lr < 0 or effective_batch_size < 1 or reference < 1:
+        raise ValueError('Invalid linear learning-rate scaling inputs')
+    return float(nominal_lr) * int(effective_batch_size) / int(reference)
+
+
+def _accumulation_backward_step(
+        loss, optimizer, parameters, loss_scaler, boundary, max_norm,
+        create_graph=False):
+    """Backpropagate one scaled micro-loss and step only at a boundary."""
+    if loss_scaler is None:
+        loss.backward(create_graph=create_graph)
+        if not boundary:
+            return
+        if max_norm is not None and max_norm > 0:
+            torch.nn.utils.clip_grad_norm_(parameters, max_norm)
+        optimizer.step()
+        return
+
+    scaler = getattr(loss_scaler, '_scaler', None)
+    if scaler is None:
+        if callable(loss_scaler) and boundary:
+            # Preserve the historical single-batch scaler protocol used by
+            # older host integrations.  A callable without exposed GradScaler
+            # state cannot safely accumulate across non-boundary batches.
+            loss_scaler(
+                loss,
+                optimizer,
+                clip_grad=max_norm,
+                parameters=parameters,
+                create_graph=create_graph,
+            )
+            return
+        raise TypeError(
+            'Gradient accumulation requires a scaler exposing torch GradScaler '
+            'as _scaler, or loss_scaler=None; opaque callable scalers are '
+            'supported only at an immediate update boundary'
+        )
+    scaler.scale(loss).backward(create_graph=create_graph)
+    if not boundary:
+        return
+    if max_norm is not None and max_norm > 0:
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(parameters, max_norm)
+    scaler.step(optimizer)
+    scaler.update()
+
+
 def train_one_epoch_mctplus(model: torch.nn.Module, data_loader: Iterable,
                     optimizer: torch.optim.Optimizer, device: torch.device,
                     epoch: int, loss_scaler, max_norm: float = 0,
@@ -129,7 +234,20 @@ def train_one_epoch_mctplus(model: torch.nn.Module, data_loader: Iterable,
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 10
 
-    for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
+    accum_iter = int(getattr(args, 'accum_iter', 1))
+    if accum_iter < 1:
+        raise ValueError(f'accum_iter must be positive, got {accum_iter}')
+    if len(data_loader) % accum_iter:
+        raise ValueError(
+            f'data loader length {len(data_loader)} is not divisible by '
+            f'accum_iter={accum_iter}'
+        )
+    optimizer.zero_grad()
+    optimizer_updates = 0
+    maximum_parameters_receiving_gradient = 0
+
+    for micro_step, (samples, targets) in enumerate(
+            metric_logger.log_every(data_loader, print_freq, header)):
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
 
@@ -198,15 +316,42 @@ def train_one_epoch_mctplus(model: torch.nn.Module, data_loader: Iterable,
             print("Loss is {}, stopping training".format(loss_value))
             sys.exit(1)
 
-        optimizer.zero_grad()
-
         is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
-        loss_scaler(loss, optimizer, clip_grad=max_norm,
-                    parameters=model.parameters(), create_graph=is_second_order)
+        boundary = (micro_step + 1) % accum_iter == 0
+        _accumulation_backward_step(
+            loss / accum_iter,
+            optimizer,
+            model.parameters(),
+            loss_scaler,
+            boundary,
+            max_norm,
+            create_graph=is_second_order,
+        )
+        if boundary:
+            maximum_parameters_receiving_gradient = max(
+                maximum_parameters_receiving_gradient,
+                sum(
+                    parameter.grad is not None
+                    for parameter in model.parameters()
+                    if parameter.requires_grad
+                ),
+            )
+            optimizer_updates += 1
+            optimizer.zero_grad()
 
-        torch.cuda.synchronize()
+        if device.type == 'cuda':
+            torch.cuda.synchronize(device)
         metric_logger.update(loss=loss_value)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+    if optimizer_updates != len(data_loader) // accum_iter:
+        raise RuntimeError(
+            f'optimizer update count {optimizer_updates} != expected '
+            f'{len(data_loader) // accum_iter}'
+        )
+    metric_logger.update(optimizer_updates=optimizer_updates)
+    metric_logger.update(
+        parameters_receiving_gradient=maximum_parameters_receiving_gradient
+    )
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)

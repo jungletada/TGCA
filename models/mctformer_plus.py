@@ -1,4 +1,8 @@
 import math
+from collections import OrderedDict
+from copy import deepcopy
+from typing import Mapping
+
 import torch
 import torch.nn as nn
 from functools import partial
@@ -22,7 +26,117 @@ from models.persistent_semantic import (
 
 from models.cti_bgt import cti_bgt_maps, validate_cti_bgt
 
-__all__ = ['mctformerplus']
+__all__ = [
+    'MCTFORMERPLUS_VARIANTS',
+    'MCTformerPlus',
+    'MCTformerPlusCam',
+    'adapt_deit_checkpoint_for_mctformerplus',
+    'build_mctformerplus',
+    'get_mctformerplus_spec',
+    'mctformerplus',
+    'mctformerplus_base',
+    'mctformerplus_tiny',
+    'model_spec_from_instance',
+    'resolve_mctformerplus_checkpoint_variant',
+    'resolve_mctformerplus_variant',
+]
+
+
+MCTFORMERPLUS_VARIANTS = {
+    'tiny': {
+        'family': 'MCTformer+',
+        'variant': 'tiny',
+        'model_name': 'mctformerplus_tiny',
+        'embed_dim': 192,
+        'depth': 12,
+        'num_heads': 3,
+        'head_dim': 64,
+        'patch_size': 16,
+        'mlp_ratio': 4,
+        'pretrained_url': (
+            'https://dl.fbaipublicfiles.com/deit/'
+            'deit_tiny_patch16_224-a1311bcf.pth'
+        ),
+    },
+    'small': {
+        'family': 'MCTformer+',
+        'variant': 'small',
+        'model_name': 'mctformerplus',
+        'embed_dim': 384,
+        'depth': 12,
+        'num_heads': 6,
+        'head_dim': 64,
+        'patch_size': 16,
+        'mlp_ratio': 4,
+        'pretrained_url': (
+            'https://dl.fbaipublicfiles.com/deit/'
+            'deit_small_patch16_224-cd65a155.pth'
+        ),
+    },
+    'base': {
+        'family': 'MCTformer+',
+        'variant': 'base',
+        'model_name': 'mctformerplus_base',
+        'embed_dim': 768,
+        'depth': 12,
+        'num_heads': 12,
+        'head_dim': 64,
+        'patch_size': 16,
+        'mlp_ratio': 4,
+        'pretrained_url': (
+            'https://dl.fbaipublicfiles.com/deit/'
+            'deit_base_patch16_224-b5f2ef4d.pth'
+        ),
+    },
+}
+
+_MCTFORMERPLUS_MODEL_TO_VARIANT = {
+    spec['model_name']: variant
+    for variant, spec in MCTFORMERPLUS_VARIANTS.items()
+}
+
+
+def resolve_mctformerplus_variant(model_name):
+    """Resolve an exact MCTformer+ model/variant name without fuzzy matching."""
+    normalized = str(model_name).strip().lower()
+    if normalized in MCTFORMERPLUS_VARIANTS:
+        return normalized
+    if normalized in _MCTFORMERPLUS_MODEL_TO_VARIANT:
+        return _MCTFORMERPLUS_MODEL_TO_VARIANT[normalized]
+    supported = sorted(
+        set(MCTFORMERPLUS_VARIANTS) | set(_MCTFORMERPLUS_MODEL_TO_VARIANT)
+    )
+    raise ValueError(
+        f'Unknown MCTformer+ variant/model {model_name!r}; expected one of {supported}'
+    )
+
+
+def get_mctformerplus_spec(variant_or_model_name):
+    """Return an isolated copy of the canonical architecture specification."""
+    variant = resolve_mctformerplus_variant(variant_or_model_name)
+    return deepcopy(MCTFORMERPLUS_VARIANTS[variant])
+
+
+def _variant_constructor_kwargs(variant, kwargs):
+    spec = get_mctformerplus_spec(variant)
+    kwargs = dict(kwargs)
+    fixed = {
+        'patch_size': spec['patch_size'],
+        'embed_dim': spec['embed_dim'],
+        'depth': spec['depth'],
+        'num_heads': spec['num_heads'],
+        'mlp_ratio': spec['mlp_ratio'],
+        'qkv_bias': True,
+    }
+    for key, expected in fixed.items():
+        if key in kwargs and kwargs[key] != expected:
+            raise ValueError(
+                f'{spec["model_name"]} fixes {key}={expected}, got {kwargs[key]}'
+            )
+        kwargs[key] = expected
+    if 'norm_layer' not in kwargs:
+        kwargs['norm_layer'] = partial(nn.LayerNorm, eps=1e-6)
+    return spec, kwargs
 
 class MCTformerPlus(VisionTransformer):
     def __init__(
@@ -674,33 +788,367 @@ class MCTformerPlusCam(MCTformerPlus):
         return outputs
 
         
-@register_model
-def mctformerplus(pretrained=False, **kwargs):
-    """Creates a MCTformerPlus model.
-    
-    Args:
-        pretrained (bool): If True, returns a model pre-trained on ImageNet
-        **kwargs: Additional arguments passed to the model
-        
-    Returns:
-        MCTformerPlus: The constructed model
+def model_spec_from_instance(model):
+    """Describe a concrete MCTformer+ instance for checkpoint provenance."""
+    if not isinstance(model, MCTformerPlus):
+        raise TypeError(f'Expected MCTformerPlus, got {type(model).__name__}')
+    depth = len(model.blocks)
+    if depth < 1:
+        raise ValueError('MCTformer+ must contain at least one transformer block')
+    num_heads = int(model.blocks[0].attn.num_heads)
+    if any(int(block.attn.num_heads) != num_heads for block in model.blocks):
+        raise ValueError('MCTformer+ blocks have inconsistent attention head counts')
+    embed_dim = int(model.embed_dim)
+    patch_size = [int(value) for value in model.patch_embed.patch_size]
+    mlp_ratio = model.blocks[0].mlp.fc1.out_features / embed_dim
+    if not float(mlp_ratio).is_integer():
+        raise ValueError(f'Non-integral MLP ratio: {mlp_ratio}')
+    matches = [
+        variant for variant, candidate in MCTFORMERPLUS_VARIANTS.items()
+        if candidate['embed_dim'] == embed_dim
+        and candidate['depth'] == depth
+        and candidate['num_heads'] == num_heads
+        and [candidate['patch_size'], candidate['patch_size']] == patch_size
+        and candidate['mlp_ratio'] == int(mlp_ratio)
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            'Concrete model does not match exactly one registered MCTformer+ variant: '
+            f'embed_dim={embed_dim}, depth={depth}, num_heads={num_heads}, '
+            f'patch_size={patch_size}, mlp_ratio={mlp_ratio}'
+        )
+    variant = matches[0]
+    registry = MCTFORMERPLUS_VARIANTS[variant]
+    return {
+        'family': 'MCTformer+',
+        'variant': variant,
+        'model_name': registry['model_name'],
+        'patch_size': patch_size,
+        'embed_dim': embed_dim,
+        'depth': depth,
+        'num_heads': num_heads,
+        'head_dim': embed_dim // num_heads,
+        'mlp_ratio': int(mlp_ratio),
+        'cam_class_to_patch_layers': int(
+            getattr(model, 'n_layers', 3)
+        ),
+        'cam_patch_to_patch_layers': depth,
+    }
+
+
+def _checkpoint_state_dict(checkpoint):
+    if not isinstance(checkpoint, Mapping):
+        raise TypeError(
+            f'Checkpoint must be a mapping, got {type(checkpoint).__name__}'
+        )
+    state = checkpoint.get('model', checkpoint)
+    if not isinstance(state, Mapping) or not state:
+        raise TypeError('Checkpoint model state must be a non-empty mapping')
+    if not all(isinstance(key, str) and isinstance(value, torch.Tensor)
+               for key, value in state.items()):
+        raise TypeError('Checkpoint state must map string keys to tensors')
+    prefixes = [key.startswith('module.') for key in state]
+    if any(prefixes):
+        if not all(prefixes):
+            raise ValueError(
+                'Checkpoint mixes module.-prefixed and unprefixed state keys'
+            )
+        state = OrderedDict(
+            (key[len('module.'):], value) for key, value in state.items()
+        )
+    return state
+
+
+def _state_architecture(state):
+    required = ('cls_token', 'patch_embed.proj.weight', 'blocks.0.attn.qkv.weight')
+    missing = [key for key in required if key not in state]
+    if missing:
+        raise ValueError(f'Checkpoint lacks architecture keys: {missing}')
+    embed_dim = int(state['patch_embed.proj.weight'].shape[0])
+    patch_weight = state['patch_embed.proj.weight']
+    if patch_weight.ndim != 4:
+        raise ValueError('patch_embed.proj.weight must be four-dimensional')
+    blocks = sorted({
+        int(key.split('.')[1]) for key in state
+        if key.startswith('blocks.') and key.split('.')[1].isdigit()
+    })
+    return {
+        'embed_dim': embed_dim,
+        'depth': len(blocks),
+        'block_indices': blocks,
+        'patch_size': [int(patch_weight.shape[-2]), int(patch_weight.shape[-1])],
+        'class_token_count': int(state['cls_token'].shape[1]),
+        'qkv_shape': list(state['blocks.0.attn.qkv.weight'].shape),
+    }
+
+
+def resolve_mctformerplus_checkpoint_variant(checkpoint, model_name):
+    """Validate CLI/checkpoint architecture and return import provenance.
+
+    A checkpoint without ``model_spec`` is accepted only for the canonical
+    legacy Small CLI name.  Tiny/Base are never inferred from a bare width.
     """
-    model = MCTformerPlus(
-        patch_size=16, embed_dim=384, depth=12, num_heads=6, mlp_ratio=4, qkv_bias=True,
-        norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
-    model.default_cfg = _cfg()
+    requested_variant = resolve_mctformerplus_variant(model_name)
+    requested_name = str(model_name).strip().lower()
+    state = _checkpoint_state_dict(checkpoint)
+    observed = _state_architecture(state)
+    metadata = checkpoint.get('model_spec') if isinstance(checkpoint, Mapping) else None
+    legacy = metadata is None
+    if legacy:
+        if requested_name != MCTFORMERPLUS_VARIANTS['small']['model_name']:
+            raise ValueError(
+                'MCTformer+ checkpoint lacks model_spec; legacy import is allowed '
+                'only with --model mctformerplus'
+            )
+        resolved_variant = 'small'
+    else:
+        if not isinstance(metadata, Mapping):
+            raise TypeError('checkpoint model_spec must be a mapping')
+        if metadata.get('family') != 'MCTformer+':
+            raise ValueError(
+                f'checkpoint model_spec.family={metadata.get("family")!r}, '
+                'expected MCTformer+'
+            )
+        resolved_variant = resolve_mctformerplus_variant(
+            metadata.get('variant', metadata.get('model_name', ''))
+        )
+        canonical_name = MCTFORMERPLUS_VARIANTS[resolved_variant]['model_name']
+        if metadata.get('model_name') != canonical_name:
+            raise ValueError(
+                f'checkpoint model_spec.model_name={metadata.get("model_name")!r} '
+                f'does not match canonical {canonical_name!r}'
+            )
+        if resolved_variant != requested_variant:
+            raise ValueError(
+                f'Checkpoint variant {resolved_variant!r} does not match requested '
+                f'{requested_variant!r}'
+            )
+    spec = get_mctformerplus_spec(resolved_variant)
+    expected_observed = {
+        'embed_dim': spec['embed_dim'],
+        'depth': spec['depth'],
+        'block_indices': list(range(spec['depth'])),
+        'patch_size': [spec['patch_size'], spec['patch_size']],
+        'class_token_count': 20,
+        'qkv_shape': [3 * spec['embed_dim'], spec['embed_dim']],
+    }
+    mismatches = {
+        key: {'observed': observed[key], 'expected': value}
+        for key, value in expected_observed.items()
+        if observed[key] != value
+    }
+    if mismatches:
+        raise ValueError(f'Checkpoint state architecture mismatch: {mismatches}')
+    if metadata is not None:
+        expected_metadata = {
+            'variant': resolved_variant,
+            'model_name': spec['model_name'],
+            'patch_size': [spec['patch_size'], spec['patch_size']],
+            'embed_dim': spec['embed_dim'],
+            'depth': spec['depth'],
+            'num_heads': spec['num_heads'],
+            'head_dim': spec['head_dim'],
+            'mlp_ratio': spec['mlp_ratio'],
+            'cam_class_to_patch_layers': 3,
+            'cam_patch_to_patch_layers': spec['depth'],
+        }
+        metadata_mismatches = {
+            key: {'observed': metadata.get(key), 'expected': value}
+            for key, value in expected_metadata.items()
+            if metadata.get(key) != value
+        }
+        if metadata_mismatches:
+            raise ValueError(
+                f'Checkpoint model_spec mismatch: {metadata_mismatches}'
+            )
+    return {
+        'variant': resolved_variant,
+        'model_name': spec['model_name'],
+        'legacy_small_import': legacy,
+        'model_spec_present': not legacy,
+        'state_architecture': observed,
+        'legacy_small_import_manifest': (
+            {
+                'status': 'legacy_small_import',
+                'reason': 'checkpoint lacks model_spec',
+                'required_cli_model': 'mctformerplus',
+                'resolved_variant': 'small',
+                'observed_state_architecture': observed,
+            }
+            if legacy else None
+        ),
+    }
+
+
+def adapt_deit_checkpoint_for_mctformerplus(checkpoint, model, num_classes=20):
+    """Adapt one official non-distilled DeiT state to a baseline MCTformer+."""
+    if not isinstance(model, MCTformerPlus):
+        raise TypeError(f'Expected MCTformerPlus, got {type(model).__name__}')
+    source = _checkpoint_state_dict(checkpoint)
+    target = model.state_dict()
+    model_spec = model_spec_from_instance(model)
+    variant_spec = get_mctformerplus_spec(model_spec['variant'])
+    if num_classes != model.num_classes:
+        raise ValueError(
+            f'num_classes={num_classes} does not match model.num_classes={model.num_classes}'
+        )
+    required_source = {'cls_token', 'pos_embed', 'patch_embed.proj.weight'}
+    absent = sorted(required_source - set(source))
+    if absent:
+        raise ValueError(f'DeiT checkpoint lacks required keys: {absent}')
+    source_embed_dim = int(source['cls_token'].shape[-1])
+    source_blocks = sorted({
+        int(key.split('.')[1]) for key in source
+        if key.startswith('blocks.') and key.split('.')[1].isdigit()
+    })
+    source_depth = len(source_blocks)
+    failures = []
+    if source_embed_dim != model.embed_dim:
+        failures.append(
+            f'source embed_dim {source_embed_dim} != target {model.embed_dim}'
+        )
+    if source_blocks != list(range(len(model.blocks))):
+        failures.append(
+            f'source block indices {source_blocks} != target '
+            f'{list(range(len(model.blocks)))}'
+        )
+    cls_token = source['cls_token']
+    position = source['pos_embed']
+    if list(cls_token.shape) != [1, 1, model.embed_dim]:
+        failures.append(f'invalid source cls_token shape {list(cls_token.shape)}')
+    if position.ndim != 3 or position.shape[0] != 1 or position.shape[2] != model.embed_dim:
+        failures.append(f'invalid source pos_embed shape {list(position.shape)}')
+    source_patch_count = int(position.shape[1] - 1)
+    source_side = math.isqrt(source_patch_count)
+    if source_side * source_side != source_patch_count:
+        failures.append(
+            f'source positional patch count {source_patch_count} is not square'
+        )
+    if failures:
+        raise ValueError('; '.join(failures))
+
+    source_cls_position = position[:, :1].repeat(1, num_classes, 1)
+    source_patch_position = position[:, 1:].reshape(
+        1, source_side, source_side, model.embed_dim
+    ).permute(0, 3, 1, 2)
+    source_patch_position = F.interpolate(
+        source_patch_position,
+        size=(model.Hp, model.Wp),
+        mode='bicubic',
+        align_corners=False,
+    ).permute(0, 2, 3, 1).flatten(1, 2)
+    repeated_cls_token = cls_token.repeat(1, num_classes, 1)
+
+    derived = {
+        'cls_token': repeated_cls_token,
+        'pos_embed_cls': source_cls_position,
+        'pos_embed_pat': source_patch_position,
+    }
+    random_keys = {'head.weight', 'head.bias'}
+    ignored_classifier_keys = {
+        'head.weight', 'head.bias', 'head_dist.weight', 'head_dist.bias'
+    }
+    adapted = OrderedDict()
+    shape_mismatches = []
+    missing_source_keys = []
+    loaded_numel = 0
+    for key, target_value in target.items():
+        if key in random_keys:
+            adapted[key] = target_value
+            continue
+        if key in derived:
+            value = derived[key]
+        elif key in source:
+            value = source[key]
+        else:
+            missing_source_keys.append(key)
+            continue
+        if value.shape != target_value.shape:
+            shape_mismatches.append({
+                'key': key,
+                'source_shape': list(value.shape),
+                'target_shape': list(target_value.shape),
+            })
+            continue
+        if not torch.isfinite(value).all():
+            raise ValueError(f'Non-finite tensor in pretrained source key {key}')
+        adapted[key] = value
+        loaded_numel += value.numel()
+    unexpected_keys = sorted(
+        key for key in source if key not in target and key not in ignored_classifier_keys
+    )
+    if missing_source_keys or shape_mismatches or unexpected_keys:
+        raise ValueError(
+            'Official DeiT adaptation failed: '
+            f'missing={missing_source_keys}, shape_mismatches={shape_mismatches}, '
+            f'unexpected={unexpected_keys}'
+        )
+    if set(adapted) != set(target):
+        raise RuntimeError(
+            f'Adapted state keys differ from model keys: '
+            f'missing={sorted(set(target) - set(adapted))}, '
+            f'extra={sorted(set(adapted) - set(target))}'
+        )
+    report = {
+        'variant': model_spec['variant'],
+        'model_name': model_spec['model_name'],
+        'source_url': variant_spec['pretrained_url'],
+        'source_embed_dim': source_embed_dim,
+        'target_embed_dim': model.embed_dim,
+        'source_depth': source_depth,
+        'target_depth': len(model.blocks),
+        'source_patch_position_shape': list(position[:, 1:].shape),
+        'target_patch_position_shape': list(source_patch_position.shape),
+        'target_class_token_shape': list(repeated_cls_token.shape),
+        'loaded_key_count': len(adapted) - len(random_keys),
+        'loaded_numel': int(loaded_numel),
+        'randomly_initialized_keys': sorted(random_keys),
+        'ignored_source_classifier_keys': sorted(
+            key for key in source if key in ignored_classifier_keys
+        ),
+        'missing_source_keys': [],
+        'unexpected_keys': [],
+        'shape_mismatches': [],
+        'passed': True,
+    }
+    return adapted, report
+
+
+def build_mctformerplus(variant, cam=False, pretrained=False, **kwargs):
+    """Build a registered-width MCTformer+ training or CAM model."""
+    spec, constructor_kwargs = _variant_constructor_kwargs(variant, kwargs)
+    model_class = MCTformerPlusCam if cam else MCTformerPlus
+    model = model_class(**constructor_kwargs)
+    model.default_cfg = _cfg(url=spec['pretrained_url'])
+    model.mctformerplus_variant = spec['variant']
+    model.mctformerplus_model_name = spec['model_name']
+    model.mctformerplus_pretrained_url = spec['pretrained_url']
+    model.pretrained_load_report = None
     if pretrained:
         checkpoint = torch.hub.load_state_dict_from_url(
-            url="https://dl.fbaipublicfiles.com/deit/deit_small_patch16_224-cd65a155.pth",
-            map_location="cpu", check_hash=True
-        )['model']
-        model_dict = model.state_dict()
-        for k in ['head.weight', 'head.bias', 'head_dist.weight', 'head_dist.bias']:
-            if k in checkpoint and checkpoint[k].shape != model_dict[k].shape:
-                print(f"Removing key {k} from pretrained checkpoint")
-                del checkpoint[k]
-        pretrained_dict = {k: v for k, v in checkpoint.items() if k in model_dict}
-        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k not in ['cls_token', 'pos_embed']}
-        model_dict.update(pretrained_dict)
-        model.load_state_dict(model_dict)
+            url=spec['pretrained_url'], map_location='cpu', check_hash=True
+        )
+        adapted, report = adapt_deit_checkpoint_for_mctformerplus(
+            checkpoint, model, num_classes=model.num_classes
+        )
+        incompatible = model.load_state_dict(adapted, strict=True)
+        if incompatible.missing_keys or incompatible.unexpected_keys:
+            raise RuntimeError(f'Unexpected strict-load result: {incompatible}')
+        model.pretrained_load_report = report
     return model
+
+
+@register_model
+def mctformerplus_tiny(pretrained=False, **kwargs):
+    return build_mctformerplus('tiny', pretrained=pretrained, **kwargs)
+
+
+@register_model
+def mctformerplus(pretrained=False, **kwargs):
+    """Canonical legacy name for the MCTformer+-Small architecture."""
+    return build_mctformerplus('small', pretrained=pretrained, **kwargs)
+
+
+@register_model
+def mctformerplus_base(pretrained=False, **kwargs):
+    return build_mctformerplus('base', pretrained=pretrained, **kwargs)

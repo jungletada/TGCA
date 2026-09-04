@@ -42,7 +42,11 @@ from analysis.semantic_relations import (
     semantic_prediction,
     spatial_minmax,
 )
-from models.mctformer_plus import MCTformerPlusCam
+from models.mctformer_plus import (
+    build_mctformerplus,
+    model_spec_from_instance,
+    resolve_mctformerplus_checkpoint_variant,
+)
 from models.tgca import TokenGroupNormalizer
 
 
@@ -87,6 +91,10 @@ def parse_float_tuple(value):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=Path, required=True)
+    parser.add_argument(
+        "--model", choices=(
+            "mctformerplus_tiny", "mctformerplus", "mctformerplus_base"),
+        default="mctformerplus")
     parser.add_argument("--baseline-metrics", type=Path, required=True)
     parser.add_argument("--expected-checkpoint-sha256")
     parser.add_argument("--voc-root", type=Path, required=True)
@@ -436,7 +444,12 @@ def main():
         raise ValueError("Phase 0/1 requires a vanilla-softmax baseline checkpoint")
     if bcss.get("variant", "e0") != "e0":
         raise ValueError("Phase 0/1 requires the E0 baseline without background/register slots")
-    model = MCTformerPlusCam(
+    resolution = resolve_mctformerplus_checkpoint_variant(
+        checkpoint, args.model
+    )
+    model = build_mctformerplus(
+        resolution['variant'],
+        cam=True,
         num_classes=20,
         input_size=args.semantic_resolution,
         attention_normalization="vanilla",
@@ -473,6 +486,8 @@ def main():
         "checkpoint_epoch": checkpoint.get("epoch"),
         "checkpoint_attention_normalization": normalization,
         "checkpoint_bcss": bcss,
+        "model_spec": model_spec_from_instance(model),
+        "variant_resolution": resolution,
         "trusted_baseline_metrics": str(args.baseline_metrics.resolve()),
         "trusted_baseline_metrics_sha256": sha256(args.baseline_metrics),
         "trusted_baseline_raw_cam_miou_percent": baseline_metrics.get("mean_iou_percent"),

@@ -44,6 +44,9 @@ from analysis.lazy_assignment.visualize_patch_score import (  # noqa: E402
 )
 from analysis.lazy_assignment.voc_score_dataset import VOCScoreDataset  # noqa: E402
 from utils import create_cam_model  # noqa: E402
+from models.mctformer_plus import (  # noqa: E402
+    resolve_mctformerplus_checkpoint_variant,
+)
 
 
 LAST_VIT_REPOSITORY = "https://github.com/ChengShiest/LAST-ViT"
@@ -75,7 +78,10 @@ def parse_args() -> argparse.Namespace:
         description="Experiment 1: layer-wise class-specific patch score"
     )
     parser.add_argument(
-        "--model", choices=("mctformerplus", "mctformerv2"), required=True
+        "--model", choices=(
+            "mctformerplus_tiny", "mctformerplus", "mctformerplus_base",
+            "mctformerv2",
+        ), required=True
     )
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--expected-checkpoint-sha256")
@@ -271,7 +277,14 @@ def checkpoint_configuration(payload) -> dict:
 
 def create_frozen_model(args: argparse.Namespace, payload):
     configuration = checkpoint_configuration(payload)
-    if args.model == "mctformerplus":
+    mctformerplus_names = {
+        "mctformerplus_tiny", "mctformerplus", "mctformerplus_base"
+    }
+    variant_resolution = None
+    if args.model in mctformerplus_names:
+        variant_resolution = resolve_mctformerplus_checkpoint_variant(
+            payload, args.model
+        )
         if configuration["bcss"].get("variant", "e0") != "e0":
             raise ValueError("Experiment 1 currently requires native MCTformer+ BCSS E0")
         if configuration["psl"].get("variant", "baseline") != "baseline":
@@ -305,6 +318,8 @@ def create_frozen_model(args: argparse.Namespace, payload):
     )
     model = create_cam_model(factory_args)
     load_info = load_state_dict_strict(model, payload)
+    if variant_resolution is not None:
+        load_info["variant_resolution"] = variant_resolution
     if hasattr(model, "set_bcss_epoch"):
         model.set_bcss_epoch(8)
     model.eval()

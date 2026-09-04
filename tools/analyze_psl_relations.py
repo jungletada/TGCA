@@ -27,12 +27,20 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from analysis._common import load_labels, segmentation_path
-from models.mctformer_plus import MCTformerPlusCam
+from models.mctformer_plus import (
+    build_mctformerplus,
+    resolve_mctformerplus_checkpoint_variant,
+)
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=Path, required=True)
+    parser.add_argument(
+        "--model",
+        choices=("mctformerplus_tiny", "mctformerplus", "mctformerplus_base"),
+        default="mctformerplus",
+    )
     parser.add_argument("--voc-root", type=Path, required=True)
     parser.add_argument("--id-list", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -103,7 +111,10 @@ def main():
     config = checkpoint.get("psl", {"variant": "baseline"})
     if config.get("variant") == "baseline":
         raise ValueError("Phase 2 relation diagnostics require a PSL checkpoint")
-    model = MCTformerPlusCam(
+    resolution = resolve_mctformerplus_checkpoint_variant(checkpoint, args.model)
+    model = build_mctformerplus(
+        resolution["variant"],
+        cam=True,
         num_classes=20,
         input_size=args.input_size,
         attention_normalization="vanilla",
@@ -224,6 +235,8 @@ def main():
         })
     metrics = {
         "phase": 2,
+        "model": resolution["model_name"],
+        "model_spec": checkpoint.get("model_spec"),
         "variant": config["variant"],
         "num_images": len(image_ids),
         "split": args.id_list.stem,

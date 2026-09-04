@@ -6,6 +6,7 @@ import random
 import numpy as np
 import argparse
 import datetime
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -19,12 +20,25 @@ from timm.utils import NativeScaler
 
 import utils
 from engine import evaluate
-from engine import train_one_epoch_mctplus, train_one_epoch_mctta
+from engine import (
+    FixedLengthBatchSampler,
+    accumulation_spec,
+    linear_scaled_learning_rate,
+    train_one_epoch_mctplus,
+    train_one_epoch_mctta,
+)
 from datasets_cam import build_dataset
 
 import models.srmct
 import models.mct_adapter
 import models.mctformer_plus
+from models.mctformer_plus import (
+    MCTformerPlus,
+    adapt_deit_checkpoint_for_mctformerplus,
+    get_mctformerplus_spec,
+    model_spec_from_instance,
+    resolve_mctformerplus_variant,
+)
 from models.cti_bgt import add_cti_bgt_arguments, adapt_cti_bgt_finetune
 from models.tgca import SUPPORTED_MODES
 from models.bcss import BCSS_VARIANTS
@@ -34,6 +48,12 @@ from models.persistent_semantic import PSL_VARIANTS, parse_interaction_layers
 def get_args_parser():
     parser = argparse.ArgumentParser('DeiT training and evaluation script', add_help=False)
     parser.add_argument('--batch_size', default=32, type=int)
+    parser.add_argument(
+        '--accum-iter', default=1, type=int,
+        help='number of micro-batches accumulated per optimizer update')
+    parser.add_argument(
+        '--val-batch-size', default=None, type=int,
+        help='validation batch size; default preserves legacy 2x micro batch')
     parser.add_argument('--epochs', default=45, type=int)
 
     # Model parameters
@@ -137,8 +157,9 @@ def get_args_parser():
                         help='Do not random erase first (clean) augmentation split')
 
     # * Finetuning params
-    parser.add_argument('--finetune', default='https://dl.fbaipublicfiles.com/deit/deit_small_patch16_224-cd65a155.pth', 
-                        help='finetune from checkpoint')
+    parser.add_argument(
+        '--finetune', default='auto',
+        help='pretrained checkpoint/URL; auto selects the registered DeiT width')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--resume', default='', help='resume from checkpoint')
@@ -170,6 +191,18 @@ def get_args_parser():
     return parser
 
 
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with Path(path).open('rb') as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _download_cache_path(url):
+    return Path(torch.hub.get_dir()) / 'checkpoints' / Path(url).name
+
+
 def load_model_weight(args, model):
     """Load model weights from a checkpoint or URL.
 
@@ -180,6 +213,42 @@ def load_model_weight(args, model):
     Returns:
         A state dictionary of the model with loaded weights.
     """
+    if (isinstance(model, MCTformerPlus)
+            and not getattr(model, 'cti_bgt', False)
+            and getattr(args, 'bcss_variant', 'e0') == 'e0'
+            and getattr(args, 'psl_variant', 'baseline') == 'baseline'):
+        if args.finetune.startswith('https'):
+            checkpoint = torch.hub.load_state_dict_from_url(
+                args.finetune, map_location='cpu', check_hash=True)
+            source_path = _download_cache_path(args.finetune)
+        else:
+            checkpoint = torch.load(args.finetune, map_location='cpu')
+            source_path = Path(args.finetune).expanduser().resolve()
+        source_state = checkpoint.get('model', checkpoint)
+        # Official DeiT has a singleton CLS token and one positional tensor.
+        is_deit_source = (
+            isinstance(source_state, dict)
+            and source_state.get('cls_token') is not None
+            and source_state['cls_token'].shape[1] == 1
+            and 'pos_embed' in source_state
+            and 'pos_embed_cls' not in source_state
+        )
+        if not is_deit_source:
+            raise ValueError(
+                'MCTformer+ --finetune expects an official non-distilled DeiT '
+                'checkpoint; use --resume for an MCTformer+ training checkpoint'
+            )
+        adapted, report = adapt_deit_checkpoint_for_mctformerplus(
+            checkpoint, model, num_classes=args.nb_classes
+        )
+        report.update({
+            'source_url': model.mctformerplus_pretrained_url,
+            'source_argument': args.finetune,
+            'cache_path': str(source_path),
+            'source_sha256': sha256_file(source_path),
+        })
+        args.pretrained_load_report = report
+        return adapted
     if getattr(model, 'cti_bgt', False):
         if args.finetune.startswith('https'):
             checkpoint = torch.hub.load_state_dict_from_url(
@@ -238,6 +307,23 @@ def load_model_weight(args, model):
 
 
 def main(args):
+    if args.batch_size < 1 or args.accum_iter < 1:
+        raise ValueError('--batch_size and --accum-iter must be positive')
+    if args.val_batch_size is not None and args.val_batch_size < 1:
+        raise ValueError('--val-batch-size must be positive when provided')
+    mctformerplus_names = {
+        'mctformerplus_tiny', 'mctformerplus', 'mctformerplus_base'
+    }
+    is_mctformerplus = args.model.lower() in mctformerplus_names
+    if args.finetune == 'auto':
+        if is_mctformerplus:
+            args.finetune = get_mctformerplus_spec(args.model)['pretrained_url']
+        else:
+            # Preserve the historical default for unrelated legacy entry points.
+            args.finetune = (
+                'https://dl.fbaipublicfiles.com/deit/'
+                'deit_small_patch16_224-cd65a155.pth'
+            )
     device = torch.device(args.device)
     if args.seed is None:
         args.seed = random.randint(0, 29510)
@@ -265,18 +351,42 @@ def main(args):
     sampler_train = torch.utils.data.RandomSampler(dataset_train)
     sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
-    data_loader_train = torch.utils.data.DataLoader(
-        dataset_train,
-        sampler=sampler_train,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        pin_memory=args.pin_mem,
-        drop_last=True,
+    batch_contract = accumulation_spec(
+        len(dataset_train),
+        args.batch_size,
+        args.accum_iter,
+        utils.get_world_size(),
+    )
+    args.effective_batch_size = batch_contract['effective_batch_size']
+    args.optimizer_updates_per_epoch = batch_contract[
+        'optimizer_updates_per_epoch'
+    ]
+    args.consumed_samples_per_epoch = batch_contract[
+        'consumed_samples_per_epoch_global'
+    ]
+    base_batch_sampler = torch.utils.data.BatchSampler(
+        sampler_train, batch_size=args.batch_size, drop_last=True
+    )
+    fixed_batch_sampler = FixedLengthBatchSampler(
+        base_batch_sampler, batch_contract['micro_batches_per_epoch']
     )
 
+    data_loader_train = torch.utils.data.DataLoader(
+        dataset_train,
+        batch_sampler=fixed_batch_sampler,
+        num_workers=args.num_workers,
+        pin_memory=args.pin_mem,
+    )
+
+    validation_batch_size = (
+        args.val_batch_size
+        if args.val_batch_size is not None
+        else int(2 * args.batch_size)
+    )
+    args.val_batch_size = validation_batch_size
     data_loader_val = torch.utils.data.DataLoader(
         dataset_val, sampler=sampler_val,
-        batch_size=int(2 * args.batch_size),
+        batch_size=validation_batch_size,
         num_workers=args.num_workers,
         pin_memory=args.pin_mem,
         drop_last=False
@@ -318,14 +428,21 @@ def main(args):
     np.random.seed(training_seed % (2 ** 32))
     random.seed(training_seed)
 
-    if "mctformerplus" in args.model:
+    if is_mctformerplus:
         train_one_epoch = train_one_epoch_mctplus
     else:
         train_one_epoch = train_one_epoch_mctta
 
+    args.pretrained_load_report = None
     if args.finetune:
         checkpoint_model = load_model_weight(args, model)
-        model.load_state_dict(checkpoint_model, strict=False)
+        strict_pretrain_load = bool(args.pretrained_load_report)
+        incompatibility = model.load_state_dict(
+            checkpoint_model, strict=strict_pretrain_load
+        )
+        if strict_pretrain_load and (
+                incompatibility.missing_keys or incompatibility.unexpected_keys):
+            raise RuntimeError(f'Unexpected strict pretrain load: {incompatibility}')
         if args.psl_variant != 'baseline' and args.finetune.startswith('https'):
             model.initialize_psl_from_backbone()
 
@@ -333,23 +450,118 @@ def main(args):
 
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     
-    linear_scaled_lr = args.lr * args.batch_size * utils.get_world_size() / 512.0
+    nominal_lr = args.lr
+    linear_scaled_lr = linear_scaled_learning_rate(
+        nominal_lr, args.effective_batch_size
+    )
     args.lr = linear_scaled_lr
     optimizer = create_optimizer(args, model)
     loss_scaler = NativeScaler()
     lr_scheduler, _ = create_scheduler(args, optimizer)
     work_space = Path(args.work_space)
+    work_space.mkdir(parents=True, exist_ok=True)
+    model_spec = model_spec_from_instance(model) if is_mctformerplus else None
+    if model_spec is not None:
+        (work_space / 'model_spec.json').write_text(
+            json.dumps(model_spec, indent=2, sort_keys=True) + '\n',
+            encoding='utf-8',
+        )
+    if args.pretrained_load_report is not None:
+        (work_space / 'pretrained_load_report.json').write_text(
+            json.dumps(args.pretrained_load_report, indent=2, sort_keys=True) + '\n',
+            encoding='utf-8',
+        )
+    pretrained_metadata = {
+        'url': (
+            args.pretrained_load_report['source_url']
+            if args.pretrained_load_report is not None else None
+        ),
+        'filename': Path(args.finetune).name,
+        'sha256': (
+            args.pretrained_load_report['source_sha256']
+            if args.pretrained_load_report is not None else None
+        ),
+    }
+    training_spec = {
+        'seed': args.seed,
+        'micro_batch_size': args.batch_size,
+        'accum_iter': args.accum_iter,
+        'world_size': utils.get_world_size(),
+        'effective_batch_size': args.effective_batch_size,
+        'nominal_lr': nominal_lr,
+        'optimizer_lr': args.lr,
+        'epochs': args.epochs,
+        'optimizer_updates_per_epoch': args.optimizer_updates_per_epoch,
+        'consumed_samples_per_epoch': args.consumed_samples_per_epoch,
+        'train_dataset_size': len(dataset_train),
+        'val_batch_size': args.val_batch_size,
+    }
+    optimizer_spec = {
+        'optimizer': args.opt,
+        'weight_decay': args.weight_decay,
+        'epsilon': args.opt_eps,
+        'betas': args.opt_betas,
+        'schedule': args.sched,
+        'warmup_epochs': args.warmup_epochs,
+        'minimum_lr': args.min_lr,
+        **training_spec,
+    }
+    (work_space / 'optimizer_spec.json').write_text(
+        json.dumps(optimizer_spec, indent=2, sort_keys=True) + '\n',
+        encoding='utf-8',
+    )
+
+    def checkpoint_payload(epoch):
+        payload = {
+            'model': model.state_dict(),
+            'bcss': {
+                'variant': args.bcss_variant,
+                'num_background_slots': args.bcss_num_background_slots,
+                'tau': args.bcss_tau,
+                'beta': args.bcss_beta,
+                'class_threshold': args.bcss_cls_threshold,
+                'lambda_fg': args.bcss_lambda_fg,
+                'lambda_bg': args.bcss_lambda_bg,
+                'semantic_temperature': args.bcss_semantic_temperature,
+                'foreground_anchor_mode': (
+                    'ownership_mass_scaled'
+                    if args.bcss_variant == 'e4_mass'
+                    else 'spatial_normalized'
+                ),
+            },
+            'attention_normalization': {
+                'mode': args.attention_normalization,
+                'gamma': args.attention_gamma,
+                'relation_bias': args.attention_normalization == 'tgca_bias',
+            },
+            'psl': model.psl_configuration(),
+            'cti_bgt': model.cti_bgt_configuration(),
+            'epoch': epoch,
+            'pretrained': pretrained_metadata,
+            'training_spec': training_spec,
+        }
+        if model_spec is not None:
+            payload['model_spec'] = model_spec
+        return payload
+
     session_name = 'Classification Training'
-    time = datetime.datetime.now().strftime("%Y%m%d-%H%M")
+    log_time = datetime.datetime.now().strftime("%Y%m%d-%H%M")
     utils.logger_info(logger_name=session_name, log_path=os.path.join(
-                      args.log_dir, f'train-{time}-{args.dataset}.log'))
+                      args.log_dir, f'train-{log_time}-{args.dataset}.log'))
     logger = logging.getLogger(session_name)
 
     logger.info(vars(args))
     logger.info(f'number of params:{n_parameters}')
 
     max_accuracy = 0.0
+    epoch_runtime = []
+    training_loop_started = time.perf_counter()
+    maximum_training_allocated = 0
+    maximum_training_reserved = 0
     for epoch in range(args.start_epoch, args.epochs):
+        if device.type == 'cuda':
+            torch.cuda.reset_peak_memory_stats(device)
+        train_started = time.perf_counter()
         train_stats = train_one_epoch(
             model, 
             data_loader_train,
@@ -359,38 +571,46 @@ def main(args):
             loss_scaler,
             args.clip_grad,
             args=args)
+        train_seconds = time.perf_counter() - train_started
+        if device.type == 'cuda':
+            training_peak_allocated = torch.cuda.max_memory_allocated(device)
+            training_peak_reserved = torch.cuda.max_memory_reserved(device)
+            maximum_training_allocated = max(
+                maximum_training_allocated, training_peak_allocated
+            )
+            maximum_training_reserved = max(
+                maximum_training_reserved, training_peak_reserved
+            )
+        else:
+            training_peak_allocated = 0
+            training_peak_reserved = 0
 
         lr_scheduler.step(epoch)
 
+        evaluation_started = time.perf_counter()
         test_stats = evaluate(data_loader_val, model, device)
+        evaluation_seconds = time.perf_counter() - evaluation_started
+        epoch_runtime.append({
+            'epoch': epoch,
+            'training_seconds': train_seconds,
+            'evaluation_seconds': evaluation_seconds,
+            'total_seconds': train_seconds + evaluation_seconds,
+            'consumed_training_images': args.consumed_samples_per_epoch,
+            'optimizer_updates': args.optimizer_updates_per_epoch,
+            'training_images_per_second': (
+                args.consumed_samples_per_epoch / train_seconds
+            ),
+            'optimizer_updates_per_second': (
+                args.optimizer_updates_per_epoch / train_seconds
+            ),
+            'training_peak_allocated_bytes': training_peak_allocated,
+            'training_peak_reserved_bytes': training_peak_reserved,
+        })
         if test_stats["mAP"] > max_accuracy:
-            torch.save({
-                        'model': model.state_dict(),
-                        'bcss': {
-                            'variant': args.bcss_variant,
-                            'num_background_slots': args.bcss_num_background_slots,
-                            'tau': args.bcss_tau,
-                            'beta': args.bcss_beta,
-                            'class_threshold': args.bcss_cls_threshold,
-                            'lambda_fg': args.bcss_lambda_fg,
-                            'lambda_bg': args.bcss_lambda_bg,
-                            'semantic_temperature': args.bcss_semantic_temperature,
-                            'foreground_anchor_mode': (
-                                'ownership_mass_scaled'
-                                if args.bcss_variant == 'e4_mass'
-                                else 'spatial_normalized'
-                            ),
-                        },
-                        'attention_normalization': {
-                            'mode': args.attention_normalization,
-                            'gamma': args.attention_gamma,
-                            'relation_bias': args.attention_normalization == 'tgca_bias',
-                        },
-                        'cti_bgt': model.cti_bgt_configuration(),
-                        'psl': model.psl_configuration(),
-                        'epoch': epoch,
-                       },
-                       os.path.join(args.work_space, f'{args.model}_best.pth'))
+            torch.save(
+                checkpoint_payload(epoch),
+                os.path.join(args.work_space, f'{args.model}_best.pth'),
+            )
         max_accuracy = max(max_accuracy, test_stats["mAP"])
 
         log_stats = {'epoch': epoch,
@@ -403,32 +623,48 @@ def main(args):
                 f'Max mAP: {max_accuracy * 100:.2f}%\n' + json.dumps(log_stats)
             )
 
-    torch.save({
-        'model': model.state_dict(),
-        'bcss': {
-            'variant': args.bcss_variant,
-            'num_background_slots': args.bcss_num_background_slots,
-            'tau': args.bcss_tau,
-            'beta': args.bcss_beta,
-            'class_threshold': args.bcss_cls_threshold,
-            'lambda_fg': args.bcss_lambda_fg,
-            'lambda_bg': args.bcss_lambda_bg,
-            'semantic_temperature': args.bcss_semantic_temperature,
-            'foreground_anchor_mode': (
-                'ownership_mass_scaled'
-                if args.bcss_variant == 'e4_mass'
-                else 'spatial_normalized'
-            ),
-        },
-        'attention_normalization': {
-            'mode': args.attention_normalization,
-            'gamma': args.attention_gamma,
-            'relation_bias': args.attention_normalization == 'tgca_bias',
-        },
-        'psl': model.psl_configuration(),
-        'cti_bgt': model.cti_bgt_configuration(),
-        'epoch': args.epochs - 1,
-    }, work_space / f'{args.model}_final.pth')
+    torch.save(
+        checkpoint_payload(args.epochs - 1),
+        work_space / f'{args.model}_final.pth',
+    )
+    total_training_seconds = sum(
+        item['training_seconds'] for item in epoch_runtime
+    )
+    total_optimizer_updates = sum(
+        item['optimizer_updates'] for item in epoch_runtime
+    )
+    total_consumed_images = sum(
+        item['consumed_training_images'] for item in epoch_runtime
+    )
+    runtime = {
+        'available': True,
+        'measurement_scope': 'current training process',
+        'device': str(device),
+        'epochs_completed': len(epoch_runtime),
+        'wall_seconds_train_and_validation': (
+            time.perf_counter() - training_loop_started
+        ),
+        'training_seconds': total_training_seconds,
+        'evaluation_seconds': sum(
+            item['evaluation_seconds'] for item in epoch_runtime
+        ),
+        'mean_epoch_seconds_train_and_validation': float(np.mean([
+            item['total_seconds'] for item in epoch_runtime
+        ])),
+        'training_images_per_second': (
+            total_consumed_images / total_training_seconds
+        ),
+        'optimizer_updates_per_second': (
+            total_optimizer_updates / total_training_seconds
+        ),
+        'training_peak_allocated_bytes': maximum_training_allocated,
+        'training_peak_reserved_bytes': maximum_training_reserved,
+        'epoch_measurements': epoch_runtime,
+    }
+    (work_space / 'training_runtime.json').write_text(
+        json.dumps(runtime, indent=2, sort_keys=True, allow_nan=False) + '\n',
+        encoding='utf-8',
+    )
 
 
 if __name__ == '__main__':

@@ -8,7 +8,10 @@ from torchvision import transforms
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
 from models.adapter_modules import resize_input_minbound
-from models.mctformer_plus import MCTformerPlusCam
+from models.mctformer_plus import (
+    build_mctformerplus,
+    resolve_mctformerplus_checkpoint_variant,
+)
 
 
 def read_ids(path):
@@ -41,7 +44,13 @@ def checkpoint_bcss_config(checkpoint):
     })
 
 
-def load_cam_model(checkpoint_path, input_size, device, variant=None):
+def load_cam_model(
+    checkpoint_path,
+    input_size,
+    device,
+    variant=None,
+    model_name="mctformerplus",
+):
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     config = checkpoint_bcss_config(checkpoint)
     checkpoint_variant = config.get("variant", "e0")
@@ -50,7 +59,12 @@ def load_cam_model(checkpoint_path, input_size, device, variant=None):
             f"Checkpoint variant is {checkpoint_variant}, requested {variant}"
         )
     normalization = checkpoint.get("attention_normalization", {})
-    model = MCTformerPlusCam(
+    resolution = resolve_mctformerplus_checkpoint_variant(
+        checkpoint, model_name
+    )
+    model = build_mctformerplus(
+        resolution["variant"],
+        cam=True,
         num_classes=20,
         input_size=input_size,
         attention_normalization=normalization.get("mode", "vanilla"),

@@ -28,6 +28,11 @@ def parse_args():
     parser.add_argument("--id-list", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--variant", choices=tuple(BCSS_VARIANTS))
+    parser.add_argument(
+        "--model",
+        choices=("mctformerplus_tiny", "mctformerplus", "mctformerplus_base"),
+        default="mctformerplus",
+    )
     parser.add_argument("--input-size", type=int, default=448)
     parser.add_argument("--replacement", choices=("mean", "blur"), default="mean")
     parser.add_argument("--max-images", type=int)
@@ -91,7 +96,12 @@ def main():
         image_dir.mkdir()
     device = torch.device(args.device)
     model, config = load_cam_model(
-        args.checkpoint, args.input_size, device, args.variant)
+        args.checkpoint,
+        args.input_size,
+        device,
+        args.variant,
+        model_name=args.model,
+    )
     labels = load_labels(args.voc_root)
     image_ids = read_ids(args.id_list)
     if args.max_images is not None:
@@ -167,6 +177,7 @@ def main():
         writer.writeheader()
         writer.writerows(rows)
     metrics = {
+        "model": args.model,
         "variant": config.get("variant", "e0"),
         "replacement": args.replacement,
         "num_image_classes": len(rows),

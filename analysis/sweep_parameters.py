@@ -30,6 +30,11 @@ def parse_args():
     parser.add_argument("--id-list", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--variant", choices=("e4", "e5", "e6"), default="e6")
+    parser.add_argument(
+        "--model",
+        choices=("mctformerplus_tiny", "mctformerplus", "mctformerplus_base"),
+        default="mctformerplus",
+    )
     parser.add_argument("--taus", type=comma_floats, default=(0.35, 0.5, 0.75))
     parser.add_argument("--betas", type=comma_floats, default=(0.25, 0.5, 0.75))
     parser.add_argument("--threshold", type=float, default=0.45)
@@ -50,7 +55,13 @@ def main():
         raise FileExistsError(f"Refusing to overwrite {args.output_dir}")
     args.output_dir.mkdir(parents=True)
     device = torch.device(args.device)
-    model, _ = load_cam_model(args.checkpoint, args.input_size, device, args.variant)
+    model, _ = load_cam_model(
+        args.checkpoint,
+        args.input_size,
+        device,
+        args.variant,
+        model_name=args.model,
+    )
     labels = load_labels(args.voc_root)
     image_ids = read_ids(args.id_list)[:args.max_images]
     settings = [(tau, beta) for tau in args.taus for beta in args.betas]
@@ -128,6 +139,7 @@ def main():
         writer.writeheader()
         writer.writerows(rows)
     payload = {
+        "model": args.model,
         "variant": args.variant,
         "checkpoint": str(args.checkpoint.resolve()),
         "selection_scope": "inference-only single-scale diagnostic; not a final CAM result",

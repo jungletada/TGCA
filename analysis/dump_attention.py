@@ -29,6 +29,11 @@ def parse_args():
     parser.add_argument("--id-list", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--variant", choices=tuple(BCSS_VARIANTS))
+    parser.add_argument(
+        "--model",
+        choices=("mctformerplus_tiny", "mctformerplus", "mctformerplus_base"),
+        default="mctformerplus",
+    )
     parser.add_argument("--input-size", type=int, default=448)
     parser.add_argument("--max-images", type=int)
     parser.add_argument("--device", default="cuda")
@@ -46,7 +51,12 @@ def main():
         raise FileExistsError(f"Refusing to overwrite {args.output_dir}")
     device = torch.device(args.device)
     model, config = load_cam_model(
-        args.checkpoint, args.input_size, device, args.variant)
+        args.checkpoint,
+        args.input_size,
+        device,
+        args.variant,
+        model_name=args.model,
+    )
     image_ids = read_ids(args.id_list)
     if args.max_images is not None:
         image_ids = image_ids[:args.max_images]
@@ -57,6 +67,7 @@ def main():
         "checkpoint": str(args.checkpoint.resolve()),
         "checkpoint_sha256": digest,
         "bcss": config,
+        "model": args.model,
         "input_size": args.input_size,
         "id_list": str(args.id_list.resolve()),
         "num_images": len(image_ids),

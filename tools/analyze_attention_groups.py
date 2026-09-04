@@ -23,7 +23,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from models.mctformer_plus import MCTformerPlusCam
+from models.mctformer_plus import (
+    build_mctformerplus,
+    model_spec_from_instance,
+    resolve_mctformerplus_checkpoint_variant,
+)
 from models.tgca import SUPPORTED_MODES, TokenGroupNormalizer
 
 
@@ -158,6 +162,10 @@ class AttentionCollector:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=Path, required=True)
+    parser.add_argument(
+        "--model", choices=(
+            "mctformerplus_tiny", "mctformerplus", "mctformerplus_base"),
+        default="mctformerplus")
     parser.add_argument("--voc-root", type=Path, required=True)
     parser.add_argument("--id-list", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -184,8 +192,13 @@ def main():
         raise ValueError(
             f"Checkpoint mode {checkpoint_config.get('mode')!r} does not match requested {args.mode!r}"
         )
+    resolution = resolve_mctformerplus_checkpoint_variant(
+        checkpoint, args.model
+    )
     state_dict = checkpoint["model"] if isinstance(checkpoint, dict) and "model" in checkpoint else checkpoint
-    model = MCTformerPlusCam(
+    model = build_mctformerplus(
+        resolution['variant'],
+        cam=True,
         num_classes=20,
         input_size=448,
         attention_normalization=args.mode,
@@ -345,6 +358,8 @@ def main():
     metrics = {
         "run_id": args.run_id,
         "host": "MCTformer+",
+        "model_spec": model_spec_from_instance(model),
+        "variant_resolution": resolution,
         "dataset": "PASCAL VOC 2012 train",
         "normalization": args.mode,
         "gamma": args.gamma,

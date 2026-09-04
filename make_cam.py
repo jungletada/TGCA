@@ -1,4 +1,6 @@
 import os
+import hashlib
+import json
 import torch
 import argparse
 import numpy as np
@@ -10,6 +12,7 @@ from torch.utils.data import DataLoader
 from torch.backends import cudnn
 cudnn.enabled = True
 import warnings
+from pathlib import Path
 warnings.filterwarnings("ignore")
 
 from misc import torchutils, imutils
@@ -19,6 +22,7 @@ from models.cti_bgt import add_cti_bgt_arguments, validate_cti_bgt_checkpoint
 from models.tgca import SUPPORTED_MODES
 from models.bcss import BCSS_VARIANTS
 from models.persistent_semantic import PSL_VARIANTS, parse_interaction_layers
+from models.mctformer_plus import resolve_mctformerplus_checkpoint_variant
 
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
@@ -243,8 +247,9 @@ def _work_trainset_psa(process_id, model, dataset, args):
                 
             np.save(osp.join(args.cam_out_dir, img_name + '.npy'), cam_dict)
         
-            if process_id == n_gpus - 1 and iter_ % (len(databin) // 20) == 0:
-                print(f"{(5*iter_+1) // (len(databin) // 20)} ", end='')
+            progress_interval = max(1, len(databin) // 20)
+            if process_id == n_gpus - 1 and iter_ % progress_interval == 0:
+                print(f"{(5 * iter_ + 1) // progress_interval} ", end='')
 
 
 def _work_trainset_irn(process_id, model, dataset, args):
@@ -306,8 +311,9 @@ def _work_trainset_irn(process_id, model, dataset, args):
             cam_dict = {"keys": valid_cat, "cam": strided_cam.cpu(), "high_res": highres_cam.cpu().numpy()}
             np.save(osp.join(f"{args.cam_out_dir}_irn", img_name + '.npy'), cam_dict) 
             
-            if process_id == n_gpus - 1 and iter % (len(databin) // 20) == 0:
-                print("%d " % ((5*iter+1)//(len(databin) // 20)), end='')
+            progress_interval = max(1, len(databin) // 20)
+            if process_id == n_gpus - 1 and iter % progress_interval == 0:
+                print("%d " % ((5 * iter + 1) // progress_interval), end='')
 
 
 def _work_testset(process_id, model, dataset, args):
@@ -387,14 +393,19 @@ def _work_testset(process_id, model, dataset, args):
                 
             np.save(osp.join(args.cam_out_dir, img_name + '.npy'), cam_dict)
         
-            if process_id == n_gpus - 1 and iter_ % (len(databin) // 20) == 0:
-                print(f"{(5*iter_+1) // (len(databin) // 20)} ", end='')
+            progress_interval = max(1, len(databin) // 20)
+            if process_id == n_gpus - 1 and iter_ % progress_interval == 0:
+                print(f"{(5 * iter_ + 1) // progress_interval} ", end='')
                 
                 
 if __name__ == '__main__':
     args = get_args_parser()
     args.cam_out_dir = os.path.join(args.work_space, args.cam_out_dir) 
-    os.makedirs(args.cam_out_dir, exist_ok=True)
+    if os.path.exists(args.cam_out_dir):
+        raise FileExistsError(
+            f'Refusing to overwrite existing CAM directory: {args.cam_out_dir}'
+        )
+    os.makedirs(args.cam_out_dir)
 
     from datasets_cam import build_dataset
     # change to multi-scale dataset
@@ -414,8 +425,16 @@ if __name__ == '__main__':
     
     args.num_classes = num_classes
 
-    model = create_cam_model(args)
     checkpoint = torch.load(args.checkpoint, map_location='cpu')
+    mctformerplus_names = {
+        'mctformerplus_tiny', 'mctformerplus', 'mctformerplus_base'
+    }
+    variant_resolution = None
+    if args.model.lower() in mctformerplus_names:
+        variant_resolution = resolve_mctformerplus_checkpoint_variant(
+            checkpoint, args.model
+        )
+    model = create_cam_model(args)
     if hasattr(model, 'cti_bgt_configuration'):
         validate_cti_bgt_checkpoint(checkpoint, model)
     checkpoint_psl = checkpoint.get('psl', {'variant': 'baseline'})
@@ -453,7 +472,27 @@ if __name__ == '__main__':
             raise ValueError(f"BCSS checkpoint/CLI mismatch: {mismatches}")
     model_dict = checkpoint.get('model', checkpoint)
     
-    model.load_state_dict(model_dict)
+    incompatibility = model.load_state_dict(model_dict, strict=True)
+    if incompatibility.missing_keys or incompatibility.unexpected_keys:
+        raise RuntimeError(f'Unexpected strict checkpoint load: {incompatibility}')
+    if variant_resolution is not None and variant_resolution['legacy_small_import']:
+        digest = hashlib.sha256()
+        with open(args.checkpoint, 'rb') as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                digest.update(chunk)
+        manifest = dict(variant_resolution['legacy_small_import_manifest'])
+        manifest.update({
+            'checkpoint': str(Path(args.checkpoint).expanduser().resolve()),
+            'checkpoint_sha256': digest.hexdigest(),
+        })
+        manifest_path = Path(args.work_space) / 'legacy_small_import_manifest.json'
+        payload = json.dumps(manifest, indent=2, sort_keys=True) + '\n'
+        if manifest_path.exists() and manifest_path.read_text() != payload:
+            raise RuntimeError(
+                f'Existing legacy Small import manifest differs: {manifest_path}'
+            )
+        if not manifest_path.exists():
+            manifest_path.write_text(payload, encoding='utf-8')
     if hasattr(model, 'set_bcss_epoch'):
         model.set_bcss_epoch(8)
     model.eval()
@@ -479,6 +518,9 @@ if __name__ == '__main__':
         nprocs=n_gpus,
         args=(model, dataset, args),
         join=True)
+    Path(args.cam_out_dir, 'CAM_COMPLETE').write_text(
+        'complete\n', encoding='utf-8'
+    )
     print(']')
 
     torch.cuda.empty_cache()
