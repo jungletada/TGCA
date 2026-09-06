@@ -69,7 +69,9 @@ def parse_args():
     parser.add_argument('--voc-root', type=Path, required=True)
     parser.add_argument('--list-path', type=Path, required=True)
     parser.add_argument('--output-dir', type=Path, required=True)
-    parser.add_argument('--final-norm', action='store_true')
+    final_norm_group = parser.add_mutually_exclusive_group()
+    final_norm_group.add_argument('--final-norm', action='store_true')
+    final_norm_group.add_argument('--patch-final-norm', action='store_true')
     parser.add_argument('--input-size', type=int, default=448)
     parser.add_argument('--batch-size', type=int, default=4)
     parser.add_argument('--num-workers', type=int, default=8)
@@ -190,7 +192,7 @@ def execute(args):
     if resolution['variant'] != 'small':
         raise ValueError('MCTformer+-FinalLN is fixed to DeiT-Small')
     validate_mctformerplus_final_norm_checkpoint(
-        checkpoint, bool(args.final_norm)
+        checkpoint, bool(args.final_norm), bool(args.patch_final_norm)
     )
     attention_config = checkpoint.get('attention_normalization', {})
     bcss = checkpoint.get('bcss', {'variant': 'e0'})
@@ -209,6 +211,7 @@ def execute(args):
         attention_normalization='vanilla', attention_gamma=1.0,
         bcss_variant='e0', psl_variant='baseline', cti_bgt=False,
         final_norm=bool(args.final_norm),
+        patch_final_norm=bool(args.patch_final_norm),
     )
     state = checkpoint.get('model', checkpoint)
     incompatibility = model.load_state_dict(state, strict=True)
@@ -252,6 +255,11 @@ def execute(args):
             )
             if auxiliary.get('final_norm') is not bool(args.final_norm):
                 raise RuntimeError('runtime FinalLN state differs from requested state')
+            if auxiliary.get('patch_final_norm') is not bool(
+                    args.patch_final_norm):
+                raise RuntimeError(
+                    'runtime patch FinalLN state differs from requested state'
+                )
             if len(attention_heads) != 12 or len(all_x_cls) != 12:
                 raise RuntimeError('expected exactly 12 Transformer blocks')
             if class_tokens.shape[1:] != (20, 384):
@@ -495,6 +503,7 @@ def execute(args):
         'status': 'complete',
         'experiment': 'MCTformer+-FinalLN focused diagnostics',
         'final_norm': bool(args.final_norm),
+        'patch_final_norm': bool(args.patch_final_norm),
         'model_spec': model_spec_from_instance(model),
         'checkpoint': {
             'path': str(args.checkpoint.resolve()),

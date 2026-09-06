@@ -38,6 +38,7 @@ __all__ = [
     'mctformerplus_tiny',
     'model_spec_from_instance',
     'checkpoint_final_norm_enabled',
+    'checkpoint_patch_final_norm_enabled',
     'resolve_mctformerplus_checkpoint_variant',
     'resolve_mctformerplus_variant',
     'validate_mctformerplus_final_norm_checkpoint',
@@ -150,9 +151,14 @@ class MCTformerPlus(VisionTransformer):
             psl_interaction_layers=(11,), psl_relation_dim=384,
             psl_num_background_latents=1, cti_bgt=False, cti_bgt_weight=0.1,
             cti_bgt_n_layers=6, cti_bgt_affinity_start=4, final_norm=False,
-            *args, **kwargs):
+            patch_final_norm=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.final_norm = bool(final_norm)
+        self.patch_final_norm = bool(patch_final_norm)
+        if self.final_norm and self.patch_final_norm:
+            raise ValueError(
+                'final_norm and patch_final_norm are mutually exclusive'
+            )
         self.cti_bgt = bool(cti_bgt)
         self.cti_bgt_weight = cti_bgt_weight
         self.cti_bgt_n_layers = cti_bgt_n_layers
@@ -239,9 +245,10 @@ class MCTformerPlus(VisionTransformer):
 
         self.psl_variant = psl_variant.lower()
         self.psl_spec = validate_psl_variant(self.psl_variant)
-        if self.final_norm and self.psl_spec.enabled:
+        if (self.final_norm or self.patch_final_norm) and self.psl_spec.enabled:
             raise ValueError(
-                'MCTformer+-FinalLN is defined only for the native joint-token '
+                'MCTformer+ FinalLN ablations are defined only for the native '
+                'joint-token '
                 'MCTformer+ path, not persistent-semantic variants'
             )
         self.psl_interaction_layers = parse_interaction_layers(
@@ -439,10 +446,16 @@ class MCTformerPlus(VisionTransformer):
         final_tokens = self.norm(x) if self.final_norm else x
         x_cls = final_tokens[:, self._foreground_slice()]
         x_patch = final_tokens[:, self._patch_slice(patch_count)]
+        if self.patch_final_norm:
+            # LayerNorm acts independently on the final embedding dimension,
+            # so normalizing only this slice is exactly the patch readout of
+            # full-sequence FinalLN while the class readout remains raw.
+            x_patch = self.norm(x_patch)
         auxiliary = {
             'variant': self.bcss_variant,
             'patch_count': patch_count,
             'final_norm': self.final_norm,
+            'patch_final_norm': self.patch_final_norm,
         }
         if self.bcss_spec.backbone_register:
             auxiliary['register_tokens'] = final_tokens[
@@ -890,16 +903,43 @@ def checkpoint_final_norm_enabled(checkpoint):
     return value
 
 
-def validate_mctformerplus_final_norm_checkpoint(checkpoint, expected):
-    """Prevent enabling FinalLN on a checkpoint trained without FinalLN."""
+def checkpoint_patch_final_norm_enabled(checkpoint):
+    """Return the recorded patch-only FinalLN state, defaulting legacy off."""
 
-    if not isinstance(expected, bool):
-        raise TypeError('expected FinalLN state must be a boolean')
-    observed = checkpoint_final_norm_enabled(checkpoint)
-    if observed != expected:
+    if not isinstance(checkpoint, Mapping):
+        raise TypeError(
+            f'Checkpoint must be a mapping, got {type(checkpoint).__name__}'
+        )
+    value = checkpoint.get('patch_final_norm', False)
+    if not isinstance(value, bool):
+        raise TypeError(
+            'checkpoint patch_final_norm metadata must be a boolean'
+        )
+    return value
+
+
+def validate_mctformerplus_final_norm_checkpoint(
+        checkpoint, expected, expected_patch=False):
+    """Require checkpoint and requested FinalLN readout scopes to match."""
+
+    if not isinstance(expected, bool) or not isinstance(expected_patch, bool):
+        raise TypeError('expected FinalLN states must be booleans')
+    if expected and expected_patch:
         raise ValueError(
-            f'Checkpoint final_norm={observed} does not match requested '
-            f'final_norm={expected}'
+            'requested final_norm and patch_final_norm are mutually exclusive'
+        )
+    observed = checkpoint_final_norm_enabled(checkpoint)
+    observed_patch = checkpoint_patch_final_norm_enabled(checkpoint)
+    if observed and observed_patch:
+        raise ValueError(
+            'checkpoint final_norm and patch_final_norm cannot both be true'
+        )
+    if (observed, observed_patch) != (expected, expected_patch):
+        raise ValueError(
+            'Checkpoint FinalLN state '
+            f'(final_norm={observed}, patch_final_norm={observed_patch}) '
+            'does not match requested state '
+            f'(final_norm={expected}, patch_final_norm={expected_patch})'
         )
     return observed
 

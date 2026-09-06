@@ -68,9 +68,13 @@ def get_args_parser():
     parser.add_argument(
         '--attention-gamma', default=1.0, type=float,
         help='key-group count correction exponent (TGCA modes only)')
-    parser.add_argument(
+    final_norm_group = parser.add_mutually_exclusive_group()
+    final_norm_group.add_argument(
         '--final-norm', action='store_true',
         help='apply the existing final LayerNorm before MCTformer+ token readout')
+    final_norm_group.add_argument(
+        '--patch-final-norm', action='store_true',
+        help='apply the existing final LayerNorm only to final patch-token readout')
     parser.add_argument('--bcss-variant', default='e0', choices=tuple(BCSS_VARIANTS),
                         help='BCSS screening or prespecified debug variant')
     parser.add_argument('--bcss-num-background-slots', default=1, type=int)
@@ -318,8 +322,8 @@ def main(args):
         'mctformerplus_tiny', 'mctformerplus', 'mctformerplus_base'
     }
     is_mctformerplus = args.model.lower() in mctformerplus_names
-    if args.final_norm and not is_mctformerplus:
-        raise ValueError('--final-norm is supported only by MCTformer+')
+    if (args.final_norm or args.patch_final_norm) and not is_mctformerplus:
+        raise ValueError('FinalLN flags are supported only by MCTformer+')
     if args.finetune == 'auto':
         if is_mctformerplus:
             args.finetune = get_mctformerplus_spec(args.model)['pretrained_url']
@@ -398,7 +402,11 @@ def main(args):
     )
 
     final_norm_kwargs = (
-        {'final_norm': args.final_norm} if is_mctformerplus else {}
+        {
+            'final_norm': args.final_norm,
+            'patch_final_norm': args.patch_final_norm,
+        }
+        if is_mctformerplus else {}
     )
     model = create_model(
         args.model,
@@ -505,6 +513,7 @@ def main(args):
         'train_dataset_size': len(dataset_train),
         'val_batch_size': args.val_batch_size,
         'final_norm': bool(args.final_norm),
+        'patch_final_norm': bool(args.patch_final_norm),
     }
     optimizer_spec = {
         'optimizer': args.opt,
@@ -547,6 +556,7 @@ def main(args):
             'psl': model.psl_configuration(),
             'cti_bgt': model.cti_bgt_configuration(),
             'final_norm': bool(args.final_norm),
+            'patch_final_norm': bool(args.patch_final_norm),
             'epoch': epoch,
             'pretrained': pretrained_metadata,
             'training_spec': training_spec,

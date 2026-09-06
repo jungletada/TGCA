@@ -55,7 +55,9 @@ def parse_args():
     parser.add_argument('--batch-size', type=int, default=16)
     parser.add_argument('--num-workers', type=int, default=8)
     parser.add_argument('--device', default='cuda')
-    parser.add_argument('--final-norm', action='store_true')
+    final_norm_group = parser.add_mutually_exclusive_group()
+    final_norm_group.add_argument('--final-norm', action='store_true')
+    final_norm_group.add_argument('--patch-final-norm', action='store_true')
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--bootstrap-resamples', type=int, default=10000)
     parser.add_argument('--bootstrap-seed', type=int, default=2027)
@@ -202,7 +204,7 @@ def execute(args):
         checkpoint, args.model
     )
     validate_mctformerplus_final_norm_checkpoint(
-        checkpoint, bool(args.final_norm)
+        checkpoint, bool(args.final_norm), bool(args.patch_final_norm)
     )
     attention = checkpoint.get('attention_normalization', {})
     bcss = checkpoint.get('bcss', {'variant': 'e0'})
@@ -228,6 +230,7 @@ def execute(args):
         psl_variant='baseline',
         cti_bgt=False,
         final_norm=bool(args.final_norm),
+        patch_final_norm=bool(args.patch_final_norm),
     )
     state = checkpoint.get('model', checkpoint)
     incompatibility = model.load_state_dict(state, strict=True)
@@ -400,6 +403,7 @@ def execute(args):
             'amp': False,
             'score_transform': 'sigmoid',
             'final_norm': bool(args.final_norm),
+            'patch_final_norm': bool(args.patch_final_norm),
             'macro_definition': 'mean of 20 dataset-level one-vs-rest class AP values',
             'micro_definition': 'AP over flattened image-class pairs',
             'legacy_definition': 'mean AP over the 20-class vector within each image',

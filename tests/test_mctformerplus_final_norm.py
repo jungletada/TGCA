@@ -10,12 +10,13 @@ import torch.nn.functional as F
 from models.mctformer_plus import (
     MCTformerPlus,
     MCTformerPlusCam,
+    checkpoint_patch_final_norm_enabled,
     validate_mctformerplus_final_norm_checkpoint,
 )
 from utils import create_cam_model
 
 
-def _kwargs(final_norm=False):
+def _kwargs(final_norm=False, patch_final_norm=False):
     return {
         'img_size': 32,
         'input_size': 32,
@@ -33,6 +34,7 @@ def _kwargs(final_norm=False):
         'psl_variant': 'baseline',
         'cti_bgt': False,
         'final_norm': final_norm,
+        'patch_final_norm': patch_final_norm,
     }
 
 
@@ -99,6 +101,49 @@ def test_final_norm_changes_only_final_split_and_keeps_raw_cct_tokens():
     assert torch.stack(norm_attn).shape == (2, 2, 4, 6, 6)
 
 
+def test_patch_final_norm_changes_only_patch_readout():
+    torch.manual_seed(121)
+    baseline = MCTformerPlus(**_kwargs()).eval()
+    patch_final_ln = MCTformerPlus(
+        **_kwargs(patch_final_norm=True)
+    ).eval()
+    joint_final_ln = MCTformerPlus(**_kwargs(final_norm=True)).eval()
+    patch_final_ln.load_state_dict(baseline.state_dict(), strict=True)
+    joint_final_ln.load_state_dict(baseline.state_dict(), strict=True)
+    inputs = torch.randn(2, 3, 32, 32)
+
+    with torch.inference_mode():
+        raw_cls, raw_patch, raw_attn, raw_all_cls = baseline.forward_features(inputs)
+        patch_cls, patch_tokens, patch_attn, patch_all_cls = (
+            patch_final_ln.forward_features(inputs)
+        )
+        joint_cls, joint_patch, joint_attn, joint_all_cls = (
+            joint_final_ln.forward_features(inputs)
+        )
+        expected_patch = patch_final_ln.norm(raw_patch)
+
+    torch.testing.assert_close(patch_cls, raw_cls, rtol=0, atol=0)
+    torch.testing.assert_close(
+        patch_tokens, expected_patch, rtol=0, atol=0
+    )
+    # LayerNorm is token-wise, so the patch readout is exactly equal to the
+    # joint FinalLN patch readout for identical pre-normalization weights.
+    torch.testing.assert_close(patch_tokens, joint_patch, rtol=0, atol=0)
+    torch.testing.assert_close(
+        torch.stack(patch_attn), torch.stack(raw_attn), rtol=0, atol=0
+    )
+    torch.testing.assert_close(
+        torch.stack(patch_attn), torch.stack(joint_attn), rtol=0, atol=0
+    )
+    torch.testing.assert_close(
+        torch.stack(patch_all_cls), torch.stack(raw_all_cls), rtol=0, atol=0
+    )
+    torch.testing.assert_close(
+        torch.stack(patch_all_cls), torch.stack(joint_all_cls), rtol=0, atol=0
+    )
+    assert not torch.equal(joint_cls, raw_cls)
+
+
 def test_final_norm_receives_nonzero_training_gradients():
     torch.manual_seed(13)
     model = MCTformerPlus(**_kwargs(final_norm=True)).train()
@@ -109,6 +154,26 @@ def test_final_norm_receives_nonzero_training_gradients():
     loss = loss + F.multilabel_soft_margin_loss(patch_logits, targets)
     loss.backward()
 
+    for parameter in (model.norm.weight, model.norm.bias):
+        assert parameter.grad is not None
+        assert torch.isfinite(parameter.grad).all()
+        assert float(parameter.grad.norm()) > 0.0
+
+
+def test_patch_final_norm_gradient_comes_from_patch_branch_only():
+    torch.manual_seed(131)
+    model = MCTformerPlus(**_kwargs(patch_final_norm=True)).train()
+    inputs = torch.randn(2, 3, 32, 32)
+    targets = torch.tensor([[1.0, 0.0], [0.0, 1.0]])
+
+    class_logits, _all_x_cls, _patch_logits = model(inputs)
+    F.multilabel_soft_margin_loss(class_logits, targets).backward()
+    assert model.norm.weight.grad is None
+    assert model.norm.bias.grad is None
+
+    model.zero_grad(set_to_none=True)
+    _class_logits, _all_x_cls, patch_logits = model(inputs)
+    F.multilabel_soft_margin_loss(patch_logits, targets).backward()
     for parameter in (model.norm.weight, model.norm.bias):
         assert parameter.grad is not None
         assert torch.isfinite(parameter.grad).all()
@@ -138,10 +203,38 @@ def test_final_norm_cam_uses_the_same_normalized_patch_tokens():
     assert native_cam.shape == (2, 2, 2, 2)
 
 
+def test_patch_final_norm_cam_uses_the_same_normalized_patch_tokens():
+    torch.manual_seed(141)
+    training_model = MCTformerPlus(
+        **_kwargs(patch_final_norm=True)
+    ).eval()
+    cam_model = MCTformerPlusCam(
+        **_kwargs(patch_final_norm=True)
+    ).eval()
+    cam_model.load_state_dict(training_model.state_dict(), strict=True)
+    inputs = torch.randn(2, 3, 32, 32)
+
+    with torch.inference_mode():
+        train_features = training_model.forward_features(inputs)
+        cam_features = cam_model.forward_features(inputs)
+        class_tokens, patch_tokens, attention_heads, _ = cam_features
+        patch_grid = patch_tokens.reshape(2, 2, 2, 32).permute(0, 3, 1, 2)
+        patch_logits = cam_model.head(patch_grid.contiguous())
+        head_mean = torch.stack(attention_heads).mean(dim=2)
+        expected_cam = cam_model.get_cam(patch_logits, head_mean)
+        native_cam = cam_model(inputs)
+
+    torch.testing.assert_close(train_features[0], class_tokens, rtol=0, atol=0)
+    torch.testing.assert_close(train_features[1], patch_tokens, rtol=0, atol=0)
+    torch.testing.assert_close(expected_cam, native_cam, rtol=0, atol=0)
+    assert native_cam.shape == (2, 2, 2, 2)
+
+
 def test_cam_factory_and_checkpoint_metadata_require_explicit_match():
     args = Namespace(
         model='mctformerplus', num_classes=20, input_size=32,
-        final_norm=True, attention_normalization='vanilla',
+        final_norm=True, patch_final_norm=False,
+        attention_normalization='vanilla',
         attention_gamma=1.0, bcss_variant='e0',
         bcss_num_background_slots=1, bcss_tau=0.5, bcss_beta=0.5,
         bcss_cls_threshold=0.5, psl_variant='baseline',
@@ -157,6 +250,10 @@ def test_cam_factory_and_checkpoint_metadata_require_explicit_match():
     assert validate_mctformerplus_final_norm_checkpoint(
         {'final_norm': True}, True
     ) is True
+    assert checkpoint_patch_final_norm_enabled({}) is False
+    assert validate_mctformerplus_final_norm_checkpoint(
+        {'patch_final_norm': True}, False, True
+    ) is False
     with pytest.raises(ValueError, match='does not match requested'):
         validate_mctformerplus_final_norm_checkpoint({}, True)
     with pytest.raises(ValueError, match='does not match requested'):
@@ -167,12 +264,32 @@ def test_cam_factory_and_checkpoint_metadata_require_explicit_match():
         validate_mctformerplus_final_norm_checkpoint(
             {'final_norm': 1}, True
         )
+    with pytest.raises(TypeError, match='must be a boolean'):
+        validate_mctformerplus_final_norm_checkpoint(
+            {'patch_final_norm': 1}, False, True
+        )
+    with pytest.raises(ValueError, match='cannot both be true'):
+        validate_mctformerplus_final_norm_checkpoint(
+            {'final_norm': True, 'patch_final_norm': True}, True
+        )
+
+
+def test_final_norm_scopes_are_mutually_exclusive():
+    with pytest.raises(ValueError, match='mutually exclusive'):
+        MCTformerPlus(**_kwargs(final_norm=True, patch_final_norm=True))
 
 
 def test_final_norm_rejects_unrelated_persistent_semantic_path():
     with pytest.raises(ValueError, match='defined only for the native'):
         MCTformerPlus(**{
             **_kwargs(final_norm=True),
+            'psl_variant': 'read_only',
+            'psl_interaction_layers': (1,),
+            'psl_relation_dim': 32,
+        })
+    with pytest.raises(ValueError, match='defined only for the native'):
+        MCTformerPlus(**{
+            **_kwargs(patch_final_norm=True),
             'psl_variant': 'read_only',
             'psl_interaction_layers': (1,),
             'psl_relation_dim': 32,

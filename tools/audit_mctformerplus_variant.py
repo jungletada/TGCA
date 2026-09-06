@@ -43,7 +43,9 @@ def parse_args():
     parser.add_argument('--expected-epochs', type=int, default=45)
     parser.add_argument('--expected-effective-batch', type=int, default=32)
     parser.add_argument('--expected-seed', type=int, default=0)
-    parser.add_argument('--final-norm', action='store_true')
+    final_norm_group = parser.add_mutually_exclusive_group()
+    final_norm_group.add_argument('--final-norm', action='store_true')
+    final_norm_group.add_argument('--patch-final-norm', action='store_true')
     return parser.parse_args()
 
 
@@ -75,7 +77,7 @@ def execute(args):
         checkpoint, args.model
     )
     validate_mctformerplus_final_norm_checkpoint(
-        checkpoint, bool(args.final_norm)
+        checkpoint, bool(args.final_norm), bool(args.patch_final_norm)
     )
     variant = resolution['variant']
     spec = get_mctformerplus_spec(variant)
@@ -84,12 +86,14 @@ def execute(args):
         attention_normalization='vanilla', bcss_variant='e0',
         psl_variant='baseline', cti_bgt=False,
         final_norm=bool(args.final_norm),
+        patch_final_norm=bool(args.patch_final_norm),
     )
     cam_model = build_mctformerplus(
         variant, cam=True, num_classes=20, input_size=args.input_size,
         attention_normalization='vanilla', bcss_variant='e0',
         psl_variant='baseline', cti_bgt=False,
         final_norm=bool(args.final_norm),
+        patch_final_norm=bool(args.patch_final_norm),
     )
     state = checkpoint.get('model', checkpoint)
     training_result = training_model.load_state_dict(state, strict=True)
@@ -133,6 +137,10 @@ def execute(args):
         'final_norm_matches': (
             bool(checkpoint.get('final_norm', False)) == bool(args.final_norm)
         ),
+        'patch_final_norm_matches': (
+            bool(checkpoint.get('patch_final_norm', False))
+            == bool(args.patch_final_norm)
+        ),
     }
     modern = not resolution['legacy_small_import']
     checkpoint_pretrained = checkpoint.get('pretrained', {})
@@ -169,6 +177,16 @@ def execute(args):
         ),
         'seed_is_0': (
             checkpoint_training.get('seed') == args.expected_seed
+            if modern else True
+        ),
+        'training_final_norm_matches': (
+            checkpoint_training.get('final_norm', False)
+            == bool(args.final_norm)
+            if modern else True
+        ),
+        'training_patch_final_norm_matches': (
+            checkpoint_training.get('patch_final_norm', False)
+            == bool(args.patch_final_norm)
             if modern else True
         ),
         'final_epoch_matches': (
@@ -240,6 +258,7 @@ def execute(args):
             'psl': psl,
             'cti_bgt': cti,
             'final_norm': bool(args.final_norm),
+            'patch_final_norm': bool(args.patch_final_norm),
             'checks': method_checks,
         },
         'checkpoint_metadata_checks': modern_checks,
