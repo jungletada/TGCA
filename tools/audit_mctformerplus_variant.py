@@ -23,6 +23,7 @@ from models.mctformer_plus import (  # noqa: E402
     get_mctformerplus_spec,
     model_spec_from_instance,
     resolve_mctformerplus_checkpoint_variant,
+    validate_mctformerplus_final_norm_checkpoint,
 )
 
 
@@ -42,6 +43,7 @@ def parse_args():
     parser.add_argument('--expected-epochs', type=int, default=45)
     parser.add_argument('--expected-effective-batch', type=int, default=32)
     parser.add_argument('--expected-seed', type=int, default=0)
+    parser.add_argument('--final-norm', action='store_true')
     return parser.parse_args()
 
 
@@ -72,17 +74,22 @@ def execute(args):
     resolution = resolve_mctformerplus_checkpoint_variant(
         checkpoint, args.model
     )
+    validate_mctformerplus_final_norm_checkpoint(
+        checkpoint, bool(args.final_norm)
+    )
     variant = resolution['variant']
     spec = get_mctformerplus_spec(variant)
     training_model = build_mctformerplus(
         variant, num_classes=20, input_size=args.input_size,
         attention_normalization='vanilla', bcss_variant='e0',
         psl_variant='baseline', cti_bgt=False,
+        final_norm=bool(args.final_norm),
     )
     cam_model = build_mctformerplus(
         variant, cam=True, num_classes=20, input_size=args.input_size,
         attention_normalization='vanilla', bcss_variant='e0',
         psl_variant='baseline', cti_bgt=False,
+        final_norm=bool(args.final_norm),
     )
     state = checkpoint.get('model', checkpoint)
     training_result = training_model.load_state_dict(state, strict=True)
@@ -123,6 +130,9 @@ def execute(args):
         'bcss_e0': bcss.get('variant', 'e0') == 'e0',
         'psl_baseline': psl.get('variant', 'baseline') == 'baseline',
         'cti_bgt_disabled': not bool(cti.get('enabled', False)),
+        'final_norm_matches': (
+            bool(checkpoint.get('final_norm', False)) == bool(args.final_norm)
+        ),
     }
     modern = not resolution['legacy_small_import']
     checkpoint_pretrained = checkpoint.get('pretrained', {})
@@ -229,6 +239,7 @@ def execute(args):
             'bcss': bcss,
             'psl': psl,
             'cti_bgt': cti,
+            'final_norm': bool(args.final_norm),
             'checks': method_checks,
         },
         'checkpoint_metadata_checks': modern_checks,

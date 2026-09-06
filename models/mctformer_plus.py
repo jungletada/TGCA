@@ -37,8 +37,10 @@ __all__ = [
     'mctformerplus_base',
     'mctformerplus_tiny',
     'model_spec_from_instance',
+    'checkpoint_final_norm_enabled',
     'resolve_mctformerplus_checkpoint_variant',
     'resolve_mctformerplus_variant',
+    'validate_mctformerplus_final_norm_checkpoint',
 ]
 
 
@@ -147,8 +149,10 @@ class MCTformerPlus(VisionTransformer):
             bcss_semantic_temperature=1.0, psl_variant='baseline',
             psl_interaction_layers=(11,), psl_relation_dim=384,
             psl_num_background_latents=1, cti_bgt=False, cti_bgt_weight=0.1,
-            cti_bgt_n_layers=6, cti_bgt_affinity_start=4, *args, **kwargs):
+            cti_bgt_n_layers=6, cti_bgt_affinity_start=4, final_norm=False,
+            *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.final_norm = bool(final_norm)
         self.cti_bgt = bool(cti_bgt)
         self.cti_bgt_weight = cti_bgt_weight
         self.cti_bgt_n_layers = cti_bgt_n_layers
@@ -235,6 +239,11 @@ class MCTformerPlus(VisionTransformer):
 
         self.psl_variant = psl_variant.lower()
         self.psl_spec = validate_psl_variant(self.psl_variant)
+        if self.final_norm and self.psl_spec.enabled:
+            raise ValueError(
+                'MCTformer+-FinalLN is defined only for the native joint-token '
+                'MCTformer+ path, not persistent-semantic variants'
+            )
         self.psl_interaction_layers = parse_interaction_layers(
             psl_interaction_layers)
         self.psl_relation_dim = int(psl_relation_dim)
@@ -424,16 +433,25 @@ class MCTformerPlus(VisionTransformer):
             attn_weights.append(weights_i)
             all_x_cls.append(x[:, self._foreground_slice()])
             
-        x_cls = x[:, self._foreground_slice()]
-        x_patch = x[:, self._patch_slice(patch_count)]
+        # MCTformer+-FinalLN changes only the readout of the complete final
+        # token sequence. Per-block class tokens above intentionally remain
+        # raw post-block values for the unchanged CCT loss.
+        final_tokens = self.norm(x) if self.final_norm else x
+        x_cls = final_tokens[:, self._foreground_slice()]
+        x_patch = final_tokens[:, self._patch_slice(patch_count)]
         auxiliary = {
             'variant': self.bcss_variant,
             'patch_count': patch_count,
+            'final_norm': self.final_norm,
         }
         if self.bcss_spec.backbone_register:
-            auxiliary['register_tokens'] = x[:, self.num_classes + patch_count:]
+            auxiliary['register_tokens'] = final_tokens[
+                :, self.num_classes + patch_count:
+            ]
         elif self.bcss_spec.backbone_background:
-            auxiliary['background_tokens'] = x[:, self.num_classes + patch_count:]
+            auxiliary['background_tokens'] = final_tokens[
+                :, self.num_classes + patch_count:
+            ]
 
         if self.semantic_slot_decoder is not None:
             cls_logits = x_cls.mean(-1)
@@ -857,6 +875,33 @@ def _checkpoint_state_dict(checkpoint):
             (key[len('module.'):], value) for key, value in state.items()
         )
     return state
+
+
+def checkpoint_final_norm_enabled(checkpoint):
+    """Return the recorded FinalLN state, defaulting legacy checkpoints off."""
+
+    if not isinstance(checkpoint, Mapping):
+        raise TypeError(
+            f'Checkpoint must be a mapping, got {type(checkpoint).__name__}'
+        )
+    value = checkpoint.get('final_norm', False)
+    if not isinstance(value, bool):
+        raise TypeError('checkpoint final_norm metadata must be a boolean')
+    return value
+
+
+def validate_mctformerplus_final_norm_checkpoint(checkpoint, expected):
+    """Prevent enabling FinalLN on a checkpoint trained without FinalLN."""
+
+    if not isinstance(expected, bool):
+        raise TypeError('expected FinalLN state must be a boolean')
+    observed = checkpoint_final_norm_enabled(checkpoint)
+    if observed != expected:
+        raise ValueError(
+            f'Checkpoint final_norm={observed} does not match requested '
+            f'final_norm={expected}'
+        )
+    return observed
 
 
 def _state_architecture(state):

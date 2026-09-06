@@ -201,6 +201,7 @@ def create_cam_model(args):
             psl_relation_dim=getattr(args, 'psl_relation_dim', 384),
             psl_num_background_latents=getattr(
                 args, 'psl_num_background_latents', 1),
+            final_norm=getattr(args, 'final_norm', False),
             cti_bgt=getattr(args, 'cti_bgt', False),
             cti_bgt_weight=getattr(args, 'cti_bgt_weight', 0.1),
             cti_bgt_n_layers=getattr(args, 'cti_bgt_n_layers', 6),

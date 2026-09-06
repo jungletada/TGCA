@@ -30,6 +30,7 @@ from models.mctformer_plus import (  # noqa: E402
     build_mctformerplus,
     model_spec_from_instance,
     resolve_mctformerplus_checkpoint_variant,
+    validate_mctformerplus_final_norm_checkpoint,
 )
 
 
@@ -54,6 +55,7 @@ def parse_args():
     parser.add_argument('--batch-size', type=int, default=16)
     parser.add_argument('--num-workers', type=int, default=8)
     parser.add_argument('--device', default='cuda')
+    parser.add_argument('--final-norm', action='store_true')
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--bootstrap-resamples', type=int, default=10000)
     parser.add_argument('--bootstrap-seed', type=int, default=2027)
@@ -199,6 +201,9 @@ def execute(args):
     resolution = resolve_mctformerplus_checkpoint_variant(
         checkpoint, args.model
     )
+    validate_mctformerplus_final_norm_checkpoint(
+        checkpoint, bool(args.final_norm)
+    )
     attention = checkpoint.get('attention_normalization', {})
     bcss = checkpoint.get('bcss', {'variant': 'e0'})
     psl = checkpoint.get('psl', {'variant': 'baseline'})
@@ -222,6 +227,7 @@ def execute(args):
         bcss_variant='e0',
         psl_variant='baseline',
         cti_bgt=False,
+        final_norm=bool(args.final_norm),
     )
     state = checkpoint.get('model', checkpoint)
     incompatibility = model.load_state_dict(state, strict=True)
@@ -393,6 +399,7 @@ def execute(args):
             'horizontal_flip': False,
             'amp': False,
             'score_transform': 'sigmoid',
+            'final_norm': bool(args.final_norm),
             'macro_definition': 'mean of 20 dataset-level one-vs-rest class AP values',
             'micro_definition': 'AP over flattened image-class pairs',
             'legacy_definition': 'mean AP over the 20-class vector within each image',

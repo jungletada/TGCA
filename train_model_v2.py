@@ -68,6 +68,9 @@ def get_args_parser():
     parser.add_argument(
         '--attention-gamma', default=1.0, type=float,
         help='key-group count correction exponent (TGCA modes only)')
+    parser.add_argument(
+        '--final-norm', action='store_true',
+        help='apply the existing final LayerNorm before MCTformer+ token readout')
     parser.add_argument('--bcss-variant', default='e0', choices=tuple(BCSS_VARIANTS),
                         help='BCSS screening or prespecified debug variant')
     parser.add_argument('--bcss-num-background-slots', default=1, type=int)
@@ -315,6 +318,8 @@ def main(args):
         'mctformerplus_tiny', 'mctformerplus', 'mctformerplus_base'
     }
     is_mctformerplus = args.model.lower() in mctformerplus_names
+    if args.final_norm and not is_mctformerplus:
+        raise ValueError('--final-norm is supported only by MCTformer+')
     if args.finetune == 'auto':
         if is_mctformerplus:
             args.finetune = get_mctformerplus_spec(args.model)['pretrained_url']
@@ -392,6 +397,9 @@ def main(args):
         drop_last=False
     )
 
+    final_norm_kwargs = (
+        {'final_norm': args.final_norm} if is_mctformerplus else {}
+    )
     model = create_model(
         args.model,
         pretrained=False,
@@ -416,7 +424,8 @@ def main(args):
         cti_bgt=args.cti_bgt,
         cti_bgt_weight=args.cti_bgt_weight,
         cti_bgt_n_layers=args.cti_bgt_n_layers,
-        cti_bgt_affinity_start=args.cti_bgt_affinity_start)
+        cti_bgt_affinity_start=args.cti_bgt_affinity_start,
+        **final_norm_kwargs)
 
     # Variant-specific parameter initialization consumes different amounts of
     # RNG. Reset before optimization so augmentation, dropout, and sampling use
@@ -495,6 +504,7 @@ def main(args):
         'consumed_samples_per_epoch': args.consumed_samples_per_epoch,
         'train_dataset_size': len(dataset_train),
         'val_batch_size': args.val_batch_size,
+        'final_norm': bool(args.final_norm),
     }
     optimizer_spec = {
         'optimizer': args.opt,
@@ -536,6 +546,7 @@ def main(args):
             },
             'psl': model.psl_configuration(),
             'cti_bgt': model.cti_bgt_configuration(),
+            'final_norm': bool(args.final_norm),
             'epoch': epoch,
             'pretrained': pretrained_metadata,
             'training_spec': training_spec,

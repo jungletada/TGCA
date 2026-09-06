@@ -22,7 +22,10 @@ from models.cti_bgt import add_cti_bgt_arguments, validate_cti_bgt_checkpoint
 from models.tgca import SUPPORTED_MODES
 from models.bcss import BCSS_VARIANTS
 from models.persistent_semantic import PSL_VARIANTS, parse_interaction_layers
-from models.mctformer_plus import resolve_mctformerplus_checkpoint_variant
+from models.mctformer_plus import (
+    resolve_mctformerplus_checkpoint_variant,
+    validate_mctformerplus_final_norm_checkpoint,
+)
 
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:256"
@@ -43,6 +46,9 @@ def get_args_parser():
     parser.add_argument(
         '--attention-gamma', default=1.0, type=float,
         help='key-group count correction exponent (TGCA modes only)')
+    parser.add_argument(
+        '--final-norm', action='store_true',
+        help='use the FinalLN readout recorded by the trained checkpoint')
     parser.add_argument('--bcss-variant', default='e0', choices=tuple(BCSS_VARIANTS))
     parser.add_argument('--bcss-num-background-slots', default=1, type=int)
     parser.add_argument('--bcss-tau', default=0.5, type=float)
@@ -434,6 +440,11 @@ if __name__ == '__main__':
         variant_resolution = resolve_mctformerplus_checkpoint_variant(
             checkpoint, args.model
         )
+        validate_mctformerplus_final_norm_checkpoint(
+            checkpoint, bool(args.final_norm)
+        )
+    elif args.final_norm:
+        raise ValueError('--final-norm is supported only by MCTformer+')
     model = create_cam_model(args)
     if hasattr(model, 'cti_bgt_configuration'):
         validate_cti_bgt_checkpoint(checkpoint, model)
