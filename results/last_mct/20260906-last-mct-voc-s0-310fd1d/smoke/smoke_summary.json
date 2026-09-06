@@ -1,0 +1,11 @@
+{
+  "cam_complete": true,
+  "cam_files": 4,
+  "checkpoint_strict_audit_passed": true,
+  "patch_loss_decrease_observed": true,
+  "patch_loss_observations": [
+    0.6912,
+    0.6885
+  ],
+  "status": "pass"
+}

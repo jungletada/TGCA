@@ -1,0 +1,200 @@
+{
+  "bootstrap": {
+    "ci95_fraction": {
+      "class_token_legacy_mean_image_ap": [
+        0.9333746518563928,
+        0.9492226764015067
+      ],
+      "class_token_macro_class_ap": [
+        0.876362840353553,
+        0.9024828835016658
+      ],
+      "class_token_micro_ap": [
+        0.9101647489248291,
+        0.9280857476537057
+      ],
+      "patch_last_mct_legacy_mean_image_ap": [
+        0.9422219687531049,
+        0.9569135753967939
+      ],
+      "patch_last_mct_macro_class_ap": [
+        0.8901732416161419,
+        0.9128847734802487
+      ],
+      "patch_last_mct_micro_ap": [
+        0.9185668556906639,
+        0.9348631426020116
+      ]
+    },
+    "ci95_percent": {
+      "class_token_legacy_mean_image_ap": [
+        93.33746518563927,
+        94.92226764015066
+      ],
+      "class_token_macro_class_ap": [
+        87.6362840353553,
+        90.24828835016659
+      ],
+      "class_token_micro_ap": [
+        91.01647489248292,
+        92.80857476537057
+      ],
+      "patch_last_mct_legacy_mean_image_ap": [
+        94.22219687531049,
+        95.69135753967939
+      ],
+      "patch_last_mct_macro_class_ap": [
+        89.01732416161418,
+        91.28847734802487
+      ],
+      "patch_last_mct_micro_ap": [
+        91.85668556906639,
+        93.48631426020117
+      ]
+    },
+    "resamples": 5000,
+    "seed": 20270906,
+    "training_seed_uncertainty_included": false,
+    "unit": "image"
+  },
+  "checkpoint": {
+    "epoch": 44,
+    "path": "/home/peng/code/TGCA/results/last_mct/20260906-last-mct-voc-s0-310fd1d/checkpoints/last_mct/mctformerplus_final.pth",
+    "policy": "final",
+    "sha256": "3ed451f1062b5746b1cbf36a380c1643968d4a5938cad35fe0ed27ed0d69fcd3"
+  },
+  "class_names": [
+    "aeroplane",
+    "bicycle",
+    "bird",
+    "boat",
+    "bottle",
+    "bus",
+    "car",
+    "cat",
+    "chair",
+    "cow",
+    "diningtable",
+    "dog",
+    "horse",
+    "motorbike",
+    "person",
+    "pottedplant",
+    "sheep",
+    "sofa",
+    "train",
+    "tvmonitor"
+  ],
+  "classification_loss": {
+    "class_token_multilabel_soft_margin_mean": 0.06330415667687062,
+    "patch_last_mct_multilabel_soft_margin_mean": 0.060058312047095525,
+    "training_objective_sum_mean": 0.12336246872396614
+  },
+  "dataset": "PASCAL VOC 2012",
+  "elapsed_seconds": 16.67067474499345,
+  "finite": true,
+  "metrics_fraction": {
+    "class_token": {
+      "legacy_mean_image_ap": 0.9413900280299975,
+      "macro_class_ap": 0.8887736946304903,
+      "micro_ap": 0.9190924727668722
+    },
+    "patch_last_mct": {
+      "legacy_mean_image_ap": 0.9495716597696611,
+      "macro_class_ap": 0.9015188998405692,
+      "micro_ap": 0.9267453704353523
+    }
+  },
+  "metrics_percent": {
+    "class_token": {
+      "legacy_mean_image_ap": 94.13900280299976,
+      "macro_class_ap": 88.87736946304902,
+      "micro_ap": 91.90924727668722
+    },
+    "patch_last_mct": {
+      "legacy_mean_image_ap": 94.95716597696611,
+      "macro_class_ap": 90.15188998405692,
+      "micro_ap": 92.67453704353524
+    }
+  },
+  "model_spec": {
+    "cam_class_to_patch_layers": 3,
+    "cam_patch_to_patch_layers": 12,
+    "depth": 12,
+    "embed_dim": 384,
+    "family": "MCTformer+",
+    "head_dim": 64,
+    "mlp_ratio": 4,
+    "model_name": "mctformerplus",
+    "num_heads": 6,
+    "patch_size": [
+      16,
+      16
+    ],
+    "variant": "small"
+  },
+  "num_images": 1449,
+  "protocol": {
+    "amp": false,
+    "final_norm": false,
+    "horizontal_flip": false,
+    "input_size": 448,
+    "last_mct": true,
+    "legacy_definition": "mean AP over the 20-class vector within each image",
+    "macro_definition": "mean of 20 dataset-level one-vs-rest class AP values",
+    "micro_definition": "AP over flattened image-class pairs",
+    "patch_branch": "patch_last_mct",
+    "patch_final_norm": true,
+    "score_transform": "sigmoid",
+    "single_scale": true,
+    "transform": "datasets_cam.build_transform(False, False)"
+  },
+  "provenance": {
+    "conda_environment": "tgca-repro",
+    "cuda": "11.8",
+    "device": "cuda",
+    "labels_path": "/home/peng/data/VOCdevkit/VOC2012/ImageLabel/cls_labels.npy",
+    "labels_sha256": "0dcf22b58230a791f5ae169f6d945f4b009af845a7d02747479085eeb5a2e6ac",
+    "list_path": "/home/peng/data/VOCdevkit/VOC2012/ImageLists/val_id.txt",
+    "list_sha256": "6f8edc37993764f6e212237d39546fb595246244147e8a050813c520aac0ade1",
+    "python": "3.9.25",
+    "torch": "2.1.0",
+    "voc_root": "/home/peng/data/VOCdevkit/VOC2012"
+  },
+  "schema_version": 1,
+  "split": "val_id",
+  "variant_resolution": {
+    "legacy_small_import": false,
+    "legacy_small_import_manifest": null,
+    "model_name": "mctformerplus",
+    "model_spec_present": true,
+    "state_architecture": {
+      "block_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "class_token_count": 20,
+      "depth": 12,
+      "embed_dim": 384,
+      "patch_size": [
+        16,
+        16
+      ],
+      "qkv_shape": [
+        1152,
+        384
+      ]
+    },
+    "variant": "small"
+  }
+}

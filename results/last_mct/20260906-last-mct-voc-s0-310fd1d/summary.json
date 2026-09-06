@@ -1,0 +1,222 @@
+{
+  "cam_results": [
+    {
+      "best_raw_cam_miou_percent": 70.33970662277234,
+      "best_threshold": 0.48,
+      "fixed_raw_cam_miou_percent": 70.06305830908285,
+      "fixed_threshold": 0.45,
+      "foreground_precision_percent_at_fixed_threshold": 80.7353249256176,
+      "foreground_recall_percent_at_fixed_threshold": 85.8168977759483,
+      "model": "Original MCTformer+"
+    },
+    {
+      "best_raw_cam_miou_percent": 70.02435915114744,
+      "best_threshold": 0.5,
+      "fixed_raw_cam_miou_percent": 69.1908565369972,
+      "fixed_threshold": 0.45,
+      "foreground_precision_percent_at_fixed_threshold": 78.7619429298976,
+      "foreground_recall_percent_at_fixed_threshold": 87.03590364874388,
+      "model": "PatchFinalLN MCTformer+"
+    },
+    {
+      "best_raw_cam_miou_percent": 62.215371830012714,
+      "best_threshold": 0.56,
+      "fixed_raw_cam_miou_percent": 58.87828871294516,
+      "fixed_threshold": 0.45,
+      "foreground_precision_percent_at_fixed_threshold": 62.883366231323635,
+      "foreground_recall_percent_at_fixed_threshold": 84.4100689901126,
+      "model": "Last-MCT"
+    }
+  ],
+  "classification_results": [
+    {
+      "class_token_macro_map_percent": 92.90631608285518,
+      "class_token_validation_loss": 0.05063256781787359,
+      "model": "Original MCTformer+",
+      "patch_head_macro_map_percent": 93.2576965561305,
+      "patch_head_validation_loss": 0.049779508630516944
+    },
+    {
+      "class_token_macro_map_percent": 92.91619025506395,
+      "class_token_validation_loss": 0.04924924780657737,
+      "model": "PatchFinalLN MCTformer+",
+      "patch_head_macro_map_percent": 93.31349787399738,
+      "patch_head_validation_loss": 0.048790865381723274
+    },
+    {
+      "class_token_macro_map_percent": 88.87736946304902,
+      "class_token_validation_loss": 0.06330415667687062,
+      "model": "Last-MCT",
+      "patch_head_macro_map_percent": 90.15188998405692,
+      "patch_head_validation_loss": 0.060058312047095525
+    }
+  ],
+  "commands": "/home/peng/anaconda3/envs/tgca-repro/bin/python tools/summarize_last_mct.py --source-run-root /home/peng/code/TGCA/results/final_ln_ablation/20260906-mctformerplus-final-ln-matched-s0-0ef6bd8 --patch-run-root /home/peng/code/TGCA/results/final_ln_ablation/20260906-mctformerplus-patch-final-ln-s0-64f2aa9 --last-run-root /home/peng/code/TGCA/results/last_mct/20260906-last-mct-voc-s0-310fd1d --expected-source-summary-sha256 0b845989429919ce7336f8e9525a7f41d69ada9536f5cde0178438b5310054e6 --expected-patch-summary-sha256 38f514939ffcd6ab420c0f4b19270ecee59911f87f73ca3d6d68315522a993b5",
+  "comparison": [
+    {
+      "best_raw_cam_miou_percent": 70.33970662277234,
+      "best_threshold": 0.48,
+      "class_token_macro_map_percent": 92.90631608285518,
+      "class_token_validation_loss": 0.05063256781787359,
+      "fixed_raw_cam_miou_percent": 70.06305830908285,
+      "fixed_threshold": 0.45,
+      "foreground_precision_percent_at_fixed_threshold": 80.7353249256176,
+      "foreground_recall_percent_at_fixed_threshold": 85.8168977759483,
+      "model": "Original MCTformer+",
+      "patch_head_macro_map_percent": 93.2576965561305,
+      "patch_head_validation_loss": 0.049779508630516944
+    },
+    {
+      "best_raw_cam_miou_percent": 70.02435915114744,
+      "best_threshold": 0.5,
+      "class_token_macro_map_percent": 92.91619025506395,
+      "class_token_validation_loss": 0.04924924780657737,
+      "fixed_raw_cam_miou_percent": 69.1908565369972,
+      "fixed_threshold": 0.45,
+      "foreground_precision_percent_at_fixed_threshold": 78.7619429298976,
+      "foreground_recall_percent_at_fixed_threshold": 87.03590364874388,
+      "model": "PatchFinalLN MCTformer+",
+      "patch_head_macro_map_percent": 93.31349787399738,
+      "patch_head_validation_loss": 0.048790865381723274
+    },
+    {
+      "best_raw_cam_miou_percent": 62.215371830012714,
+      "best_threshold": 0.56,
+      "class_token_macro_map_percent": 88.87736946304902,
+      "class_token_validation_loss": 0.06330415667687062,
+      "fixed_raw_cam_miou_percent": 58.87828871294516,
+      "fixed_threshold": 0.45,
+      "foreground_precision_percent_at_fixed_threshold": 62.883366231323635,
+      "foreground_recall_percent_at_fixed_threshold": 84.4100689901126,
+      "model": "Last-MCT",
+      "patch_head_macro_map_percent": 90.15188998405692,
+      "patch_head_validation_loss": 0.060058312047095525
+    }
+  ],
+  "experiment": "Last-MCT matched VOC seed-0",
+  "immutable_references": {
+    "original": {
+      "checkpoint": {
+        "final_norm": false,
+        "path": "/home/peng/code/TGCA/results/final_ln_ablation/20260906-mctformerplus-final-ln-matched-s0-0ef6bd8/checkpoints/baseline/mctformerplus_final.pth",
+        "sha256": "aced3d3bd69c57782c8e85f1d10abd7ff7ab02504df92c2f2f3898defcf7a65a"
+      },
+      "run_root": "/home/peng/code/TGCA/results/final_ln_ablation/20260906-mctformerplus-final-ln-matched-s0-0ef6bd8",
+      "summary_sha256": "0b845989429919ce7336f8e9525a7f41d69ada9536f5cde0178438b5310054e6"
+    },
+    "patch_final_ln": {
+      "checkpoint": {
+        "final_norm": false,
+        "patch_final_norm": true,
+        "path": "/home/peng/code/TGCA/results/final_ln_ablation/20260906-mctformerplus-patch-final-ln-s0-64f2aa9/checkpoints/patch_final_ln/mctformerplus_final.pth",
+        "sha256": "a2a67b293aec37baea859e80a1e09f17b9fbe72afc2b87cbde22907638cc3227"
+      },
+      "run_root": "/home/peng/code/TGCA/results/final_ln_ablation/20260906-mctformerplus-patch-final-ln-s0-64f2aa9",
+      "summary_sha256": "38f514939ffcd6ab420c0f4b19270ecee59911f87f73ca3d6d68315522a993b5"
+    }
+  },
+  "last_checkpoint": {
+    "path": "/home/peng/code/TGCA/results/last_mct/20260906-last-mct-voc-s0-310fd1d/checkpoints/last_mct/mctformerplus_final.pth",
+    "sha256": "3ed451f1062b5746b1cbf36a380c1643968d4a5938cad35fe0ed27ed0d69fcd3"
+  },
+  "matched_training_spec": {
+    "accum_iter": 1,
+    "consumed_samples_per_epoch": 10560,
+    "effective_batch_size": 32,
+    "epochs": 45,
+    "final_norm": false,
+    "last_mct": true,
+    "last_mct_configuration": {
+      "classifier": "shared Conv2d(D, 20, kernel_size=1) / F.linear",
+      "enabled": true,
+      "eps": 1e-06,
+      "fft_dimension": "embedding",
+      "patch_final_norm": true,
+      "score_formula": "P / abs(P_lowpass - P).clamp_min(eps)",
+      "selection_semantics": "independent patch index per embedding channel",
+      "sigma": 19.595917942265423,
+      "topk": 1,
+      "topk_dimension": "patch"
+    },
+    "micro_batch_size": 32,
+    "nominal_lr": 0.0005,
+    "optimizer_lr": 3.125e-05,
+    "optimizer_updates_per_epoch": 330,
+    "patch_final_norm": true,
+    "seed": 0,
+    "train_dataset_size": 10582,
+    "val_batch_size": 32,
+    "world_size": 1
+  },
+  "method_configuration": {
+    "attention_normalization": {
+      "gamma": 1.0,
+      "mode": "vanilla",
+      "relation_bias": false
+    },
+    "bcss": {
+      "beta": 0.5,
+      "class_threshold": 0.5,
+      "foreground_anchor_mode": "spatial_normalized",
+      "lambda_bg": 0.1,
+      "lambda_fg": 0.5,
+      "num_background_slots": 1,
+      "semantic_temperature": 1.0,
+      "tau": 0.5,
+      "variant": "e0"
+    },
+    "checks": {
+      "attention_gamma_one": true,
+      "attention_relation_bias_disabled": true,
+      "attention_vanilla": true,
+      "bcss_e0": true,
+      "cti_bgt_disabled": true,
+      "final_norm_matches": true,
+      "last_mct_configuration_matches": true,
+      "last_mct_matches": true,
+      "patch_final_norm_matches": true,
+      "patch_head_kernel_matches": true,
+      "psl_baseline": true
+    },
+    "cti_bgt": {
+      "affinity_start": 4,
+      "enabled": false,
+      "n_layers": 6,
+      "weight": 0.1
+    },
+    "final_norm": false,
+    "last_mct": true,
+    "last_mct_configuration": {
+      "classifier": "shared Conv2d(D, 20, kernel_size=1) / F.linear",
+      "enabled": true,
+      "eps": 1e-06,
+      "fft_dimension": "embedding",
+      "patch_final_norm": true,
+      "score_formula": "P / abs(P_lowpass - P).clamp_min(eps)",
+      "selection_semantics": "independent patch index per embedding channel",
+      "sigma": 19.595917942265423,
+      "topk": 1,
+      "topk_dimension": "patch"
+    },
+    "patch_final_norm": true,
+    "psl": {
+      "interaction_layers_zero_based": [
+        11
+      ],
+      "num_background_latents": 1,
+      "ordering": "read_then_write",
+      "patch_dim": 384,
+      "relation": "shared",
+      "relation_dim": 384,
+      "semantic_dim": 384,
+      "variant": "baseline",
+      "write_gate_initialization": 0.0
+    }
+  },
+  "schema_version": 1,
+  "source_status": {
+    "original": "complete",
+    "patch_final_ln": "complete"
+  },
+  "status": "complete"
+}

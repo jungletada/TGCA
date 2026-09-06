@@ -1,0 +1,229 @@
+{
+  "checkpoint": {
+    "epoch": 0,
+    "finite": true,
+    "path": "/home/peng/code/TGCA/results/last_mct/20260906-last-mct-voc-s0-310fd1d/smoke/checkpoints/mctformerplus_final.pth",
+    "sha256": "a28f45cf4e2b51db54de046f0bb6887c1c4447af87a474ac09ee7d2190e7ab29",
+    "size_bytes": 88017766,
+    "state_key_count": 154,
+    "strict_cam_model_load": true,
+    "strict_training_model_load": true
+  },
+  "checkpoint_metadata_checks": {
+    "consumed_samples_match_updates": true,
+    "effective_batch_factors_match": true,
+    "effective_batch_is_32": true,
+    "epochs_is_45": true,
+    "final_epoch_matches": true,
+    "model_spec_present": true,
+    "nominal_lr_matches": true,
+    "optimizer_lr_matches": true,
+    "optimizer_updates_match_dataset": true,
+    "pretrained_filename_matches": true,
+    "pretrained_metadata_present": true,
+    "pretrained_sha_matches": true,
+    "pretrained_url_matches": true,
+    "seed_is_0": true,
+    "training_final_norm_matches": true,
+    "training_last_mct_configuration_matches": true,
+    "training_last_mct_matches": true,
+    "training_patch_final_norm_matches": true,
+    "training_spec_present": true
+  },
+  "command": "/home/peng/anaconda3/envs/tgca-repro/bin/python tools/audit_mctformerplus_variant.py --checkpoint /home/peng/code/TGCA/results/last_mct/20260906-last-mct-voc-s0-310fd1d/smoke/checkpoints/mctformerplus_final.pth --model mctformerplus --official-pretrained /home/peng/.cache/torch/hub/checkpoints/deit_small_patch16_224-cd65a155.pth --expected-pretrained-sha256 cd65a15597004d0ce19d7a9daef969903972db5b398e3a5febcd3c4df1d8f59f --expected-epochs 1 --expected-effective-batch 32 --expected-seed 0 --output /home/peng/code/TGCA/results/last_mct/20260906-last-mct-voc-s0-310fd1d/smoke/audit/last_mct.json --patch-final-norm --last-mct",
+  "method_configuration": {
+    "attention_normalization": {
+      "gamma": 1.0,
+      "mode": "vanilla",
+      "relation_bias": false
+    },
+    "bcss": {
+      "beta": 0.5,
+      "class_threshold": 0.5,
+      "foreground_anchor_mode": "spatial_normalized",
+      "lambda_bg": 0.1,
+      "lambda_fg": 0.5,
+      "num_background_slots": 1,
+      "semantic_temperature": 1.0,
+      "tau": 0.5,
+      "variant": "e0"
+    },
+    "checks": {
+      "attention_gamma_one": true,
+      "attention_relation_bias_disabled": true,
+      "attention_vanilla": true,
+      "bcss_e0": true,
+      "cti_bgt_disabled": true,
+      "final_norm_matches": true,
+      "last_mct_configuration_matches": true,
+      "last_mct_matches": true,
+      "patch_final_norm_matches": true,
+      "patch_head_kernel_matches": true,
+      "psl_baseline": true
+    },
+    "cti_bgt": {
+      "affinity_start": 4,
+      "enabled": false,
+      "n_layers": 6,
+      "weight": 0.1
+    },
+    "final_norm": false,
+    "last_mct": true,
+    "last_mct_configuration": {
+      "classifier": "shared Conv2d(D, 20, kernel_size=1) / F.linear",
+      "enabled": true,
+      "eps": 1e-06,
+      "fft_dimension": "embedding",
+      "patch_final_norm": true,
+      "score_formula": "P / abs(P_lowpass - P).clamp_min(eps)",
+      "selection_semantics": "independent patch index per embedding channel",
+      "sigma": 19.595917942265423,
+      "topk": 1,
+      "topk_dimension": "patch"
+    },
+    "patch_final_norm": true,
+    "psl": {
+      "interaction_layers_zero_based": [
+        11
+      ],
+      "num_background_latents": 1,
+      "ordering": "read_then_write",
+      "patch_dim": 384,
+      "relation": "shared",
+      "relation_dim": 384,
+      "semantic_dim": 384,
+      "variant": "baseline",
+      "write_gate_initialization": 0.0
+    }
+  },
+  "model_spec": {
+    "cam_class_to_patch_layers": 3,
+    "cam_patch_to_patch_layers": 12,
+    "depth": 12,
+    "embed_dim": 384,
+    "family": "MCTformer+",
+    "head_dim": 64,
+    "mlp_ratio": 4,
+    "model_name": "mctformerplus",
+    "num_heads": 6,
+    "patch_size": [
+      16,
+      16
+    ],
+    "variant": "small"
+  },
+  "official_pretrained": {
+    "cache_path": "/home/peng/.cache/torch/hub/checkpoints/deit_small_patch16_224-cd65a155.pth",
+    "ignored_source_classifier_keys": [
+      "head.bias",
+      "head.weight"
+    ],
+    "loaded_key_count": 152,
+    "loaded_numel": 21981696,
+    "missing_source_keys": [],
+    "model_name": "mctformerplus",
+    "passed": true,
+    "randomly_initialized_keys": [
+      "head.bias",
+      "head.weight"
+    ],
+    "shape_mismatches": [],
+    "source_depth": 12,
+    "source_embed_dim": 384,
+    "source_patch_position_shape": [
+      1,
+      196,
+      384
+    ],
+    "source_sha256": "cd65a15597004d0ce19d7a9daef969903972db5b398e3a5febcd3c4df1d8f59f",
+    "source_url": "https://dl.fbaipublicfiles.com/deit/deit_small_patch16_224-cd65a155.pth",
+    "target_class_token_shape": [
+      1,
+      20,
+      384
+    ],
+    "target_depth": 12,
+    "target_embed_dim": 384,
+    "target_patch_position_shape": [
+      1,
+      784,
+      384
+    ],
+    "unexpected_keys": [],
+    "variant": "small"
+  },
+  "parameters": {
+    "total": 21989396,
+    "trainable": 21989396
+  },
+  "passed": true,
+  "schema_version": 1,
+  "source_immutability": {
+    "checkpoint_opened_read_only": true,
+    "pretrained_opened_read_only": true
+  },
+  "status": "pass",
+  "training_spec": {
+    "accum_iter": 1,
+    "consumed_samples_per_epoch": 320,
+    "effective_batch_size": 32,
+    "epochs": 1,
+    "final_norm": false,
+    "last_mct": true,
+    "last_mct_configuration": {
+      "classifier": "shared Conv2d(D, 20, kernel_size=1) / F.linear",
+      "enabled": true,
+      "eps": 1e-06,
+      "fft_dimension": "embedding",
+      "patch_final_norm": true,
+      "score_formula": "P / abs(P_lowpass - P).clamp_min(eps)",
+      "selection_semantics": "independent patch index per embedding channel",
+      "sigma": 19.595917942265423,
+      "topk": 1,
+      "topk_dimension": "patch"
+    },
+    "micro_batch_size": 32,
+    "nominal_lr": 0.0005,
+    "optimizer_lr": 3.125e-05,
+    "optimizer_updates_per_epoch": 10,
+    "patch_final_norm": true,
+    "seed": 0,
+    "train_dataset_size": 320,
+    "val_batch_size": 4,
+    "world_size": 1
+  },
+  "variant_resolution": {
+    "legacy_small_import": false,
+    "legacy_small_import_manifest": null,
+    "model_name": "mctformerplus",
+    "model_spec_present": true,
+    "state_architecture": {
+      "block_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "class_token_count": 20,
+      "depth": 12,
+      "embed_dim": 384,
+      "patch_size": [
+        16,
+        16
+      ],
+      "qkv_shape": [
+        1152,
+        384
+      ]
+    },
+    "variant": "small"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "cache_path": "/home/peng/.cache/torch/hub/checkpoints/deit_small_patch16_224-cd65a155.pth",
+  "ignored_source_classifier_keys": [
+    "head.bias",
+    "head.weight"
+  ],
+  "loaded_key_count": 152,
+  "loaded_numel": 21981696,
+  "missing_source_keys": [],
+  "model_name": "mctformerplus",
+  "passed": true,
+  "randomly_initialized_keys": [
+    "head.bias",
+    "head.weight"
+  ],
+  "shape_mismatches": [],
+  "source_argument": "/home/peng/.cache/torch/hub/checkpoints/deit_small_patch16_224-cd65a155.pth",
+  "source_depth": 12,
+  "source_embed_dim": 384,
+  "source_patch_position_shape": [
+    1,
+    196,
+    384
+  ],
+  "source_sha256": "cd65a15597004d0ce19d7a9daef969903972db5b398e3a5febcd3c4df1d8f59f",
+  "source_url": "https://dl.fbaipublicfiles.com/deit/deit_small_patch16_224-cd65a155.pth",
+  "target_class_token_shape": [
+    1,
+    20,
+    384
+  ],
+  "target_depth": 12,
+  "target_embed_dim": 384,
+  "target_patch_position_shape": [
+    1,
+    784,
+    384
+  ],
+  "unexpected_keys": [],
+  "variant": "small"
+}
