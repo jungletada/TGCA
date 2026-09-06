@@ -53,6 +53,9 @@ def get_args_parser():
     final_norm_group.add_argument(
         '--patch-final-norm', action='store_true',
         help='use the patch-only FinalLN readout recorded by the checkpoint')
+    parser.add_argument(
+        '--last-mct', action='store_true',
+        help='use the fixed LaST patch aggregator recorded by the checkpoint')
     parser.add_argument('--bcss-variant', default='e0', choices=tuple(BCSS_VARIANTS))
     parser.add_argument('--bcss-num-background-slots', default=1, type=int)
     parser.add_argument('--bcss-tau', default=0.5, type=float)
@@ -445,10 +448,11 @@ if __name__ == '__main__':
             checkpoint, args.model
         )
         validate_mctformerplus_final_norm_checkpoint(
-            checkpoint, bool(args.final_norm), bool(args.patch_final_norm)
+            checkpoint, bool(args.final_norm), bool(args.patch_final_norm),
+            bool(args.last_mct),
         )
-    elif args.final_norm or args.patch_final_norm:
-        raise ValueError('FinalLN flags are supported only by MCTformer+')
+    elif args.final_norm or args.patch_final_norm or args.last_mct:
+        raise ValueError('FinalLN and Last-MCT flags are supported only by MCTformer+')
     model = create_cam_model(args)
     if hasattr(model, 'cti_bgt_configuration'):
         validate_cti_bgt_checkpoint(checkpoint, model)

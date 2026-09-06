@@ -46,6 +46,7 @@ def parse_args():
     final_norm_group = parser.add_mutually_exclusive_group()
     final_norm_group.add_argument('--final-norm', action='store_true')
     final_norm_group.add_argument('--patch-final-norm', action='store_true')
+    parser.add_argument('--last-mct', action='store_true')
     return parser.parse_args()
 
 
@@ -77,7 +78,8 @@ def execute(args):
         checkpoint, args.model
     )
     validate_mctformerplus_final_norm_checkpoint(
-        checkpoint, bool(args.final_norm), bool(args.patch_final_norm)
+        checkpoint, bool(args.final_norm), bool(args.patch_final_norm),
+        bool(args.last_mct),
     )
     variant = resolution['variant']
     spec = get_mctformerplus_spec(variant)
@@ -87,6 +89,7 @@ def execute(args):
         psl_variant='baseline', cti_bgt=False,
         final_norm=bool(args.final_norm),
         patch_final_norm=bool(args.patch_final_norm),
+        last_mct=bool(args.last_mct),
     )
     cam_model = build_mctformerplus(
         variant, cam=True, num_classes=20, input_size=args.input_size,
@@ -94,6 +97,7 @@ def execute(args):
         psl_variant='baseline', cti_bgt=False,
         final_norm=bool(args.final_norm),
         patch_final_norm=bool(args.patch_final_norm),
+        last_mct=bool(args.last_mct),
     )
     state = checkpoint.get('model', checkpoint)
     training_result = training_model.load_state_dict(state, strict=True)
@@ -141,6 +145,17 @@ def execute(args):
             bool(checkpoint.get('patch_final_norm', False))
             == bool(args.patch_final_norm)
         ),
+        'last_mct_matches': (
+            bool(checkpoint.get('last_mct', False)) == bool(args.last_mct)
+        ),
+        'last_mct_configuration_matches': (
+            checkpoint.get('last_mct_configuration', {'enabled': False})
+            == training_model.last_mct_configuration()
+        ),
+        'patch_head_kernel_matches': (
+            tuple(training_model.head.kernel_size)
+            == ((1, 1) if args.last_mct else (3, 3))
+        ),
     }
     modern = not resolution['legacy_small_import']
     checkpoint_pretrained = checkpoint.get('pretrained', {})
@@ -187,6 +202,17 @@ def execute(args):
         'training_patch_final_norm_matches': (
             checkpoint_training.get('patch_final_norm', False)
             == bool(args.patch_final_norm)
+            if modern else True
+        ),
+        'training_last_mct_matches': (
+            checkpoint_training.get('last_mct', False)
+            == bool(args.last_mct)
+            if modern else True
+        ),
+        'training_last_mct_configuration_matches': (
+            checkpoint_training.get(
+                'last_mct_configuration', {'enabled': False}
+            ) == training_model.last_mct_configuration()
             if modern else True
         ),
         'final_epoch_matches': (
@@ -259,6 +285,8 @@ def execute(args):
             'cti_bgt': cti,
             'final_norm': bool(args.final_norm),
             'patch_final_norm': bool(args.patch_final_norm),
+            'last_mct': bool(args.last_mct),
+            'last_mct_configuration': training_model.last_mct_configuration(),
             'checks': method_checks,
         },
         'checkpoint_metadata_checks': modern_checks,

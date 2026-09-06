@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate frozen MCTformer+ class-token and patch-GWRP classification."""
+"""Evaluate frozen MCTformer+ class-token and patch-head classification."""
 
 from __future__ import annotations
 
@@ -58,6 +58,7 @@ def parse_args():
     final_norm_group = parser.add_mutually_exclusive_group()
     final_norm_group.add_argument('--final-norm', action='store_true')
     final_norm_group.add_argument('--patch-final-norm', action='store_true')
+    parser.add_argument('--last-mct', action='store_true')
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--bootstrap-resamples', type=int, default=10000)
     parser.add_argument('--bootstrap-seed', type=int, default=2027)
@@ -204,7 +205,8 @@ def execute(args):
         checkpoint, args.model
     )
     validate_mctformerplus_final_norm_checkpoint(
-        checkpoint, bool(args.final_norm), bool(args.patch_final_norm)
+        checkpoint, bool(args.final_norm), bool(args.patch_final_norm),
+        bool(args.last_mct),
     )
     attention = checkpoint.get('attention_normalization', {})
     bcss = checkpoint.get('bcss', {'variant': 'e0'})
@@ -231,6 +233,7 @@ def execute(args):
         cti_bgt=False,
         final_norm=bool(args.final_norm),
         patch_final_norm=bool(args.patch_final_norm),
+        last_mct=bool(args.last_mct),
     )
     state = checkpoint.get('model', checkpoint)
     incompatibility = model.load_state_dict(state, strict=True)
@@ -298,9 +301,10 @@ def execute(args):
     if not np.isfinite(class_scores).all() or not np.isfinite(patch_scores).all():
         raise RuntimeError('Non-finite classification score')
 
+    patch_branch = 'patch_last_mct' if args.last_mct else 'patch_gwrp'
     branch_scores = {
         'class_token': class_scores,
-        'patch_gwrp': patch_scores,
+        patch_branch: patch_scores,
     }
     point = {
         branch: classification_metrics(labels, scores)
@@ -314,12 +318,15 @@ def execute(args):
     (args.output_dir / 'command.txt').write_text(
         shlex.join([sys.executable] + sys.argv) + '\n', encoding='utf-8'
     )
+    prediction_arrays = {
+        'image_ids': np.asarray(image_ids),
+        'labels': labels,
+        'class_token_scores': class_scores,
+        f'{patch_branch}_scores': patch_scores,
+    }
     np.savez_compressed(
         args.output_dir / 'classification_predictions.npz',
-        image_ids=np.asarray(image_ids),
-        labels=labels,
-        class_token_scores=class_scores,
-        patch_gwrp_scores=patch_scores,
+        **prediction_arrays,
     )
     if bootstrap:
         np.savez_compressed(
@@ -338,11 +345,11 @@ def execute(args):
             'class_token_ap_percent': 100.0 * point[
                 'class_token'
             ]['per_class_ap'][class_id],
-            'patch_gwrp_ap_fraction': point[
-                'patch_gwrp'
+            f'{patch_branch}_ap_fraction': point[
+                patch_branch
             ]['per_class_ap'][class_id],
-            'patch_gwrp_ap_percent': 100.0 * point[
-                'patch_gwrp'
+            f'{patch_branch}_ap_percent': 100.0 * point[
+                patch_branch
             ]['per_class_ap'][class_id],
         })
     with (args.output_dir / 'classification_per_class.csv').open(
@@ -362,11 +369,11 @@ def execute(args):
             'class_token_image_ap_percent': 100.0 * point[
                 'class_token'
             ]['per_image_ap'][index],
-            'patch_gwrp_image_ap_fraction': point[
-                'patch_gwrp'
+            f'{patch_branch}_image_ap_fraction': point[
+                patch_branch
             ]['per_image_ap'][index],
-            'patch_gwrp_image_ap_percent': 100.0 * point[
-                'patch_gwrp'
+            f'{patch_branch}_image_ap_percent': 100.0 * point[
+                patch_branch
             ]['per_image_ap'][index],
         })
     with (args.output_dir / 'classification_per_image.csv').open(
@@ -404,6 +411,8 @@ def execute(args):
             'score_transform': 'sigmoid',
             'final_norm': bool(args.final_norm),
             'patch_final_norm': bool(args.patch_final_norm),
+            'last_mct': bool(args.last_mct),
+            'patch_branch': patch_branch,
             'macro_definition': 'mean of 20 dataset-level one-vs-rest class AP values',
             'micro_definition': 'AP over flattened image-class pairs',
             'legacy_definition': 'mean AP over the 20-class vector within each image',
@@ -420,7 +429,7 @@ def execute(args):
             'class_token_multilabel_soft_margin_mean': (
                 class_loss_sum / len(image_ids)
             ),
-            'patch_gwrp_multilabel_soft_margin_mean': (
+            f'{patch_branch}_multilabel_soft_margin_mean': (
                 patch_loss_sum / len(image_ids)
             ),
             'training_objective_sum_mean': (
