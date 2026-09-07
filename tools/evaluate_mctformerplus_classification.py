@@ -59,6 +59,7 @@ def parse_args():
     final_norm_group.add_argument('--final-norm', action='store_true')
     final_norm_group.add_argument('--patch-final-norm', action='store_true')
     parser.add_argument('--last-mct', action='store_true')
+    parser.add_argument('--class-stable-last', action='store_true')
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--bootstrap-resamples', type=int, default=10000)
     parser.add_argument('--bootstrap-seed', type=int, default=2027)
@@ -206,7 +207,7 @@ def execute(args):
     )
     validate_mctformerplus_final_norm_checkpoint(
         checkpoint, bool(args.final_norm), bool(args.patch_final_norm),
-        bool(args.last_mct),
+        bool(args.last_mct), bool(args.class_stable_last),
     )
     attention = checkpoint.get('attention_normalization', {})
     bcss = checkpoint.get('bcss', {'variant': 'e0'})
@@ -234,6 +235,7 @@ def execute(args):
         final_norm=bool(args.final_norm),
         patch_final_norm=bool(args.patch_final_norm),
         last_mct=bool(args.last_mct),
+        class_stable_last=bool(args.class_stable_last),
     )
     state = checkpoint.get('model', checkpoint)
     incompatibility = model.load_state_dict(state, strict=True)
@@ -301,7 +303,13 @@ def execute(args):
     if not np.isfinite(class_scores).all() or not np.isfinite(patch_scores).all():
         raise RuntimeError('Non-finite classification score')
 
-    patch_branch = 'patch_last_mct' if args.last_mct else 'patch_gwrp'
+    patch_branch = (
+        'patch_last_mct'
+        if args.last_mct else (
+            'patch_class_stable_last'
+            if args.class_stable_last else 'patch_gwrp'
+        )
+    )
     branch_scores = {
         'class_token': class_scores,
         patch_branch: patch_scores,
@@ -412,6 +420,7 @@ def execute(args):
             'final_norm': bool(args.final_norm),
             'patch_final_norm': bool(args.patch_final_norm),
             'last_mct': bool(args.last_mct),
+            'class_stable_last': bool(args.class_stable_last),
             'patch_branch': patch_branch,
             'macro_definition': 'mean of 20 dataset-level one-vs-rest class AP values',
             'micro_definition': 'AP over flattened image-class pairs',

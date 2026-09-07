@@ -27,6 +27,7 @@ from models.persistent_semantic import (
 from models.cti_bgt import cti_bgt_maps, validate_cti_bgt
 
 __all__ = [
+    'ClassStableLastPooler',
     'LastPatchAggregator',
     'MCTFORMERPLUS_VARIANTS',
     'MCTformerPlus',
@@ -38,6 +39,7 @@ __all__ = [
     'mctformerplus_base',
     'mctformerplus_tiny',
     'model_spec_from_instance',
+    'checkpoint_class_stable_last_enabled',
     'checkpoint_final_norm_enabled',
     'checkpoint_last_mct_enabled',
     'checkpoint_patch_final_norm_enabled',
@@ -245,6 +247,135 @@ class LastPatchAggregator(nn.Module):
         pooled = selected.mean(dim=1)
         return pooled, indices, stability
 
+
+class ClassStableLastPooler(nn.Module):
+    """Class-wise LaST selector over spatial response maps.
+
+    Low-pass filtering operates on ``[B, N, D]`` patch tokens only along the
+    embedding dimension. Pooling operates independently for every semantic
+    class over flattened spatial locations and gathers values from the
+    original response map, never from the low-pass map.
+    """
+
+    def __init__(self, embed_dim, topk=1, sigma=None, eps=1e-6):
+        super().__init__()
+        self.embed_dim = int(embed_dim)
+        self.topk = int(topk)
+        self.sigma = (
+            math.sqrt(self.embed_dim) if sigma is None else float(sigma)
+        )
+        self.eps = float(eps)
+        if self.embed_dim < 1:
+            raise ValueError('Class-Stable LaST embed_dim must be positive')
+        if self.topk < 1:
+            raise ValueError('Class-Stable LaST topk must be positive')
+        if not math.isfinite(self.sigma) or self.sigma <= 0:
+            raise ValueError(
+                'Class-Stable LaST sigma must be finite and positive'
+            )
+        if not math.isfinite(self.eps) or self.eps <= 0:
+            raise ValueError('Class-Stable LaST eps must be finite and positive')
+        self.register_buffer('_last_kernel', torch.empty(0), persistent=False)
+
+    def configuration(self):
+        return {
+            'topk': self.topk,
+            'sigma': self.sigma,
+            'eps': self.eps,
+            'score_formula': 'M / abs(M_lowpass - M).clamp_min(eps)',
+            'fft_dimension': 'embedding',
+            'topk_dimension': 'spatial',
+            'selection_semantics': (
+                'independent spatial index per semantic class'
+            ),
+            'gathered_values': 'original M',
+            'lowpass_role': 'selector only',
+        }
+
+    def _get_last_kernel(self, patch_tokens):
+        if patch_tokens.ndim != 3:
+            raise ValueError(
+                'Class-Stable LaST patch tokens must have shape [B, N, D], '
+                f'got {tuple(patch_tokens.shape)}'
+            )
+        width = patch_tokens.shape[-1]
+        if width != self.embed_dim:
+            raise ValueError(
+                'Class-Stable LaST expected embedding width '
+                f'{self.embed_dim}, got {width}'
+            )
+        if self._last_kernel.numel() != width:
+            positions = torch.arange(
+                -width // 2 + 1,
+                width // 2 + 1,
+                device=patch_tokens.device,
+                dtype=patch_tokens.dtype,
+            )
+            kernel = torch.exp(-0.5 * (positions / self.sigma) ** 2)
+            self._last_kernel = kernel / kernel.max()
+        return self._last_kernel.view(1, 1, width).to(
+            device=patch_tokens.device, dtype=patch_tokens.dtype
+        )
+
+    def low_pass(self, patch_tokens):
+        original_dtype = patch_tokens.dtype
+        values = (
+            patch_tokens.float()
+            if original_dtype in (torch.float16, torch.bfloat16)
+            else patch_tokens
+        )
+        kernel = self._get_last_kernel(values)
+        spectrum = torch.fft.fft(values, dim=-1)
+        spectrum = torch.fft.fftshift(spectrum, dim=-1) * kernel
+        low_pass = torch.fft.ifft(
+            torch.fft.ifftshift(spectrum, dim=-1), dim=-1
+        ).real
+        return low_pass.to(original_dtype)
+
+    def stability_score(self, class_map, low_pass_class_map):
+        if class_map.ndim != 4:
+            raise ValueError(
+                'Class-Stable LaST maps must have shape [B, C, H, W], got '
+                f'{tuple(class_map.shape)}'
+            )
+        if class_map.shape != low_pass_class_map.shape:
+            raise ValueError(
+                'Class-Stable LaST original and low-pass map shapes must '
+                f'match, got {tuple(class_map.shape)} and '
+                f'{tuple(low_pass_class_map.shape)}'
+            )
+        if class_map.dtype in (torch.float16, torch.bfloat16):
+            values = class_map.float()
+            low_pass_values = low_pass_class_map.float()
+        else:
+            values = class_map
+            low_pass_values = low_pass_class_map
+        denominator = (low_pass_values - values).abs().clamp_min(self.eps)
+        return values / denominator
+
+    def pool(self, class_map, stability):
+        if class_map.shape != stability.shape:
+            raise ValueError(
+                'Class-Stable LaST map and stability shapes must match, got '
+                f'{tuple(class_map.shape)} and {tuple(stability.shape)}'
+            )
+        original = class_map.flatten(2)
+        scores = stability.flatten(2)
+        if original.shape[-1] < 1:
+            raise ValueError(
+                'Class-Stable LaST requires at least one spatial location'
+            )
+        k = min(self.topk, original.shape[-1])
+        indices = torch.topk(scores, k=k, dim=-1, largest=True).indices
+        selected = torch.gather(original, dim=-1, index=indices)
+        return selected.mean(dim=-1), indices, selected
+
+    def forward(self, class_map, low_pass_class_map):
+        stability = self.stability_score(class_map, low_pass_class_map)
+        pooled, indices, selected = self.pool(class_map, stability)
+        return pooled, indices, stability, selected
+
+
 class MCTformerPlus(VisionTransformer):
     def __init__(
             self, decay_parameter=0.996, input_size=448,
@@ -255,17 +386,22 @@ class MCTformerPlus(VisionTransformer):
             psl_interaction_layers=(11,), psl_relation_dim=384,
             psl_num_background_latents=1, cti_bgt=False, cti_bgt_weight=0.1,
             cti_bgt_n_layers=6, cti_bgt_affinity_start=4, final_norm=False,
-            patch_final_norm=False, last_mct=False, last_topk=1,
-            last_sigma=None, last_eps=1e-6, *args, **kwargs):
+            patch_final_norm=False, last_mct=False, class_stable_last=False,
+            last_topk=1, last_sigma=None, last_eps=1e-6, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.final_norm = bool(final_norm)
         self.patch_final_norm = bool(patch_final_norm)
         self.last_mct = bool(last_mct)
+        self.class_stable_last = bool(class_stable_last)
         if self.final_norm and self.patch_final_norm:
             raise ValueError(
                 'final_norm and patch_final_norm are mutually exclusive'
             )
-        if self.last_mct:
+        if self.last_mct and self.class_stable_last:
+            raise ValueError(
+                'last_mct and class_stable_last are mutually exclusive'
+            )
+        if self.last_mct or self.class_stable_last:
             expected_sigma = math.sqrt(self.embed_dim)
             requested_sigma = (
                 expected_sigma if last_sigma is None else float(last_sigma)
@@ -277,29 +413,30 @@ class MCTformerPlus(VisionTransformer):
             )
             if architecture != (384, 12, 6):
                 raise ValueError(
-                    'Last-MCT first-round support is restricted to '
+                    'LaST ablation first-round support is restricted to '
                     'MCTformer+-Small (embed_dim=384, depth=12, heads=6)'
                 )
             if not self.patch_final_norm or self.final_norm:
                 raise ValueError(
-                    'Last-MCT requires patch_final_norm=True and final_norm=False'
+                    'LaST ablation requires patch_final_norm=True and '
+                    'final_norm=False'
                 )
             if self.attention_normalization != 'vanilla':
-                raise ValueError('Last-MCT requires vanilla attention')
+                raise ValueError('LaST ablations require vanilla attention')
             if str(bcss_variant).lower() != 'e0':
-                raise ValueError('Last-MCT requires BCSS E0')
+                raise ValueError('LaST ablations require BCSS E0')
             if str(psl_variant).lower() != 'baseline':
-                raise ValueError('Last-MCT requires PSL baseline')
+                raise ValueError('LaST ablations require PSL baseline')
             if bool(cti_bgt):
-                raise ValueError('Last-MCT requires CTI-BGT disabled')
+                raise ValueError('LaST ablations require CTI-BGT disabled')
             if int(last_topk) != 1:
-                raise ValueError('Last-MCT first round fixes topk=1')
+                raise ValueError('LaST ablation first round fixes topk=1')
             if requested_sigma != expected_sigma:
                 raise ValueError(
-                    'Last-MCT first round fixes sigma=sqrt(embed_dim)'
+                    'LaST ablation first round fixes sigma=sqrt(embed_dim)'
                 )
             if float(last_eps) != 1e-6:
-                raise ValueError('Last-MCT first round fixes eps=1e-6')
+                raise ValueError('LaST ablation first round fixes eps=1e-6')
         self.cti_bgt = bool(cti_bgt)
         self.cti_bgt_weight = cti_bgt_weight
         self.cti_bgt_n_layers = cti_bgt_n_layers
@@ -330,6 +467,15 @@ class MCTformerPlus(VisionTransformer):
                 kernel_size=3, stride=1, padding=1,
             )
             self.last_patch_aggregator = None
+        self.class_stable_last_pooler = (
+            ClassStableLastPooler(
+                embed_dim=self.embed_dim,
+                topk=last_topk,
+                sigma=last_sigma,
+                eps=last_eps,
+            )
+            if self.class_stable_last else None
+        )
         self.head.apply(self._init_weights)
 
         img_size = to_2tuple(input_size)
@@ -495,6 +641,18 @@ class MCTformerPlus(VisionTransformer):
             'classifier': 'shared Conv2d(D, 20, kernel_size=1) / F.linear',
         }
 
+    def class_stable_last_configuration(self):
+        if not self.class_stable_last:
+            return {'enabled': False}
+        return {
+            'enabled': True,
+            **self.class_stable_last_pooler.configuration(),
+            'patch_final_norm': True,
+            'classifier': 'shared Conv2d(D, 20, kernel_size=3, padding=1)',
+            'classification_map': 'original M',
+            'cam_map': 'original M',
+        }
+
     def _cti_bgt_maps(self, patch_cam, attentions, labels=None):
         return cti_bgt_maps(
             patch_cam, attentions, labels,
@@ -624,6 +782,7 @@ class MCTformerPlus(VisionTransformer):
             'final_norm': self.final_norm,
             'patch_final_norm': self.patch_final_norm,
             'last_mct': self.last_mct,
+            'class_stable_last': self.class_stable_last,
         }
         if self.bcss_spec.backbone_register:
             auxiliary['register_tokens'] = final_tokens[
@@ -693,6 +852,44 @@ class MCTformerPlus(VisionTransformer):
             self.head.bias,
         )
 
+    def class_stable_last_low_pass(self, patch_tokens):
+        if not self.class_stable_last:
+            raise RuntimeError(
+                'class_stable_last_low_pass requires class_stable_last=True'
+            )
+        return self.class_stable_last_pooler.low_pass(patch_tokens)
+
+    def class_stable_last_pool(self, patch_tokens, original_class_map):
+        """Pool original 3x3 class maps using low-pass response stability."""
+        if not self.class_stable_last:
+            raise RuntimeError(
+                'class_stable_last_pool requires class_stable_last=True'
+            )
+        if patch_tokens.ndim != 3 or original_class_map.ndim != 4:
+            raise ValueError(
+                'Expected patch tokens [B,N,D] and class map [B,C,H,W]'
+            )
+        batch, patch_count, width = patch_tokens.shape
+        if original_class_map.shape[0] != batch:
+            raise ValueError('Patch-token and class-map batch sizes must match')
+        height, grid_width = original_class_map.shape[-2:]
+        if patch_count != height * grid_width or width != self.embed_dim:
+            raise ValueError(
+                'Patch-token shape does not match the original class-map grid'
+            )
+        low_pass_tokens = self.class_stable_last_low_pass(patch_tokens)
+        low_pass_grid = low_pass_tokens.reshape(
+            batch, height, grid_width, width
+        ).permute(0, 3, 1, 2).contiguous()
+        # The same 3x3 classifier object produces M and M_lp. M_lp only
+        # selects indices; selected classification values come from M.
+        low_pass_class_map = self.head(low_pass_grid)[
+            :, self._foreground_slice()
+        ]
+        return self.class_stable_last_pooler(
+            original_class_map, low_pass_class_map
+        )
+
     def forward(self, x, active_labels=None):
         w, h = x.shape[2:]
         x_cls, x_patch, attentions, all_x_cls, auxiliary = self.forward_features(
@@ -702,6 +899,7 @@ class MCTformerPlus(VisionTransformer):
             pooled_token, _, _ = self.last_aggregate(x_patch)
             x_patch_logits = self.last_classify(pooled_token)
         else:
+            x_patch_tokens = x_patch
             n, p, c = x_patch.shape
             if w != h:
                 w0 = w // self.patch_embed.patch_size[0]
@@ -719,21 +917,29 @@ class MCTformerPlus(VisionTransformer):
                         x_patch, attentions, active_labels)
                 # BG has no image-level label and no GWRP classification loss.
                 x_patch = x_patch[:, 1:]
-            x_patch_flattened = x_patch.view(
-                x_patch.shape[0], x_patch.shape[1], -1
-            ).permute(0, 2, 1)
-            sorted_patch_token, indices = torch.sort(
-                x_patch_flattened, -2, descending=True
-            )
-            weights = torch.logspace(
-                start=0, end=x_patch_flattened.size(-2) - 1,
-                steps=x_patch_flattened.size(-2), base=self.decay_parameter,
-                device=x_patch.device,
-            )
-            x_patch_logits = torch.sum(
-                sorted_patch_token * weights.unsqueeze(0).unsqueeze(-1),
-                dim=-2,
-            ) / weights.sum()
+            if self.class_stable_last:
+                x_patch_logits, _, _, _ = self.class_stable_last_pool(
+                    # forward_features returns normalized tokens when the
+                    # required patch-only FinalLN is enabled.
+                    patch_tokens=x_patch_tokens,
+                    original_class_map=x_patch[:, self._foreground_slice()],
+                )
+            else:
+                x_patch_flattened = x_patch.view(
+                    x_patch.shape[0], x_patch.shape[1], -1
+                ).permute(0, 2, 1)
+                sorted_patch_token, indices = torch.sort(
+                    x_patch_flattened, -2, descending=True
+                )
+                weights = torch.logspace(
+                    start=0, end=x_patch_flattened.size(-2) - 1,
+                    steps=x_patch_flattened.size(-2), base=self.decay_parameter,
+                    device=x_patch.device,
+                )
+                x_patch_logits = torch.sum(
+                    sorted_patch_token * weights.unsqueeze(0).unsqueeze(-1),
+                    dim=-2,
+                ) / weights.sum()
         x_cls_logits = x_cls.mean(-1)
 
         output = []
@@ -874,7 +1080,12 @@ class MCTformerPlusCam(MCTformerPlus):
         cls_label = torch.ones(b, self.num_classes).to(x.device)
         cls_label[cls_logits <= 0] = 0
 
-        if not self.last_mct:
+        if self.class_stable_last:
+            x_logits, _, _, _ = self.class_stable_last_pool(
+                x_patch_tokens,
+                x_patch[:, self._foreground_slice()],
+            )
+        elif not self.last_mct:
             x_logits = self.gwrp(x_patch[:, self._foreground_slice()])
         patch_label = torch.ones(b, self.num_classes).to(x.device)
         patch_label[x_logits <= 0] = 0
@@ -1148,13 +1359,34 @@ def checkpoint_last_mct_enabled(checkpoint):
     return value
 
 
+def checkpoint_class_stable_last_enabled(checkpoint):
+    """Return recorded Class-Stable LaST state, defaulting legacy off."""
+
+    if not isinstance(checkpoint, Mapping):
+        raise TypeError(
+            f'Checkpoint must be a mapping, got {type(checkpoint).__name__}'
+        )
+    value = checkpoint.get('class_stable_last', False)
+    if not isinstance(value, bool):
+        raise TypeError(
+            'checkpoint class_stable_last metadata must be a boolean'
+        )
+    return value
+
+
 def validate_mctformerplus_final_norm_checkpoint(
-        checkpoint, expected, expected_patch=False, expected_last_mct=False):
-    """Require checkpoint and requested FinalLN/Last-MCT scopes to match."""
+        checkpoint, expected, expected_patch=False, expected_last_mct=False,
+        expected_class_stable_last=False):
+    """Require checkpoint and requested FinalLN/LaST scopes to match."""
 
     if not all(isinstance(value, bool) for value in (
-            expected, expected_patch, expected_last_mct)):
-        raise TypeError('expected FinalLN and Last-MCT states must be booleans')
+            expected, expected_patch, expected_last_mct,
+            expected_class_stable_last)):
+        raise TypeError('expected FinalLN and LaST states must be booleans')
+    if expected_last_mct and expected_class_stable_last:
+        raise ValueError(
+            'requested last_mct and class_stable_last are mutually exclusive'
+        )
     if expected and expected_patch:
         raise ValueError(
             'requested final_norm and patch_final_norm are mutually exclusive'
@@ -1162,6 +1394,11 @@ def validate_mctformerplus_final_norm_checkpoint(
     observed = checkpoint_final_norm_enabled(checkpoint)
     observed_patch = checkpoint_patch_final_norm_enabled(checkpoint)
     observed_last_mct = checkpoint_last_mct_enabled(checkpoint)
+    observed_class_stable = checkpoint_class_stable_last_enabled(checkpoint)
+    if observed_last_mct and observed_class_stable:
+        raise ValueError(
+            'checkpoint last_mct and class_stable_last cannot both be true'
+        )
     if observed and observed_patch:
         raise ValueError(
             'checkpoint final_norm and patch_final_norm cannot both be true'
@@ -1176,15 +1413,29 @@ def validate_mctformerplus_final_norm_checkpoint(
             'requested Last-MCT requires patch_final_norm=True and '
             'final_norm=False'
         )
-    if (observed, observed_patch, observed_last_mct) != (
-            expected, expected_patch, expected_last_mct):
+    if observed_class_stable and (observed or not observed_patch):
         raise ValueError(
-            'Checkpoint FinalLN/Last-MCT state '
+            'checkpoint Class-Stable LaST requires patch_final_norm=true and '
+            'final_norm=false'
+        )
+    if expected_class_stable_last and (expected or not expected_patch):
+        raise ValueError(
+            'requested Class-Stable LaST requires patch_final_norm=True and '
+            'final_norm=False'
+        )
+    if (observed, observed_patch, observed_last_mct,
+            observed_class_stable) != (
+            expected, expected_patch, expected_last_mct,
+            expected_class_stable_last):
+        raise ValueError(
+            'Checkpoint FinalLN/LaST state '
             f'(final_norm={observed}, patch_final_norm={observed_patch}, '
-            f'last_mct={observed_last_mct}) '
+            f'last_mct={observed_last_mct}, '
+            f'class_stable_last={observed_class_stable}) '
             'does not match requested state '
             f'(final_norm={expected}, patch_final_norm={expected_patch}, '
-            f'last_mct={expected_last_mct})'
+            f'last_mct={expected_last_mct}, '
+            f'class_stable_last={expected_class_stable_last})'
         )
     return observed
 

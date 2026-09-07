@@ -47,6 +47,7 @@ def parse_args():
     final_norm_group.add_argument('--final-norm', action='store_true')
     final_norm_group.add_argument('--patch-final-norm', action='store_true')
     parser.add_argument('--last-mct', action='store_true')
+    parser.add_argument('--class-stable-last', action='store_true')
     return parser.parse_args()
 
 
@@ -79,7 +80,7 @@ def execute(args):
     )
     validate_mctformerplus_final_norm_checkpoint(
         checkpoint, bool(args.final_norm), bool(args.patch_final_norm),
-        bool(args.last_mct),
+        bool(args.last_mct), bool(args.class_stable_last),
     )
     variant = resolution['variant']
     spec = get_mctformerplus_spec(variant)
@@ -90,6 +91,7 @@ def execute(args):
         final_norm=bool(args.final_norm),
         patch_final_norm=bool(args.patch_final_norm),
         last_mct=bool(args.last_mct),
+        class_stable_last=bool(args.class_stable_last),
     )
     cam_model = build_mctformerplus(
         variant, cam=True, num_classes=20, input_size=args.input_size,
@@ -98,6 +100,7 @@ def execute(args):
         final_norm=bool(args.final_norm),
         patch_final_norm=bool(args.patch_final_norm),
         last_mct=bool(args.last_mct),
+        class_stable_last=bool(args.class_stable_last),
     )
     state = checkpoint.get('model', checkpoint)
     training_result = training_model.load_state_dict(state, strict=True)
@@ -151,6 +154,15 @@ def execute(args):
         'last_mct_configuration_matches': (
             checkpoint.get('last_mct_configuration', {'enabled': False})
             == training_model.last_mct_configuration()
+        ),
+        'class_stable_last_matches': (
+            bool(checkpoint.get('class_stable_last', False))
+            == bool(args.class_stable_last)
+        ),
+        'class_stable_last_configuration_matches': (
+            checkpoint.get(
+                'class_stable_last_configuration', {'enabled': False}
+            ) == training_model.class_stable_last_configuration()
         ),
         'patch_head_kernel_matches': (
             tuple(training_model.head.kernel_size)
@@ -213,6 +225,17 @@ def execute(args):
             checkpoint_training.get(
                 'last_mct_configuration', {'enabled': False}
             ) == training_model.last_mct_configuration()
+            if modern else True
+        ),
+        'training_class_stable_last_matches': (
+            checkpoint_training.get('class_stable_last', False)
+            == bool(args.class_stable_last)
+            if modern else True
+        ),
+        'training_class_stable_last_configuration_matches': (
+            checkpoint_training.get(
+                'class_stable_last_configuration', {'enabled': False}
+            ) == training_model.class_stable_last_configuration()
             if modern else True
         ),
         'final_epoch_matches': (
@@ -287,6 +310,10 @@ def execute(args):
             'patch_final_norm': bool(args.patch_final_norm),
             'last_mct': bool(args.last_mct),
             'last_mct_configuration': training_model.last_mct_configuration(),
+            'class_stable_last': bool(args.class_stable_last),
+            'class_stable_last_configuration': (
+                training_model.class_stable_last_configuration()
+            ),
             'checks': method_checks,
         },
         'checkpoint_metadata_checks': modern_checks,

@@ -204,6 +204,7 @@ def create_cam_model(args):
             final_norm=getattr(args, 'final_norm', False),
             patch_final_norm=getattr(args, 'patch_final_norm', False),
             last_mct=getattr(args, 'last_mct', False),
+            class_stable_last=getattr(args, 'class_stable_last', False),
             cti_bgt=getattr(args, 'cti_bgt', False),
             cti_bgt_weight=getattr(args, 'cti_bgt_weight', 0.1),
             cti_bgt_n_layers=getattr(args, 'cti_bgt_n_layers', 6),

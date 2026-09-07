@@ -78,6 +78,9 @@ def get_args_parser():
     parser.add_argument(
         '--last-mct', action='store_true',
         help='replace PatchFinalLN GWRP/3x3 patch head with fixed LaST K=1/1x1')
+    parser.add_argument(
+        '--class-stable-last', action='store_true',
+        help='select class-wise Top-K original 3x3 responses via low-pass stability')
     parser.add_argument('--bcss-variant', default='e0', choices=tuple(BCSS_VARIANTS),
                         help='BCSS screening or prespecified debug variant')
     parser.add_argument('--bcss-num-background-slots', default=1, type=int)
@@ -325,14 +328,21 @@ def main(args):
         'mctformerplus_tiny', 'mctformerplus', 'mctformerplus_base'
     }
     is_mctformerplus = args.model.lower() in mctformerplus_names
-    if (args.final_norm or args.patch_final_norm or args.last_mct) \
+    if (args.final_norm or args.patch_final_norm or args.last_mct
+            or args.class_stable_last) \
             and not is_mctformerplus:
-        raise ValueError('FinalLN and Last-MCT flags are supported only by MCTformer+')
-    if args.last_mct and args.model.lower() != 'mctformerplus':
-        raise ValueError('Last-MCT first-round support is restricted to mctformerplus Small')
-    if args.last_mct and (args.final_norm or not args.patch_final_norm):
+        raise ValueError('FinalLN and LaST flags are supported only by MCTformer+')
+    if (args.last_mct or args.class_stable_last) \
+            and args.model.lower() != 'mctformerplus':
         raise ValueError(
-            'Last-MCT requires --patch-final-norm and forbids --final-norm'
+            'LaST first-round support is restricted to mctformerplus Small'
+        )
+    if args.last_mct and args.class_stable_last:
+        raise ValueError('--last-mct and --class-stable-last are mutually exclusive')
+    if (args.last_mct or args.class_stable_last) \
+            and (args.final_norm or not args.patch_final_norm):
+        raise ValueError(
+            'LaST ablations require --patch-final-norm and forbid --final-norm'
         )
     if args.finetune == 'auto':
         if is_mctformerplus:
@@ -416,6 +426,7 @@ def main(args):
             'final_norm': args.final_norm,
             'patch_final_norm': args.patch_final_norm,
             'last_mct': args.last_mct,
+            'class_stable_last': args.class_stable_last,
         }
         if is_mctformerplus else {}
     )
@@ -527,6 +538,10 @@ def main(args):
         'patch_final_norm': bool(args.patch_final_norm),
         'last_mct': bool(args.last_mct),
         'last_mct_configuration': model.last_mct_configuration(),
+        'class_stable_last': bool(args.class_stable_last),
+        'class_stable_last_configuration': (
+            model.class_stable_last_configuration()
+        ),
     }
     optimizer_spec = {
         'optimizer': args.opt,
@@ -572,6 +587,10 @@ def main(args):
             'patch_final_norm': bool(args.patch_final_norm),
             'last_mct': bool(args.last_mct),
             'last_mct_configuration': model.last_mct_configuration(),
+            'class_stable_last': bool(args.class_stable_last),
+            'class_stable_last_configuration': (
+                model.class_stable_last_configuration()
+            ),
             'epoch': epoch,
             'pretrained': pretrained_metadata,
             'training_spec': training_spec,
