@@ -1,0 +1,9 @@
+{
+  "basis_invariance_passed": true,
+  "bootstrap_repeats": 5000,
+  "bootstrap_seed": 20260901,
+  "finished_at": "2026-09-07T17:10:09+0900",
+  "image_count": 1449,
+  "phase": "D",
+  "status": "complete"
+}

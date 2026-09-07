@@ -1,0 +1,10 @@
+{
+  "basis_invariance_passed": true,
+  "bootstrap_repeats": 5000,
+  "bootstrap_seed": 20260901,
+  "finished_at": "2026-09-07T17:06:39+0900",
+  "image_count": 1449,
+  "maximum_solver_residual": 9.055154805537313e-06,
+  "phase": "C",
+  "status": "complete"
+}
