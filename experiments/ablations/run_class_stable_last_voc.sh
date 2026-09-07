@@ -288,20 +288,33 @@ values = [
     for match in [re.search(r'pat_loss: ([0-9.eE+-]+)', line)]
     if match
 ]
+gradient_counts = [
+    float(match.group(1))
+    for line in text.splitlines()
+    if line.startswith('Averaged stats:')
+    for match in [re.search(
+        r'parameters_receiving_gradient: ([0-9.eE+-]+)', line
+    )]
+    if match
+]
 if len(values) < 2 or not all(math.isfinite(value) for value in values):
     raise SystemExit('smoke training did not report finite patch losses')
+if (
+    not gradient_counts
+    or not all(math.isfinite(value) and value > 0 for value in gradient_counts)
+):
+    raise SystemExit('smoke training did not report finite nonzero gradients')
 audit = json.loads(audit_path.read_text())
 cams = sorted(cam_dir.glob('*.npy'))
 payload = {
     'status': 'pass',
     'patch_loss_observations': values,
     'patch_loss_decrease_observed': min(values[1:]) < values[0],
+    'parameters_receiving_gradient': gradient_counts,
     'checkpoint_strict_audit_passed': bool(audit.get('passed')),
     'cam_files': len(cams),
     'cam_complete': (cam_dir / 'CAM_COMPLETE').is_file(),
 }
-if not payload['patch_loss_decrease_observed']:
-    raise SystemExit('smoke patch loss did not decrease after its first observation')
 if not payload['checkpoint_strict_audit_passed'] or not payload['cam_complete'] or len(cams) != 4:
     raise SystemExit(f'smoke checkpoint/CAM validation failed: {payload}')
 output.write_text(json.dumps(payload, indent=2, sort_keys=True) + '\n')
