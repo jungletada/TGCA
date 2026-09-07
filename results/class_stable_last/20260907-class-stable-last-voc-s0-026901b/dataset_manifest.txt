@@ -1,0 +1,7 @@
+d1326bd532648d73bc4b1bd275434eba81930982dc7401a65a8cecb26c028e24  /home/peng/code/TGCA/data/VOCdevkit/VOC2012/ImageLists/train_aug_id.txt
+aa623bd2c8ce4443a8aaae51c524c0eb165e8e44caf6aa9e3ad33d7b75a3ef20  /home/peng/code/TGCA/data/VOCdevkit/VOC2012/ImageLists/train_id.txt
+6f8edc37993764f6e212237d39546fb595246244147e8a050813c520aac0ade1  /home/peng/code/TGCA/data/VOCdevkit/VOC2012/ImageLists/val_id.txt
+0dcf22b58230a791f5ae169f6d945f4b009af845a7d02747479085eeb5a2e6ac  /home/peng/code/TGCA/data/VOCdevkit/VOC2012/ImageLabel/cls_labels.npy
+train_aug_ids=10582
+train_cam_ids=1464
+val_ids=1449

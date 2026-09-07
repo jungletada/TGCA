@@ -1,0 +1,70 @@
+{
+  "checkpoints": {
+    "last_mct": {
+      "path": "/home/peng/code/TGCA/results/last_mct/20260906-last-mct-voc-s0-310fd1d/checkpoints/last_mct/mctformerplus_final.pth",
+      "sha256": "3ed451f1062b5746b1cbf36a380c1643968d4a5938cad35fe0ed27ed0d69fcd3"
+    },
+    "original": {
+      "final_norm": false,
+      "path": "/home/peng/code/TGCA/results/final_ln_ablation/20260906-mctformerplus-final-ln-matched-s0-0ef6bd8/checkpoints/baseline/mctformerplus_final.pth",
+      "sha256": "aced3d3bd69c57782c8e85f1d10abd7ff7ab02504df92c2f2f3898defcf7a65a"
+    },
+    "patch_final_ln": {
+      "final_norm": false,
+      "patch_final_norm": true,
+      "path": "/home/peng/code/TGCA/results/final_ln_ablation/20260906-mctformerplus-patch-final-ln-s0-64f2aa9/checkpoints/patch_final_ln/mctformerplus_final.pth",
+      "sha256": "a2a67b293aec37baea859e80a1e09f17b9fbe72afc2b87cbde22907638cc3227"
+    }
+  },
+  "files": {
+    "last_audit": {
+      "path": "/home/peng/code/TGCA/results/last_mct/20260906-last-mct-voc-s0-310fd1d/audit/last_mct.json",
+      "sha256": "e0fee255ecc96ecf6ad90262dcb7346b50b8ee2bb14684c298d6ac25e0a75064"
+    },
+    "last_cam": {
+      "path": "/home/peng/code/TGCA/results/last_mct/20260906-last-mct-voc-s0-310fd1d/evaluations/last_mct/cam_evaluation/metrics.json",
+      "sha256": "1867eaed14c2f817752ea50fcb9db8f4f8cdad1f34b1229765e8bd6e05d74e7f"
+    },
+    "last_classification": {
+      "path": "/home/peng/code/TGCA/results/last_mct/20260906-last-mct-voc-s0-310fd1d/evaluations/last_mct/classification/classification_metrics.json",
+      "sha256": "b132f5169eee8b3a28907cc15bc207afd0644209cfdbb47bf3ff3abb68d3553a"
+    },
+    "last_summary": {
+      "path": "/home/peng/code/TGCA/results/last_mct/20260906-last-mct-voc-s0-310fd1d/summary.json",
+      "sha256": "683c13a493bc4ecb6e0c21750787ee5a1cc76f83859d8ed6ce22b8d8c313646b"
+    },
+    "original_audit": {
+      "path": "/home/peng/code/TGCA/results/final_ln_ablation/20260906-mctformerplus-final-ln-matched-s0-0ef6bd8/audit/baseline.json",
+      "sha256": "63d478f12175c645a0822e332614d526c57a0ddc0bbc5d3451d8b2c70e92aff0"
+    },
+    "original_cam": {
+      "path": "/home/peng/code/TGCA/results/final_ln_ablation/20260906-mctformerplus-final-ln-matched-s0-0ef6bd8/evaluations/baseline/cam_evaluation/metrics.json",
+      "sha256": "5dc41fb710de9d6d6bc696c20a9b26f9ec2f8a4a0b4a77ca4939c338422003c8"
+    },
+    "original_classification": {
+      "path": "/home/peng/code/TGCA/results/final_ln_ablation/20260906-mctformerplus-final-ln-matched-s0-0ef6bd8/evaluations/baseline/classification/classification_metrics.json",
+      "sha256": "78a9a4834874518a1075b24440d1904db230661347bf06e2db347cb888d21a36"
+    },
+    "original_summary": {
+      "path": "/home/peng/code/TGCA/results/final_ln_ablation/20260906-mctformerplus-final-ln-matched-s0-0ef6bd8/summary.json",
+      "sha256": "0b845989429919ce7336f8e9525a7f41d69ada9536f5cde0178438b5310054e6"
+    },
+    "patch_audit": {
+      "path": "/home/peng/code/TGCA/results/final_ln_ablation/20260906-mctformerplus-patch-final-ln-s0-64f2aa9/audit/patch_final_ln.json",
+      "sha256": "1a5eed6b5da667fa96a77e62f50492041ed453fd5e6dc67ab61a7f45193f81c5"
+    },
+    "patch_cam": {
+      "path": "/home/peng/code/TGCA/results/final_ln_ablation/20260906-mctformerplus-patch-final-ln-s0-64f2aa9/evaluations/patch_final_ln/cam_evaluation/metrics.json",
+      "sha256": "83861534a4d61f623353066890da4ba47dc3aebadbc404b99226aa0ced696bb3"
+    },
+    "patch_classification": {
+      "path": "/home/peng/code/TGCA/results/final_ln_ablation/20260906-mctformerplus-patch-final-ln-s0-64f2aa9/evaluations/patch_final_ln/classification/classification_metrics.json",
+      "sha256": "6fb8eedb9683203e8762e6412a34a12bc1229514c617c84b3217ad26da698a65"
+    },
+    "patch_summary": {
+      "path": "/home/peng/code/TGCA/results/final_ln_ablation/20260906-mctformerplus-patch-final-ln-s0-64f2aa9/summary.json",
+      "sha256": "38f514939ffcd6ab420c0f4b19270ecee59911f87f73ca3d6d68315522a993b5"
+    }
+  },
+  "mode": "read_only"
+}
