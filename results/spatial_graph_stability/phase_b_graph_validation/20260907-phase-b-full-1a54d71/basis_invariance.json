@@ -1,0 +1,65 @@
+{
+  "maximum_error": 1.0552467977209545e-07,
+  "passed": true,
+  "per_transform_max_abs_edge_weight_error": {
+    "haar_00": {
+      "B2_feature": 1.0552467966107315e-07,
+      "B3_spatial_feature": 8.612267698993037e-08
+    },
+    "haar_01": {
+      "B2_feature": 1.0552467966107315e-07,
+      "B3_spatial_feature": 8.612267698993037e-08
+    },
+    "haar_02": {
+      "B2_feature": 1.0552467966107315e-07,
+      "B3_spatial_feature": 8.612267698993037e-08
+    },
+    "haar_03": {
+      "B2_feature": 1.0552467966107315e-07,
+      "B3_spatial_feature": 8.612267698993037e-08
+    },
+    "haar_04": {
+      "B2_feature": 1.0552467966107315e-07,
+      "B3_spatial_feature": 8.612267698993037e-08
+    },
+    "haar_05": {
+      "B2_feature": 1.0552467977209545e-07,
+      "B3_spatial_feature": 8.612267698993037e-08
+    },
+    "haar_06": {
+      "B2_feature": 1.0552467966107315e-07,
+      "B3_spatial_feature": 8.612267698993037e-08
+    },
+    "haar_07": {
+      "B2_feature": 1.0552467966107315e-07,
+      "B3_spatial_feature": 8.612267698993037e-08
+    },
+    "haar_08": {
+      "B2_feature": 1.0552467966107315e-07,
+      "B3_spatial_feature": 8.612267698993037e-08
+    },
+    "haar_09": {
+      "B2_feature": 1.0552467966107315e-07,
+      "B3_spatial_feature": 8.612267698993037e-08
+    },
+    "identity": {
+      "B2_feature": 1.0552467966107315e-07,
+      "B3_spatial_feature": 8.612267698993037e-08
+    },
+    "permutation": {
+      "B2_feature": 1.0552467966107315e-07,
+      "B3_spatial_feature": 8.612267698993037e-08
+    },
+    "signed_permutation": {
+      "B2_feature": 1.0552467966107315e-07,
+      "B3_spatial_feature": 8.612267698993037e-08
+    }
+  },
+  "schema_version": 1,
+  "subset_image_ids": [
+    "2007_000033",
+    "2007_000042"
+  ],
+  "subset_rule": "first two images in deterministic VOC val order",
+  "tolerance": 1e-05
+}

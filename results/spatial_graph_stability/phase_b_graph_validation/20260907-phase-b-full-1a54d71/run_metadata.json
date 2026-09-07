@@ -1,0 +1,264 @@
+{
+  "command": "/home/peng/anaconda3/envs/tgca-repro/bin/python /home/peng/code/TGCA/analysis/spatial_graph_stability/run_phase_b.py --output-dir results/spatial_graph_stability/phase_b_graph_validation/20260907-phase-b-full-1a54d71 --phase-a-dir results/spatial_graph_stability/phase_a_basis_dependence/20260907-phase-a-full-1a54d71 --mct-checkpoint results/final_ln_ablation/20260906-mctformerplus-patch-final-ln-s0-64f2aa9/checkpoints/patch_final_ln/mctformerplus_final.pth --test-log results/spatial_graph_stability/test_logs/1a54d71.log",
+  "environment": {
+    "conda_explicit.txt": {
+      "command": "conda list --explicit",
+      "returncode": 0,
+      "sha256": "cee8d2d31666196012f5590169b95a47a67db6ab9ec3f1054c436ba5f08dfc2e"
+    },
+    "pip_freeze.txt": {
+      "command": "/home/peng/anaconda3/envs/tgca-repro/bin/python -m pip freeze",
+      "returncode": 0,
+      "sha256": "2464100c5a043b0330d9403eee16bd47e417cc885c03f762d633bce72b4f5f65"
+    }
+  },
+  "extraction": {
+    "basis_invariance": {
+      "maximum_error": 1.0552467977209545e-07,
+      "passed": true,
+      "per_transform_max_abs_edge_weight_error": {
+        "haar_00": {
+          "B2_feature": 1.0552467966107315e-07,
+          "B3_spatial_feature": 8.612267698993037e-08
+        },
+        "haar_01": {
+          "B2_feature": 1.0552467966107315e-07,
+          "B3_spatial_feature": 8.612267698993037e-08
+        },
+        "haar_02": {
+          "B2_feature": 1.0552467966107315e-07,
+          "B3_spatial_feature": 8.612267698993037e-08
+        },
+        "haar_03": {
+          "B2_feature": 1.0552467966107315e-07,
+          "B3_spatial_feature": 8.612267698993037e-08
+        },
+        "haar_04": {
+          "B2_feature": 1.0552467966107315e-07,
+          "B3_spatial_feature": 8.612267698993037e-08
+        },
+        "haar_05": {
+          "B2_feature": 1.0552467977209545e-07,
+          "B3_spatial_feature": 8.612267698993037e-08
+        },
+        "haar_06": {
+          "B2_feature": 1.0552467966107315e-07,
+          "B3_spatial_feature": 8.612267698993037e-08
+        },
+        "haar_07": {
+          "B2_feature": 1.0552467966107315e-07,
+          "B3_spatial_feature": 8.612267698993037e-08
+        },
+        "haar_08": {
+          "B2_feature": 1.0552467966107315e-07,
+          "B3_spatial_feature": 8.612267698993037e-08
+        },
+        "haar_09": {
+          "B2_feature": 1.0552467966107315e-07,
+          "B3_spatial_feature": 8.612267698993037e-08
+        },
+        "identity": {
+          "B2_feature": 1.0552467966107315e-07,
+          "B3_spatial_feature": 8.612267698993037e-08
+        },
+        "permutation": {
+          "B2_feature": 1.0552467966107315e-07,
+          "B3_spatial_feature": 8.612267698993037e-08
+        },
+        "signed_permutation": {
+          "B2_feature": 1.0552467966107315e-07,
+          "B3_spatial_feature": 8.612267698993037e-08
+        }
+      },
+      "schema_version": 1,
+      "subset_image_ids": [
+        "2007_000033",
+        "2007_000042"
+      ],
+      "subset_rule": "first two images in deterministic VOC val order",
+      "tolerance": 1e-05
+    },
+    "cache": {
+      "large_raw_cache_committed": false,
+      "path": "/home/peng/code/TGCA/results/spatial_graph_stability/phase_b_graph_validation/20260907-phase-b-full-1a54d71/graph_analysis_cache.npz",
+      "sha256": "cdf2b8f7a3b1a567dcb6fd32f610ad736993e76c7c7508cf7b8cb19bdfa65345",
+      "size_bytes": 14296531
+    },
+    "dataset": {
+      "image_count": 1449,
+      "input_size": 448,
+      "label_strata_counts": {
+        "single_label": 927,
+        "three_plus_label": 147,
+        "two_label": 375
+      },
+      "name": "PASCAL VOC 2012 val",
+      "patch_count": 784,
+      "patch_grid": [
+        28,
+        28
+      ],
+      "patch_size": 16
+    },
+    "duration_seconds": 12.03758321609348,
+    "graph": {
+      "candidate_set": "undirected 8-neighbor / 3x3 local neighborhood",
+      "edge_count_per_image": 2970,
+      "feature_affinity": "clamp((1 + cosine(p_i,p_j))/2, 0, 1)",
+      "graph_low_pass_performed": false,
+      "gt_used_in_graph_construction": false,
+      "joint_affinity": "spatial * feature",
+      "same_candidate_edges_all_variants": true,
+      "sigma_s": 1.0,
+      "symmetrized": true
+    },
+    "model": {
+      "checkpoint": "/home/peng/code/TGCA/results/final_ln_ablation/20260906-mctformerplus-patch-final-ln-s0-64f2aa9/checkpoints/patch_final_ln/mctformerplus_final.pth",
+      "checkpoint_sha256": "a2a67b293aec37baea859e80a1e09f17b9fbe72afc2b87cbde22907638cc3227",
+      "epoch": 44,
+      "flags": {
+        "class_stable_last": false,
+        "final_norm": false,
+        "last_mct": false,
+        "patch_final_norm": true
+      },
+      "head": {
+        "in_channels": 384,
+        "kernel_size": [
+          3,
+          3
+        ],
+        "out_channels": 20
+      },
+      "strict_state_load": true,
+      "training_spec": {
+        "accum_iter": 1,
+        "consumed_samples_per_epoch": 10560,
+        "effective_batch_size": 32,
+        "epochs": 45,
+        "final_norm": false,
+        "micro_batch_size": 32,
+        "nominal_lr": 0.0005,
+        "optimizer_lr": 3.125e-05,
+        "optimizer_updates_per_epoch": 330,
+        "patch_final_norm": true,
+        "seed": 0,
+        "train_dataset_size": 10582,
+        "val_batch_size": 32,
+        "world_size": 1
+      },
+      "variant_resolution": {
+        "legacy_small_import": false,
+        "legacy_small_import_manifest": null,
+        "model_name": "mctformerplus",
+        "model_spec_present": true,
+        "state_architecture": {
+          "block_indices": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11
+          ],
+          "class_token_count": 20,
+          "depth": 12,
+          "embed_dim": 384,
+          "patch_size": [
+            16,
+            16
+          ],
+          "qkv_shape": [
+            1152,
+            384
+          ]
+        },
+        "variant": "small"
+      }
+    },
+    "patch_gt": {
+      "mixed_void_primary_metric_policy": "excluded",
+      "semantic_majority_minimum": 0.5,
+      "tie_policy": "mixed",
+      "valid_fraction_minimum": 0.5
+    }
+  },
+  "finished_at": "2026-09-07T15:35:35+0900",
+  "git": {
+    "branch": "main",
+    "commit": "1a54d713bea24fe596613d9598852207279c7873",
+    "host": "LHR",
+    "repository_url": "https://github.com/jungletada/TGCA.git",
+    "staged_diff": [],
+    "status_short": [
+      "?? docs/Class_Stable_LaST_MCTformerPlus_Codex_Plan.md",
+      "?? docs/Phase_A_B_Fourier_Basis_and_Spatial_Graph_Codex_Plan.md",
+      "?? docs/Spatial_Graph_Stability_Preliminary_Experiment_Plan.md",
+      "?? hosts/LAST-ViT/"
+    ],
+    "tracked_diff": []
+  },
+  "input_hashes_after": {
+    "patchfinal_checkpoint": "a2a67b293aec37baea859e80a1e09f17b9fbe72afc2b87cbde22907638cc3227",
+    "phase_a_basis_archive": "e5e63ad54355c396132a6b5ef86e31c2d8cacf0ad275b8f2361c7621f9750cb2",
+    "phase_a_completion": "2844d1c535e3e57a0f70ebe3cae18cd2379d2da0819d3bcd3219bab5f07a52f4",
+    "voc_val_list": "cdc1326d12f69ce5153aa5da04a4d8783e146868d42d19f82f44e74b97ac907d"
+  },
+  "input_hashes_before": {
+    "patchfinal_checkpoint": "a2a67b293aec37baea859e80a1e09f17b9fbe72afc2b87cbde22907638cc3227",
+    "phase_a_basis_archive": "e5e63ad54355c396132a6b5ef86e31c2d8cacf0ad275b8f2361c7621f9750cb2",
+    "phase_a_completion": "2844d1c535e3e57a0f70ebe3cae18cd2379d2da0819d3bcd3219bab5f07a52f4",
+    "voc_val_list": "cdc1326d12f69ce5153aa5da04a4d8783e146868d42d19f82f44e74b97ac907d"
+  },
+  "output_tables": {
+    "boundary_metrics.csv": {
+      "sha256": "ce7479c939be15f0993434c43f6c03ea2bb8155212f61c56fc9bddc60f639d0c"
+    },
+    "graph_bootstrap_deltas.csv": {
+      "sha256": "90a250b9cbf2832ebeefad8f354f0aefccd7ea757626a4cbc6c3fa0818b03b0d"
+    },
+    "graph_metrics.csv": {
+      "sha256": "09cf8a8a267cbf9a40e40012fc5df48e1174cc68143df419d2de2b4bad9a19a9"
+    },
+    "graph_metrics_per_class.csv": {
+      "sha256": "ba1a8b7ade14ec1116a0c88d96b281c4b405a1b332c9b970679d2080a52c31de"
+    }
+  },
+  "phase": "B",
+  "phase_a_linkage": {
+    "basis_metadata_sha256": "1206e86b43e0926d8c1bf55321b80dd86b76c41ae5e248494caa8cab2040a26a",
+    "completion_sha256": "2844d1c535e3e57a0f70ebe3cae18cd2379d2da0819d3bcd3219bab5f07a52f4",
+    "matrix_archive_sha256": "e5e63ad54355c396132a6b5ef86e31c2d8cacf0ad275b8f2361c7621f9750cb2",
+    "phase_a_dir": "/home/peng/code/TGCA/results/spatial_graph_stability/phase_a_basis_dependence/20260907-phase-a-full-1a54d71"
+  },
+  "schema_version": 1,
+  "source_immutable": true,
+  "statistics": {
+    "bootstrap_repeats": 5000,
+    "bootstrap_seed": 20260901,
+    "bootstrap_unit": "whole image",
+    "confidence_interval": "95% percentile",
+    "histogram_bins": 2048,
+    "image_counts_by_stratum": {
+      "all": 1449,
+      "single_label": 927,
+      "three_plus_label": 147,
+      "two_label": 375
+    },
+    "maximum_full_sample_histogram_abs_error": 0.0008039260616238275,
+    "paired_graph_draws": true,
+    "rank_ci_method": "per-image fixed-bin sufficient histograms",
+    "rank_point_estimates": "exact pooled-edge sklearn"
+  },
+  "status": "complete",
+  "test_log": {
+    "path": "/home/peng/code/TGCA/results/spatial_graph_stability/test_logs/1a54d71.log",
+    "sha256": "54214b395a249f3773a547b110aa45c95ee0d13abb41475b7bc14ee170878f9a"
+  }
+}

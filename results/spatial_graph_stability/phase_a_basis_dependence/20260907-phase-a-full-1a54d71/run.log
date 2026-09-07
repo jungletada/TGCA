@@ -1,0 +1,19 @@
+[2026-09-07T15:34:23+0900] Phase A started: /home/peng/anaconda3/envs/tgca-repro/bin/python /home/peng/code/TGCA/analysis/spatial_graph_stability/run_phase_a.py --output-dir results/spatial_graph_stability/phase_a_basis_dependence/20260907-phase-a-full-1a54d71 --mct-checkpoint results/final_ln_ablation/20260906-mctformerplus-patch-final-ln-s0-64f2aa9/checkpoints/patch_final_ln/mctformerplus_final.pth --test-log results/spatial_graph_stability/test_logs/1a54d71.log
+[2026-09-07T15:34:26+0900] A1 official LaST processed 32/1449 images
+[2026-09-07T15:34:28+0900] A1 official LaST processed 320/1449 images
+[2026-09-07T15:34:29+0900] A1 official LaST processed 640/1449 images
+[2026-09-07T15:34:31+0900] A1 official LaST processed 960/1449 images
+[2026-09-07T15:34:32+0900] A1 official LaST processed 1280/1449 images
+[2026-09-07T15:34:33+0900] A1 official LaST processed 1449/1449 images
+[2026-09-07T15:34:36+0900] A2 PatchFinalLN processed 8/1449 images
+[2026-09-07T15:34:38+0900] A2 PatchFinalLN processed 160/1449 images
+[2026-09-07T15:34:39+0900] A2 PatchFinalLN processed 320/1449 images
+[2026-09-07T15:34:41+0900] A2 PatchFinalLN processed 480/1449 images
+[2026-09-07T15:34:43+0900] A2 PatchFinalLN processed 640/1449 images
+[2026-09-07T15:34:44+0900] A2 PatchFinalLN processed 800/1449 images
+[2026-09-07T15:34:46+0900] A2 PatchFinalLN processed 960/1449 images
+[2026-09-07T15:34:48+0900] A2 PatchFinalLN processed 1120/1449 images
+[2026-09-07T15:34:49+0900] A2 PatchFinalLN processed 1280/1449 images
+[2026-09-07T15:34:51+0900] A2 PatchFinalLN processed 1440/1449 images
+[2026-09-07T15:34:51+0900] A2 PatchFinalLN processed 1449/1449 images
+[2026-09-07T15:34:55+0900] Phase A complete
