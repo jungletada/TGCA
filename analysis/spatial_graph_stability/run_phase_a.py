@@ -207,7 +207,7 @@ def _run_official(
     pooled = np.empty((count, images, 768), dtype=np.float32)
     logits = np.empty((count, images, 1000), dtype=np.float32)
     invariance = {transform.name: 0.0 for transform in transforms}
-    nonfinite = {transform.name: 0 for transform in transforms}
+    stability_nonfinite = {transform.name: 0 for transform in transforms}
     offset = 0
     started = time.perf_counter()
     with torch.inference_mode():
@@ -226,13 +226,16 @@ def _run_official(
                 transformed_logits = F.linear(
                     selected, transformed_weight, classifier.bias
                 )
-                nonfinite[transform.name] += int(
+                stability_nonfinite[transform.name] += int(
                     (~torch.isfinite(stability)).sum().item()
-                    + (~torch.isfinite(transformed_logits)).sum().item()
                 )
-                if nonfinite[transform.name]:
+                # The official selector deliberately has no denominator
+                # clamp. Its ranking is still defined when an isolated score
+                # is +/-inf, provided the selected original token and logits
+                # remain finite. Do not silently substitute a new selector.
+                if not torch.isfinite(selected).all() or not torch.isfinite(transformed_logits).all():
                     raise RuntimeError(
-                        f"official selector produced non-finite values for {transform.name}"
+                        f"official selector output produced non-finite values for {transform.name}"
                     )
                 selected_votes = vote_counts(selected_indices, 196)
                 sl = slice(offset, offset + batch_size)
@@ -330,7 +333,7 @@ def _run_official(
         },
         "duration_seconds": duration,
         "raw_outputs": raw_records,
-        "nonfinite_counts": nonfinite,
+        "unclamped_stability_nonfinite_counts": stability_nonfinite,
     }
     del model, rotations, transformed_weights
     gc.collect()
@@ -401,6 +404,10 @@ def _run_mct(
     semantic_labels = np.empty((images, 784), dtype=np.int8)
     conv_invariance = {transform.name: 0.0 for transform in transforms}
     affinity_invariance = {transform.name: 0.0 for transform in transforms}
+    stability_nonfinite = {
+        transform.name: {"total": 0, "nan": 0, "positive_infinity": 0, "negative_infinity": 0}
+        for transform in transforms
+    }
     offset = 0
     started = time.perf_counter()
     with torch.inference_mode():
@@ -437,10 +444,17 @@ def _run_mct(
                 selected, selected_indices, stability, _ = last_channel_selector(
                     transformed_patches, topk=1, eps=None
                 )
-                if not torch.isfinite(stability).all():
-                    raise RuntimeError(
-                        f"MCT selector produced non-finite values for {transforms[transform_index].name}"
-                    )
+                name = transforms[transform_index].name
+                # This remains the exact official, unclamped selector. A
+                # zero low-pass residual can yield an infinite ranking score;
+                # topk/gather still select a finite original patch token. The
+                # count is an output diagnostic, not a reason to alter LaST.
+                stability_nonfinite[name]["total"] += int((~torch.isfinite(stability)).sum().item())
+                stability_nonfinite[name]["nan"] += int(torch.isnan(stability).sum().item())
+                stability_nonfinite[name]["positive_infinity"] += int(torch.isposinf(stability).sum().item())
+                stability_nonfinite[name]["negative_infinity"] += int(torch.isneginf(stability).sum().item())
+                if not torch.isfinite(selected).all():
+                    raise RuntimeError(f"MCT selected token is non-finite for {name}")
                 selected_votes = vote_counts(selected_indices, 784)
                 sl = slice(offset, offset + batch_size)
                 indices[transform_index, sl] = selected_indices.cpu().numpy().astype(np.uint16)
@@ -554,6 +568,7 @@ def _run_mct(
         },
         "duration_seconds": duration,
         "raw_outputs": raw_records,
+        "unclamped_stability_nonfinite_counts": stability_nonfinite,
         "semantic_labels": {
             "path": str(labels_path),
             "sha256": sha256_file(labels_path),
@@ -672,6 +687,8 @@ def _write_reports(
             f"The reparameterized 3×3 classifier reproduced its semantic map with maximum float64 absolute error `{conv_max:.3e}`; pairwise cosine affinity remained invariant with maximum error `{affinity_max:.3e}` (both required `<1e-5`).",
             "",
             "Any vote-map differences therefore belong to the channel-index Fourier selector, while the spatial semantic map and cosine graph remain equivalent. This is a frozen representation-level diagnosis, not a trained-method or localization claim.",
+            "",
+            f"The official unclamped selector produced {sum(value['total'] for value in mct_metadata['unclamped_stability_nonfinite_counts'].values())} non-finite ranking entries on this input set. Selected original patch tokens remained finite; the counts are preserved in run metadata rather than being hidden by a denominator clamp.",
             "",
         ]
     )

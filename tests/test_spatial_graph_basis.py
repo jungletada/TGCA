@@ -99,6 +99,17 @@ def test_last_selector_exactly_matches_official_unclamped_reference():
         torch.testing.assert_close(actual, reference, rtol=1e-12, atol=1e-12)
 
 
+def test_official_unclamped_selector_preserves_finite_original_tokens_when_scores_nan():
+    # A zero token has the exact official 0/0 score. The diagnostic must retain
+    # that fact rather than adding an undocumented epsilon, while top-k/gather
+    # remain well-defined and select finite original-token values.
+    tokens = torch.zeros(1, 3, 8, dtype=torch.float64)
+    pooled, indices, stability, _ = last_channel_selector(tokens, topk=1, eps=None)
+    assert torch.isnan(stability).all()
+    assert torch.isfinite(pooled).all()
+    assert torch.isfinite(torch.gather(tokens, 1, indices)).all()
+
+
 def test_cosine_affinity_is_orthogonal_basis_invariant():
     generator = torch.Generator().manual_seed(104)
     tokens = torch.randn(2, 9, 8, generator=generator, dtype=torch.float64)
