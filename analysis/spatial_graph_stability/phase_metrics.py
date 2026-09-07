@@ -267,6 +267,7 @@ def summarize_simple_rows(
     rows: Sequence[Mapping[str, object]], *, value_cols: Sequence[str], repeats: int, seed: int,
     group_columns: Sequence[str] = ("graph", "lambda"),
     per_class: bool = True,
+    scope: str = "all_positive_classes",
 ) -> list[dict[str, object]]:
     frame = pd.DataFrame(rows)
     if frame.empty:
@@ -277,7 +278,7 @@ def summarize_simple_rows(
         for stratum, scoped in iter_all_and_label_strata(subset):
             result.extend(summarize_clustered(
                 scoped, value_cols=value_cols,
-                identity={**identity, "scope": "all_positive_classes", "stratum": stratum},
+                identity={**identity, "scope": scope, "stratum": stratum},
                 repeats=repeats, seed=seed,
             ))
         if per_class and "class_id" in subset:

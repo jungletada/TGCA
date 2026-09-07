@@ -221,14 +221,16 @@ def _paired_comparisons(region_rows: list[dict[str, object]], *, repeats: int, s
     keys = ["image_id", "image_index", "class_id", "class_name", "num_positive_classes", "label_stratum", "graph", "lambda"]
     metrics = ("target_hit", "target_tail_enrich_05", "target_tail_enrich_10", "bg_tail_enrich_05", "auc_target_bg", "auc_target_other", "ap_target_bg", "ap_target_other")
     for graph, subset in frame.groupby("graph", sort=True):
-        left = subset[subset["score"] == "relevance"][keys + list(metrics)].copy(); right = subset[subset["score"] == "relevance_x_stability"][keys + list(metrics)].copy()
-        merged = left.merge(right, on=keys, suffixes=("_r", "_rs"), validate="one_to_one")
-        for metric in metrics:
-            right_values = pd.to_numeric(merged[f"{metric}_rs"], errors="coerce").to_numpy(dtype=np.float64)
-            left_values = pd.to_numeric(merged[f"{metric}_r"], errors="coerce").to_numpy(dtype=np.float64)
-            merged[metric] = right_values - left_values
-        for stratum, scoped in (("all", merged), ("single_label", merged[merged["label_stratum"] == "single_label"]), ("exactly_2_labels", merged[merged["label_stratum"] == "exactly_2_labels"]), ("3plus_labels", merged[merged["label_stratum"] == "3plus_labels"])):
-            result.extend(summarize_clustered(scoped, value_cols=metrics, identity={"comparison": "relevance_x_stability_minus_relevance", "graph": graph, "stratum": stratum}, repeats=repeats, seed=seed))
+        right = subset[subset["score"] == "relevance_x_stability"][keys + list(metrics)].copy()
+        for baseline, comparison in (("relevance", "relevance_x_stability_minus_relevance"), ("stability", "relevance_x_stability_minus_stability")):
+            left = subset[subset["score"] == baseline][keys + list(metrics)].copy()
+            merged = left.merge(right, on=keys, suffixes=("_base", "_rs"), validate="one_to_one")
+            for metric in metrics:
+                right_values = pd.to_numeric(merged[f"{metric}_rs"], errors="coerce").to_numpy(dtype=np.float64)
+                left_values = pd.to_numeric(merged[f"{metric}_base"], errors="coerce").to_numpy(dtype=np.float64)
+                merged[metric] = right_values - left_values
+            for stratum, scoped in (("all", merged), ("single_label", merged[merged["label_stratum"] == "single_label"]), ("exactly_2_labels", merged[merged["label_stratum"] == "exactly_2_labels"]), ("3plus_labels", merged[merged["label_stratum"] == "3plus_labels"])):
+                result.extend(summarize_clustered(scoped, value_cols=metrics, identity={"comparison": comparison, "graph": graph, "stratum": stratum}, repeats=repeats, seed=seed))
     return result
 
 
@@ -247,10 +249,10 @@ def _write_report(output_dir: Path, linkage: Mapping[str, object], metrics: list
         for score in ("relevance", "stability", "relevance_x_stability"):
             values = [_find(metrics, graph=graph, score=score, metric=metric) for metric in ("auc_target_bg", "auc_target_other", "target_tail_enrich_10", "bg_tail_enrich_10", "target_hit")]
             lines.append(f"| {graph} | {score} | " + " | ".join(_fmt(value) for value in values) + " |")
-    lines.extend(["", "## Paired R×S − R effects", "", "| Graph | Metric | Δ | 95% CI |", "|---|---|---:|---:|"])
+    lines.extend(["", "## Paired R×S effects", "", "| Comparison | Graph | Metric | Δ | 95% CI |", "|---|---|---|---:|---:|"])
     selected = [row for row in comparisons if row.get("aggregation") == "micro" and row.get("stratum") == "all" and row.get("metric") in ("target_tail_enrich_10", "bg_tail_enrich_10", "auc_target_bg", "auc_target_other")]
     for row in selected:
-        lines.append(f"| {row['graph']} | {row['metric']} | {_fmt(row['estimate'])} | [{_fmt(row['ci_low'])}, {_fmt(row['ci_high'])}] |")
+        lines.append(f"| {row['comparison']} | {row['graph']} | {row['metric']} | {_fmt(row['estimate'])} | [{_fmt(row['ci_low'])}, {_fmt(row['ci_high'])}] |")
     lines.extend(["", "## Interpretation boundary", "", "These are frozen representation-level and semantic-diagnostic results. They test whether stability conditionally modifies existing relevance; they do not establish a trained pooling method, attention intervention, CAM improvement, or causal localization mechanism.", "", f"Phase C/D basis regression passed with maximum error `{basis['maximum_error']:.3e}` (<1e-5).", ""])
     text_dump(output_dir / "04_RELEVANCE_STABILITY_ABLATION_REPORT.md", "\n".join(lines))
 

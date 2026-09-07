@@ -399,7 +399,7 @@ def _format(value: object) -> str:
 
 
 def _lookup(rows: list[dict[str, object]], graph: str, lambda_value: float, metric: str) -> dict[str, object]:
-    found = [row for row in rows if row.get("graph") == graph and row.get("lambda") == lambda_value and row.get("metric") == metric and row.get("aggregation") == "micro" and row.get("stratum") == "all" and row.get("scope") == "all_positive_classes"]
+    found = [row for row in rows if row.get("graph") == graph and row.get("lambda") == lambda_value and row.get("metric") == metric and row.get("aggregation") == "micro" and row.get("stratum") == "all" and row.get("scope") == "all_class_maps"]
     if len(found) != 1:
         raise RuntimeError(f"ambiguous numerical result for {graph}/{lambda_value}/{metric}: {len(found)}")
     return found[0]
@@ -449,7 +449,7 @@ def main() -> None:
     edges = local_edge_index((28, 28)); weights = _graph_weights(cache, edges)
     extraction, raw_maps, primary_smooth, primary_stability, numerical = _extract_and_analyze(args=args, output_dir=output_dir, cache=cache, edges=edges, weights=weights, device=device, log=log)
     log("Phase C low-pass solves complete; computing image-clustered semantic diagnostics")
-    numerical_summary = summarize_simple_rows(numerical, value_cols=("fidelity", "relative_l2_change", "map_pearson", "map_spearman", "energy_raw", "energy_smoothed", "energy_retention", "smoothed_std_over_raw", "linear_solve_relative_residual", "cg_iterations", "solve_runtime_ms_per_map"), repeats=args.bootstrap_repeats, seed=args.bootstrap_seed)
+    numerical_summary = summarize_simple_rows(numerical, value_cols=("fidelity", "relative_l2_change", "map_pearson", "map_spearman", "energy_raw", "energy_smoothed", "energy_retention", "smoothed_std_over_raw", "linear_solve_relative_residual", "cg_iterations", "solve_runtime_ms_per_map"), repeats=args.bootstrap_repeats, seed=args.bootstrap_seed, scope="all_class_maps")
     # Keep fidelity and energy as separate required tables while preserving the complete lambda curve.
     fidelity_rows = [row for row in numerical_summary if row["metric"] in ("fidelity", "relative_l2_change", "map_pearson", "map_spearman", "smoothed_std_over_raw")]
     energy_rows = [row for row in numerical_summary if row["metric"] in ("energy_raw", "energy_smoothed", "energy_retention", "linear_solve_relative_residual", "cg_iterations", "solve_runtime_ms_per_map")]
