@@ -258,8 +258,15 @@ def _macro_rows(
                 if (class_id, graph, metric) in per_class_bootstrap
             ]
             if arrays:
-                with np.errstate(invalid="ignore"):
-                    bootstrap = np.nanmean(np.stack(arrays, axis=0), axis=0)
+                stacked = np.stack(arrays, axis=0)
+                finite_count = np.isfinite(stacked).sum(axis=0)
+                finite_sum = np.nansum(stacked, axis=0)
+                bootstrap = np.divide(
+                    finite_sum,
+                    finite_count,
+                    out=np.full(repeats, np.nan, dtype=np.float64),
+                    where=finite_count > 0,
+                )
             else:
                 bootstrap = np.full(repeats, np.nan, dtype=np.float64)
             estimate = float(np.mean(estimates)) if estimates else None
@@ -315,6 +322,10 @@ def evaluate_graph_metrics(
     draw_values: dict[tuple[str, str, str, str], np.ndarray] = {}
     strata = image_strata(image_label_counts)
     for stratum, selected in strata.items():
+        # Small smoke subsets can legitimately lack a label-count stratum.
+        # The full VOC run still reports every populated prespecified stratum.
+        if selected.size == 0:
+            continue
         selected_ids = [image_ids[index] for index in selected]
         draws = make_cluster_draws(selected_ids, repeats=repeats, seed=seed)
         subset_labels = semantic_labels[selected]

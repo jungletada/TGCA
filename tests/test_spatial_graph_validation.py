@@ -30,6 +30,7 @@ from analysis.spatial_graph_stability.graph import (
     semantic_patch_labels,
 )
 from analysis.spatial_graph_stability.basis import generate_basis_transforms
+from analysis.spatial_graph_stability.graph_metrics import evaluate_graph_metrics
 
 
 def test_local_candidate_edges_are_shared_finite_nonnegative_and_symmetric():
@@ -130,3 +131,27 @@ def test_histogram_cluster_bootstrap_matches_expanded_first_draw():
 
 def test_full_voc_grid_has_expected_undirected_edge_count():
     assert local_edge_index((28, 28)).count == 2970
+
+
+def test_metric_runner_skips_empty_label_count_strata_for_smoke_subsets():
+    edges = local_edge_index((2, 2))
+    image_ids = ["one", "two"]
+    labels = np.array([[0, 1, 1, 0], [0, 0, 1, 1]], dtype=np.int8)
+    weights = {
+        name: np.full((2, edges.count), 0.5 + 0.1 * index, dtype=np.float32)
+        for index, name in enumerate(GRAPH_NAMES)
+    }
+    rows, _, _, audit = evaluate_graph_metrics(
+        image_ids=image_ids,
+        image_label_counts=np.array([1, 1], dtype=np.uint8),
+        semantic_labels=labels,
+        weights=weights,
+        edges=edges,
+        repeats=4,
+        seed=205,
+        bins=16,
+        bootstrap_device="cpu",
+    )
+    assert rows
+    assert {row["stratum"] for row in rows}.issubset({"all", "single_label"})
+    assert audit["image_counts_by_stratum"]["two_label"] == 0
