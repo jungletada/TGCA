@@ -146,7 +146,7 @@ def main():
 
 ## Q1. Can CWP train without duplicated DeiT CLS content, and how does it perform?
 
-The strict checkpoint audit passed. The CWP state has `class_token_pooler.class_queries` and no `cls_token`; its query gradient and update diagnostics remained finite during training.
+The strict checkpoint audit passed. The CWP state has `class_token_pooler.class_queries` and no `cls_token`. Training used the ordinary MCTformer+ AMP/GradScaler path without a CWP-specific abort guard.
 
 | Method | Class-token macro mAP | Patch-head macro mAP | Class val loss | Patch val loss | Fixed 0.45 native CAM mIoU | Best native CAM mIoU (threshold) | FG precision / recall at 0.45 |
 |---|---:|---:|---:|---:|---:|---:|---:|

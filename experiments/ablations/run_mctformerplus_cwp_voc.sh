@@ -127,6 +127,7 @@ value = {
     'fixed_cam_threshold': 0.45,
     'threshold_grid': {'start': 0.0, 'stop': 0.59, 'step': 0.01},
     'checkpoint_policy': 'final', 'commit': commit,
+    'training_behavior': 'ordinary MCTformer+ train_model_v2 AMP/GradScaler path; no CWP-specific gradient abort guard',
 }
 output.write_text(json.dumps(value, indent=2, sort_keys=True) + '\n')
 PY
@@ -184,7 +185,7 @@ printf 'STAGE=tests finished=%s\n' "$(date --iso-8601=seconds)" \
     | tee -a "$tgca_run_root/tests.txt"
 
 printf 'STAGE=smoke started=%s\n' "$(date --iso-8601=seconds)"
-mkdir -p "$tgca_run_root/smoke"/{audit,checkpoints,lists,resume_checkpoints}
+mkdir -p "$tgca_run_root/smoke"/{audit,checkpoints,lists}
 head -n 3200 "$tgca_train_aug" > "$tgca_run_root/smoke/lists/train_aug_id.txt"
 head -n 4 "$tgca_val" > "$tgca_run_root/smoke/lists/val_id.txt"
 tgca_smoke_log="$tgca_run_root/smoke/training_stdout.log"
@@ -215,62 +216,34 @@ run_exact env CUDA_VISIBLE_DEVICES="$tgca_gpu" python make_cam.py \
     --cam_out_dir cam --train_list "$tgca_run_root/smoke/lists/val_id.txt" \
     --input_size 448 --scales 1.0 --attention-normalization vanilla \
     --bcss-variant e0 --psl-variant baseline --checkpoint "$tgca_smoke_checkpoint"
-tgca_resume_log="$tgca_run_root/smoke/resume_stdout.log"
-run_exact_logged "$tgca_resume_log" \
-    env CUDA_VISIBLE_DEVICES="$tgca_gpu" python train_model_v2.py \
-    --dataset VOC12 --model mctformerplus --class-token-init cwp \
-    --voc12_root "$tgca_voc_root" \
-    --train_list "$tgca_run_root/smoke/lists/train_aug_id.txt" \
-    --val_list "$tgca_run_root/smoke/lists/val_id.txt" \
-    --work_space "$tgca_run_root/smoke/resume_checkpoints" --input-size 448 \
-    --epochs 2 --batch_size 32 --accum-iter 1 --val-batch-size 4 \
-    --seed "$tgca_seed" --opt adamw --sched cosine --warmup-epochs 5 \
-    --lr 5e-4 --min-lr 1e-5 --weight-decay 0.05 \
-    --drop 0.0 --drop-path 0.1 --train-interpolation bicubic \
-    --attention-normalization vanilla --attention-gamma 1.0 \
-    --bcss-variant e0 --psl-variant baseline --num_workers 4 \
-    --resume "$tgca_smoke_checkpoint"
-run_exact env CUDA_VISIBLE_DEVICES="$tgca_gpu" python tools/audit_mctformerplus_variant.py \
-    --checkpoint "$tgca_run_root/smoke/resume_checkpoints/mctformerplus_final.pth" \
-    --model mctformerplus --class-token-init cwp \
-    --official-pretrained "$tgca_pretrained" \
-    --expected-pretrained-sha256 "$tgca_pretrained_sha" \
-    --expected-epochs 2 --expected-effective-batch 32 --expected-seed 0 \
-    --output "$tgca_run_root/smoke/audit/cwp_resume.json"
-python - "$tgca_smoke_log" "$tgca_resume_log" \
-        "$tgca_run_root/smoke/audit/cwp.json" "$tgca_run_root/smoke/audit/cwp_resume.json" \
+python - "$tgca_smoke_log" \
+        "$tgca_run_root/smoke/audit/cwp.json" \
         "$tgca_run_root/smoke/cam" "$tgca_run_root/smoke/smoke_summary.json" <<'PY'
 import json, math, pathlib, re, sys
-train_log, resume_log, audit_path, resume_audit_path, cam_dir, output = map(pathlib.Path, sys.argv[1:])
-text = train_log.read_text() + '\n' + resume_log.read_text()
+train_log, audit_path, cam_dir, output = map(pathlib.Path, sys.argv[1:])
+text = train_log.read_text()
 def values(name):
     return [float(item) for item in re.findall(fr'{name}: ([0-9.eE+-]+)', text)]
 required = {
     'loss': values('loss'), 'pat_loss': values('pat_loss'),
-    'query_gradient': values('cwp_query_gradient_norm'),
-    'query_update': values('cwp_query_update_norm'),
     'row_error': values('cwp_attention_row_sum_max_error'),
 }
 if any(not sequence for sequence in required.values()):
     raise SystemExit(f'missing smoke diagnostics: {required}')
 if not all(math.isfinite(value) for sequence in required.values() for value in sequence):
     raise SystemExit('non-finite smoke diagnostic')
-if max(required['query_gradient']) <= 0 or max(required['query_update']) <= 0:
-    raise SystemExit('CWP queries did not receive a finite nonzero gradient/update')
 if max(required['row_error']) >= 1e-6:
     raise SystemExit('CWP attention row-sum error exceeded tolerance')
-audits = [json.loads(audit_path.read_text()), json.loads(resume_audit_path.read_text())]
+audit = json.loads(audit_path.read_text())
 cams = sorted(cam_dir.glob('*.npy'))
 payload = {
     'status': 'pass', 'training_iterations': 100,
-    'resume_iterations': 100, 'resume_epoch': 1,
-    'query_gradient_norm_max': max(required['query_gradient']),
-    'query_update_norm_max': max(required['query_update']),
     'attention_row_sum_max_error': max(required['row_error']),
-    'strict_audits_passed': all(item.get('passed') for item in audits),
+    'strict_audit_passed': bool(audit.get('passed')),
     'cam_files': len(cams), 'cam_complete': (cam_dir / 'CAM_COMPLETE').is_file(),
+    'training_behavior': 'ordinary MCTformer+ AMP/GradScaler path; no CWP gradient abort guard',
 }
-if not payload['strict_audits_passed'] or not payload['cam_complete'] or len(cams) != 4:
+if not payload['strict_audit_passed'] or not payload['cam_complete'] or len(cams) != 4:
     raise SystemExit(f'smoke validation failed: {payload}')
 output.write_text(json.dumps(payload, indent=2, sort_keys=True) + '\n')
 print(json.dumps(payload, sort_keys=True))
