@@ -118,3 +118,13 @@ def test_present_absent_entropy_is_undefined_not_infinite_for_one_valid_patch():
         valid=np.array([True, False]),
     )
     assert math.isnan(row["spatial_entropy"])
+
+
+def test_present_absent_entropy_handles_underflowed_spatial_probability():
+    row = _present_absent_row(
+        image_id="sample", image_index=0, class_id=0, label_count=1,
+        presence="present", relation="s_last", values=np.array([-1e10, 0.0]),
+        foreground=np.array([True, False]), background=np.array([False, True]),
+        valid=np.array([True, True]),
+    )
+    assert math.isfinite(row["spatial_entropy"])

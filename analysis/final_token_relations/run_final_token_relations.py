@@ -323,7 +323,8 @@ def _summary_by_columns(
     result: list[dict[str, object]] = []
     if frame.empty:
         return result
-    for keys, subset in frame.groupby(list(group_columns), sort=True):
+    grouping = group_columns[0] if len(group_columns) == 1 else list(group_columns)
+    for keys, subset in frame.groupby(grouping, sort=True):
         identity = dict(zip(group_columns, keys if isinstance(keys, tuple) else (keys,)))
         scopes = iter_all_and_label_strata(subset) if strata and "label_stratum" in subset else (("all", subset),)
         for stratum, scoped in scopes:
@@ -398,8 +399,9 @@ def _present_absent_row(
     selected = score[valid]
     probability = spatial_probability(torch.from_numpy(score[None, None]))[0, 0].numpy()
     valid_count = int(valid.sum())
+    valid_probability = np.asarray(probability[valid], dtype=np.float64)
     entropy = (
-        -float((probability[valid] * np.log(np.maximum(probability[valid], 1e-300))).sum() / math.log(valid_count))
+        -float((valid_probability * np.log(np.maximum(valid_probability, 1e-300))).sum() / math.log(valid_count))
         if valid_count > 1
         else float("nan")
     )
