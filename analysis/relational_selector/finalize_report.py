@@ -105,7 +105,17 @@ def _markdown(shared: pd.DataFrame, selector: pd.DataFrame, multi: pd.DataFrame,
         for column in shown.columns:
             if pd.api.types.is_numeric_dtype(shown[column]):
                 shown[column] = shown[column].map(lambda value: "—" if not np.isfinite(value) else f"{value:.4f}")
-        return shown.to_markdown(index=False)
+        # Avoid the optional ``tabulate`` dependency: reproducibility must not
+        # depend on an undeclared report-formatting package in tgca-repro.
+        def escape(value: object) -> str:
+            return str(value).replace("|", "\\|")
+        header = "| " + " | ".join(escape(column) for column in columns) + " |"
+        divider = "| " + " | ".join("---" for _ in columns) + " |"
+        body = [
+            "| " + " | ".join(escape(value) for value in row) + " |"
+            for row in shown.itertuples(index=False, name=None)
+        ]
+        return "\n".join([header, divider, *body])
 
     late = shared[shared.layer >= 9]
     layer12 = shared.loc[shared.layer == 12].iloc[0]
