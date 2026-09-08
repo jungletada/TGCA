@@ -1,0 +1,31 @@
+................................................................         [100%]
+=============================== warnings summary ===============================
+../../anaconda3/envs/tgca-repro/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:88
+../../anaconda3/envs/tgca-repro/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:88
+../../anaconda3/envs/tgca-repro/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:88
+../../anaconda3/envs/tgca-repro/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:88
+../../anaconda3/envs/tgca-repro/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:88
+../../anaconda3/envs/tgca-repro/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:88
+  /home/peng/anaconda3/envs/tgca-repro/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:88: PyparsingDeprecationWarning: 'parseString' deprecated - use 'parse_string'
+    parse = parser.parseString(pattern)
+
+../../anaconda3/envs/tgca-repro/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:92
+../../anaconda3/envs/tgca-repro/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:92
+../../anaconda3/envs/tgca-repro/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:92
+../../anaconda3/envs/tgca-repro/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:92
+../../anaconda3/envs/tgca-repro/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:92
+../../anaconda3/envs/tgca-repro/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:92
+  /home/peng/anaconda3/envs/tgca-repro/lib/python3.9/site-packages/matplotlib/_fontconfig_pattern.py:92: PyparsingDeprecationWarning: 'resetCache' deprecated - use 'reset_cache'
+    parser.resetCache()
+
+../../anaconda3/envs/tgca-repro/lib/python3.9/site-packages/matplotlib/_mathtext.py:45
+  /home/peng/anaconda3/envs/tgca-repro/lib/python3.9/site-packages/matplotlib/_mathtext.py:45: PyparsingDeprecationWarning: 'enablePackrat' deprecated - use 'enable_packrat'
+    ParserElement.enablePackrat()
+
+tests/test_experiment2_bootstrap.py::test_paired_model_frame_uses_only_common_keys_and_plus_minus_base
+  /home/peng/anaconda3/envs/tgca-repro/lib/python3.9/site-packages/pandas/core/dtypes/cast.py:1641: DeprecationWarning: np.find_common_type is deprecated.  Please use `np.result_type` or `np.promote_types`.
+  See https://numpy.org/devdocs/release/1.25.0-notes.html and the docs for more information.  (Deprecated NumPy 1.25)
+    return np.find_common_type(types, [])
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+64 passed, 14 warnings in 7.83s

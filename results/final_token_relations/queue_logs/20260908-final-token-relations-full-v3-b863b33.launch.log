@@ -1,0 +1,11 @@
+[2026-09-08T10:34:42+0900] final-token E1/E2 started: /home/peng/anaconda3/envs/tgca-repro/bin/python /home/peng/code/TGCA/analysis/final_token_relations/run_final_token_relations.py --output-dir results/final_token_relations/20260908-final-token-relations-full-v3-b863b33 --batch-size 32 --num-workers 4 --bootstrap-repeats 5000 --bootstrap-seed 20260901 --test-log results/final_token_relations/test_logs/20260908-final-token-b863b33.log
+[2026-09-08T10:34:43+0900] deterministic CPU native mean-readout audit max_abs_error=0
+[2026-09-08T10:34:46+0900] extracted raw final-token E1/E2 diagnostics for 32/1449 images
+[2026-09-08T10:35:10+0900] extracted raw final-token E1/E2 diagnostics for 320/1449 images
+[2026-09-08T10:35:30+0900] extracted raw final-token E1/E2 diagnostics for 640/1449 images
+[2026-09-08T10:35:51+0900] extracted raw final-token E1/E2 diagnostics for 960/1449 images
+[2026-09-08T10:36:14+0900] extracted raw final-token E1/E2 diagnostics for 1280/1449 images
+[2026-09-08T10:36:27+0900] extracted raw final-token E1/E2 diagnostics for 1449/1449 images
+[2026-09-08T10:36:27+0900] frozen extraction complete; computing whole-image clustered bootstrap summaries
+[2026-09-08T10:37:13+0900] final-token E1/E2 complete
+exit_status=0
