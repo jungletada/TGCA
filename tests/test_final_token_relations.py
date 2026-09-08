@@ -12,6 +12,7 @@ from analysis.final_token_relations.relations import (
     spatial_probability,
     transformed_mean_readout,
 )
+from analysis.final_token_relations.run_final_token_relations import _present_absent_row
 from analysis.spatial_graph_stability.basis import generate_basis_transforms
 
 
@@ -107,3 +108,13 @@ def test_relation_functions_do_not_accept_or_use_gt_arguments():
     # Construction has exactly the representation inputs; GT is deliberately
     # absent from this API and is only consumed in the runner's metric stage.
     assert set(final_token_relations(classes, patches)).issuperset({"s_last", "s_pos", "s_negmag"})
+
+
+def test_present_absent_entropy_is_undefined_not_infinite_for_one_valid_patch():
+    row = _present_absent_row(
+        image_id="sample", image_index=0, class_id=0, label_count=1,
+        presence="present", relation="s_last", values=np.array([1.0, 2.0]),
+        foreground=np.array([True, False]), background=np.array([False, True]),
+        valid=np.array([True, False]),
+    )
+    assert math.isnan(row["spatial_entropy"])

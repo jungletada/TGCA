@@ -397,7 +397,12 @@ def _present_absent_row(
     score = np.asarray(values, dtype=np.float64).reshape(-1)
     selected = score[valid]
     probability = spatial_probability(torch.from_numpy(score[None, None]))[0, 0].numpy()
-    entropy = -float((probability[valid] * np.log(np.maximum(probability[valid], 1e-300))).sum() / math.log(int(valid.sum())))
+    valid_count = int(valid.sum())
+    entropy = (
+        -float((probability[valid] * np.log(np.maximum(probability[valid], 1e-300))).sum() / math.log(valid_count))
+        if valid_count > 1
+        else float("nan")
+    )
     top = stable_topk_mask(score, 0.10, valid)
     return {
         "image_id": image_id, "image_index": image_index, "class_id": class_id,
