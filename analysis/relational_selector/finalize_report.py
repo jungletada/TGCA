@@ -109,7 +109,11 @@ def _markdown(shared: pd.DataFrame, selector: pd.DataFrame, multi: pd.DataFrame,
 
     late = shared[shared.layer >= 9]
     layer12 = shared.loc[shared.layer == 12].iloc[0]
-    l11_l12 = adjacent[(adjacent.from_layer == 11) & (adjacent.to_layer == 12) & (adjacent.rank == 4)].iloc[0]
+    l11_l12 = adjacent[
+        (adjacent["from_layer"] == 11)
+        & (adjacent["to_layer"] == 12)
+        & (adjacent["rank"] == 4)
+    ].iloc[0]
     s0 = selector[selector.selector == "S0"].iloc[0]
     s5 = selector[selector.selector == "S5"].iloc[0]
     paired = bootstrap[(bootstrap.family == "paired_delta") & (bootstrap.selector == "S5") & (bootstrap.metric.isin(["auc_target_other", "ap_target_other", "target_top05_fraction", "pair_jaccard_top05"]))]
