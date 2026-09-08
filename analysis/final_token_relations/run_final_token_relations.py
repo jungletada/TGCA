@@ -978,7 +978,11 @@ def main() -> None:
             if decomposition >= 1e-6:
                 raise RuntimeError(f"positive/negative decomposition identity failed: {decomposition}")
             statistics = positive_channel_statistics(classes)
-            identity_error = float(positive_channel_statistics(classes.double())["logit_identity_error"].abs().max().item())
+            # Retain native float32 quantities for descriptive statistics, but
+            # record the specified algebraic identity in float64 alongside the
+            # float64 gate used above.
+            statistics64 = positive_channel_statistics(classes.double())
+            identity_error = float(statistics64["logit_identity_error"].abs().max().item())
             max_logit_identity_error = max(max_logit_identity_error, identity_error)
             if identity_error >= 1e-6:
                 raise RuntimeError(f"positive/negative logit identity failed: {identity_error}")
@@ -1029,7 +1033,7 @@ def main() -> None:
                         "negative_contribution_mass": float(statistics["negative_mass"][local_index, class_id].item()),
                         "positive_negative_mass_ratio": float(statistics["positive_negative_ratio"][local_index, class_id].item()),
                         "native_class_logit": float(native_np[local_index, class_id]),
-                        "D_logit_minus_pos_minus_neg_abs_error": float(statistics["logit_identity_error"][local_index, class_id].item()),
+                        "D_logit_minus_pos_minus_neg_abs_error": float(statistics64["logit_identity_error"][local_index, class_id].item()),
                     })
                     for relation in ("s_last", "s_pos"):
                         present_absent_raw.append(_present_absent_row(
