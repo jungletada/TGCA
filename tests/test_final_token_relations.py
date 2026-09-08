@@ -50,6 +50,18 @@ def test_positive_negative_decomposition_and_native_mean_readout_identity():
     assert torch.allclose(statistics["native_logits"], classes.mean(-1), atol=1e-7, rtol=0)
 
 
+def test_float64_identity_audit_is_robust_to_large_raw_token_cancellation():
+    """The runner audits algebra in float64, without changing float32 maps."""
+
+    classes, patches = _tokens()
+    # This is comparable to the scale observed in the frozen native model:
+    # float32 reduction order is not a suitable algebraic reference there.
+    relations = final_token_relations((classes * 100).double(), (patches * 100).double())
+    assert torch.max(torch.abs(relations["s_last"] - relations["s_pos"] + relations["s_negmag"])).item() < 1e-6
+    statistics = positive_channel_statistics((classes * 100).double())
+    assert torch.max(statistics["logit_identity_error"]).item() < 1e-6
+
+
 def test_permutation_preserves_positive_channel_relation_but_signed_rotation_is_diagnostic():
     classes, patches = _tokens()
     relations = final_token_relations(classes.double(), patches.double())

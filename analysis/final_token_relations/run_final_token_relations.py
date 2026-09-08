@@ -798,12 +798,17 @@ def main() -> None:
                 raise RuntimeError("native baseline extraction observed an excluded variant")
             native_logits = classes.mean(dim=-1)
             relations = final_token_relations(classes, patches)
-            decomposition = float((relations["s_last"] - (relations["s_pos"] - relations["s_negmag"])).abs().max().item())
+            # The maps themselves intentionally retain native float32 values.
+            # Establish the defining positive/negative identities in float64,
+            # so a large raw-token cancellation is not misreported as a
+            # mathematical violation of the decomposition.
+            relations64 = final_token_relations(classes.double(), patches.double())
+            decomposition = float((relations64["s_last"] - (relations64["s_pos"] - relations64["s_negmag"])).abs().max().item())
             max_decomposition_error = max(max_decomposition_error, decomposition)
             if decomposition >= 1e-6:
                 raise RuntimeError(f"positive/negative decomposition identity failed: {decomposition}")
             statistics = positive_channel_statistics(classes)
-            identity_error = float(statistics["logit_identity_error"].abs().max().item())
+            identity_error = float(positive_channel_statistics(classes.double())["logit_identity_error"].abs().max().item())
             max_logit_identity_error = max(max_logit_identity_error, identity_error)
             if identity_error >= 1e-6:
                 raise RuntimeError(f"positive/negative logit identity failed: {identity_error}")

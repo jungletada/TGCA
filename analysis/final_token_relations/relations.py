@@ -79,7 +79,11 @@ def positive_channel_statistics(class_tokens: torch.Tensor) -> Mapping[str, torc
 
     if class_tokens.ndim != 3 or class_tokens.shape[-1] < 1:
         raise ValueError("class_tokens must have shape [B,C,D] with D>0")
-    values = class_tokens.float()
+    # Preserve float64 for the pre-registered algebraic identity audit.  Normal
+    # diagnostics receive raw float32 model tokens and therefore remain float32.
+    values = class_tokens.to(
+        dtype=torch.float64 if class_tokens.dtype == torch.float64 else torch.float32
+    )
     positive = torch.relu(values)
     negative = torch.relu(-values)
     width = values.shape[-1]
