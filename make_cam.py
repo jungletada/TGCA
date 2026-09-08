@@ -61,7 +61,8 @@ def get_args_parser():
         '--class-stable-last', action='store_true',
         help='use class-stable LaST pooling recorded by the checkpoint')
     parser.add_argument(
-        '--class-token-init', default='baseline', choices=('baseline', 'cwp'),
+        '--class-token-init', default='baseline',
+        choices=('baseline', 'cwp', 'residual_cwp'),
         help='class-token initialization recorded by the checkpoint')
     parser.add_argument('--bcss-variant', default='e0', choices=tuple(BCSS_VARIANTS))
     parser.add_argument('--bcss-num-background-slots', default=1, type=int)

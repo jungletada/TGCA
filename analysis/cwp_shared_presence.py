@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Layer-0--12 shared-presence diagnostics for the frozen CWP checkpoint."""
+"""Layer-0--12 shared-presence diagnostics for CWP initializers."""
 
 from __future__ import annotations
 
@@ -52,7 +52,13 @@ from models.mctformer_plus import (
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-dir', type=Path, required=True)
-    parser.add_argument('--cwp-checkpoint', type=Path, required=True)
+    parser.add_argument(
+        '--variant-checkpoint', '--cwp-checkpoint', dest='variant_checkpoint',
+        type=Path, required=True,
+    )
+    parser.add_argument(
+        '--class-token-init', choices=('cwp', 'residual_cwp'), default='cwp'
+    )
     parser.add_argument('--baseline-checkpoint', type=Path, required=True)
     parser.add_argument('--baseline-task-summary', type=Path, required=True)
     parser.add_argument('--baseline-pca', type=Path, required=True)
@@ -73,12 +79,14 @@ def _resolve(root: Path, value: Path) -> Path:
     return value.expanduser().resolve() if value.is_absolute() else (root / value).resolve()
 
 
-def _load_cwp(path: Path):
+def _load_variant(path: Path, class_token_init: str):
     checkpoint = torch.load(path, map_location='cpu')
     resolution = resolve_mctformerplus_checkpoint_variant(checkpoint, 'mctformerplus')
     if resolution['variant'] != 'small':
         raise RuntimeError('CWP shared-presence analysis requires Small')
-    validate_mctformerplus_class_token_init_checkpoint(checkpoint, 'cwp')
+    validate_mctformerplus_class_token_init_checkpoint(
+        checkpoint, class_token_init
+    )
     validate_mctformerplus_final_norm_checkpoint(
         checkpoint, False, False, False, False
     )
@@ -87,11 +95,13 @@ def _load_cwp(path: Path):
         attention_normalization='vanilla', attention_gamma=1.0,
         bcss_variant='e0', psl_variant='baseline', cti_bgt=False,
         final_norm=False, patch_final_norm=False, last_mct=False,
-        class_stable_last=False, class_token_init='cwp',
+        class_stable_last=False, class_token_init=class_token_init,
     )
     result = model.load_state_dict(checkpoint['model'], strict=True)
     if result.missing_keys or result.unexpected_keys:
-        raise RuntimeError(f'CWP strict checkpoint load failed: {result}')
+        raise RuntimeError(
+            f'{class_token_init} strict checkpoint load failed: {result}'
+        )
     return model, checkpoint
 
 
@@ -116,14 +126,15 @@ def _positive_pair_cosine(tokens: torch.Tensor, labels: torch.Tensor):
     return output
 
 
-def _initial_cwp_state(path: Path, device: torch.device):
+def _initial_variant_state(
+        path: Path, device: torch.device, class_token_init: str):
     with torch.random.fork_rng(devices=[]):
         torch.manual_seed(0)
         model = build_mctformerplus(
             'small', num_classes=20, input_size=448,
             attention_normalization='vanilla', bcss_variant='e0',
             psl_variant='baseline', cti_bgt=False,
-            class_token_init='cwp',
+            class_token_init=class_token_init,
         )
     source = torch.load(path, map_location='cpu')
     adapted, report = adapt_deit_checkpoint_for_mctformerplus(
@@ -135,10 +146,12 @@ def _initial_cwp_state(path: Path, device: torch.device):
         'patch_embed.proj.weight', 'patch_embed.proj.bias', 'pos_embed_pat',
         'pos_embed_cls', 'class_token_pooler.class_queries',
     )
+    if class_token_init == 'residual_cwp':
+        keys += ('cls_token', 'class_token_pooler.alpha')
     return {key: state[key].to(device) for key in keys}, report
 
 
-def _cwp_layer0_from_state(images, state):
+def _variant_layer0_from_state(images, state, class_token_init):
     patches = F.conv2d(
         images, state['patch_embed.proj.weight'], state['patch_embed.proj.bias'],
         stride=16,
@@ -149,6 +162,11 @@ def _cwp_layer0_from_state(images, state):
     ) / np.sqrt(384.0)
     attention = torch.softmax(logits, dim=-1)
     classes = torch.matmul(attention, patches.float()).to(patches.dtype)
+    if class_token_init == 'residual_cwp':
+        classes = (
+            state['cls_token'].expand(images.shape[0], -1, -1)
+            + state['class_token_pooler.alpha'] * classes
+        )
     classes = classes + state['pos_embed_cls']
     return classes, patches, attention
 
@@ -248,7 +266,7 @@ def main():
 
     paths = {
         name: _resolve(root, value) for name, value in {
-            'cwp_checkpoint': args.cwp_checkpoint,
+            'variant_checkpoint': args.variant_checkpoint,
             'baseline_checkpoint': args.baseline_checkpoint,
             'baseline_task_summary': args.baseline_task_summary,
             'baseline_pca': args.baseline_pca,
@@ -263,10 +281,13 @@ def main():
     device = torch.device(args.device)
     if device.type == 'cuda' and not torch.cuda.is_available():
         raise RuntimeError('CUDA unavailable')
-    cwp_model, cwp_checkpoint = _load_cwp(paths['cwp_checkpoint'])
+    variant_key = args.class_token_init
+    cwp_model, cwp_checkpoint = _load_variant(
+        paths['variant_checkpoint'], variant_key
+    )
     baseline_checkpoint = _validate_baseline(paths['baseline_checkpoint'])
-    initial_state, initial_pretrained_report = _initial_cwp_state(
-        paths['official_pretrained'], device
+    initial_state, initial_pretrained_report = _initial_variant_state(
+        paths['official_pretrained'], device, variant_key
     )
     cwp_model = cwp_model.to(device).eval()
     dataset = VOCSemanticDataset(
@@ -286,12 +307,12 @@ def main():
     cwp_mu = []
     pooling_accumulators = {
         'official_deit_initialization': PoolingAccumulator(),
-        'trained_cwp': PoolingAccumulator(),
+        f'trained_{variant_key}': PoolingAccumulator(),
     }
     pooling_row_errors = {key: 0.0 for key in pooling_accumulators}
     index = 0
     before_hashes = {
-        'cwp': sha256_file(paths['cwp_checkpoint']),
+        variant_key: sha256_file(paths['variant_checkpoint']),
         'baseline': sha256_file(paths['baseline_checkpoint']),
     }
     log(f'start images={len(dataset)} device={device} batch_size={args.batch_size}')
@@ -312,20 +333,24 @@ def main():
                     auxiliary['initial_patch_tokens'], labels,
                 )
                 initial_classes, initial_patches, initial_attention = (
-                    _cwp_layer0_from_state(images, initial_state)
+                    _variant_layer0_from_state(
+                        images, initial_state, variant_key
+                    )
                 )
                 del initial_classes, initial_patches
                 final_attention = auxiliary['class_token_pooling_attention']
                 pooling_accumulators['official_deit_initialization'].update(
                     initial_attention
                 )
-                pooling_accumulators['trained_cwp'].update(final_attention)
+                pooling_accumulators[f'trained_{variant_key}'].update(
+                    final_attention
+                )
                 pooling_row_errors['official_deit_initialization'] = max(
                     pooling_row_errors['official_deit_initialization'],
                     float((initial_attention.sum(-1) - 1).abs().max()),
                 )
-                pooling_row_errors['trained_cwp'] = max(
-                    pooling_row_errors['trained_cwp'],
+                pooling_row_errors[f'trained_{variant_key}'] = max(
+                    pooling_row_errors[f'trained_{variant_key}'],
                     float((final_attention.sum(-1) - 1).abs().max()),
                 )
                 cwp_mu.append(torch.stack(
@@ -357,7 +382,7 @@ def main():
     finally:
         collector.close()
     after_hashes = {
-        'cwp': sha256_file(paths['cwp_checkpoint']),
+        variant_key: sha256_file(paths['variant_checkpoint']),
         'baseline': sha256_file(paths['baseline_checkpoint']),
     }
     if before_hashes != after_hashes:
@@ -377,22 +402,25 @@ def main():
     baseline_summary = pd.read_csv(paths['baseline_task_summary'])
     summary_compare = baseline_summary.merge(
         cwp_summary, on='layer', how='outer',
-        suffixes=('_baseline', '_cwp'), validate='one_to_one'
+        suffixes=('_baseline', f'_{variant_key}'), validate='one_to_one'
     )
     pca_compare = baseline_pca[['layer', 'effective_rank']].merge(
         cwp_pca[['layer', 'effective_rank']], on='layer',
-        how='outer', suffixes=('_baseline', '_cwp'), validate='one_to_one'
+        how='outer', suffixes=('_baseline', f'_{variant_key}'),
+        validate='one_to_one'
     )
     comparison = summary_compare[[
-        'layer', 'raw_pair_corr_baseline', 'raw_pair_corr_cwp',
-        'raw_pair_jaccard_top05_baseline', 'raw_pair_jaccard_top05_cwp',
-        'common_r2_baseline', 'common_r2_cwp',
+        'layer', 'raw_pair_corr_baseline', f'raw_pair_corr_{variant_key}',
+        'raw_pair_jaccard_top05_baseline',
+        f'raw_pair_jaccard_top05_{variant_key}',
+        'common_r2_baseline', f'common_r2_{variant_key}',
     ]].merge(pca_compare, on='layer', validate='one_to_one')
     for metric in (
         'raw_pair_corr', 'raw_pair_jaccard_top05', 'common_r2', 'effective_rank'
     ):
-        comparison[f'{metric}_delta_cwp_minus_baseline'] = (
-            comparison[f'{metric}_cwp'] - comparison[f'{metric}_baseline']
+        comparison[f'{metric}_delta_{variant_key}_minus_baseline'] = (
+            comparison[f'{metric}_{variant_key}']
+            - comparison[f'{metric}_baseline']
         )
 
     pooling_summary = {
@@ -402,25 +430,28 @@ def main():
     for key, value in pooling_row_errors.items():
         pooling_summary[key]['max_attention_row_sum_error'] = value
 
-    csv_dump(output / 'cwp_per_image_layer.csv', cwp_frame.to_dict('records'), list(cwp_frame.columns))
-    csv_dump(output / 'cwp_layer_summary.csv', cwp_summary.to_dict('records'), list(cwp_summary.columns))
-    csv_dump(output / 'cwp_pca.csv', cwp_pca.to_dict('records'), list(cwp_pca.columns))
-    csv_dump(output / 'baseline_vs_cwp_layer_comparison.csv', comparison.to_dict('records'), list(comparison.columns))
-    json_dump(output / 'cwp_layer0_pooling_summary.json', pooling_summary)
+    csv_dump(output / f'{variant_key}_per_image_layer.csv', cwp_frame.to_dict('records'), list(cwp_frame.columns))
+    csv_dump(output / f'{variant_key}_layer_summary.csv', cwp_summary.to_dict('records'), list(cwp_summary.columns))
+    csv_dump(output / f'{variant_key}_pca.csv', cwp_pca.to_dict('records'), list(cwp_pca.columns))
+    csv_dump(output / f'baseline_vs_{variant_key}_layer_comparison.csv', comparison.to_dict('records'), list(comparison.columns))
+    json_dump(output / f'{variant_key}_layer0_pooling_summary.json', pooling_summary)
     environment = write_environment_manifests(output)
     metadata = {
-        'schema': 'mctformerplus_cwp_shared_presence_v1',
+        'schema': f'mctformerplus_{variant_key}_shared_presence_v1',
         'created_at': timestamp(),
         'command': command_line(),
         'git': source_git,
         'num_images': len(dataset),
         'checkpoint_sha256': before_hashes,
         'checkpoint_epochs': {
-            'cwp': cwp_checkpoint.get('epoch'),
+            variant_key: cwp_checkpoint.get('epoch'),
             'baseline': baseline_checkpoint.get('epoch'),
         },
         'layers': list(range(13)),
-        'layer_zero_definition': 'PatchEmbed + patch positional embedding; CWP/baseline initializer + class positional embedding; before Block 1',
+        'layer_zero_definition': (
+            'PatchEmbed + patch positional embedding; selected CWP '
+            'initializer + class positional embedding; before Block 1'
+        ),
         'source_results_immutable': True,
         'environment_manifests': environment,
         'initial_pretrained_load_report': initial_pretrained_report,
@@ -429,9 +460,12 @@ def main():
     json_dump(output / 'metadata.json', metadata)
     json_dump(output / 'completion.json', {
         'status': 'complete', 'num_images': len(dataset),
-        'cwp_rows': len(cwp_frame), 'created_at': timestamp(),
+        f'{variant_key}_rows': len(cwp_frame), 'created_at': timestamp(),
     })
-    log(f'complete rows={len(cwp_frame)} checkpoint_sha256={before_hashes["cwp"]}')
+    log(
+        f'complete rows={len(cwp_frame)} '
+        f'checkpoint_sha256={before_hashes[variant_key]}'
+    )
 
 
 if __name__ == '__main__':

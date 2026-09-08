@@ -62,7 +62,8 @@ def parse_args():
     parser.add_argument('--last-mct', action='store_true')
     parser.add_argument('--class-stable-last', action='store_true')
     parser.add_argument(
-        '--class-token-init', default='baseline', choices=('baseline', 'cwp')
+        '--class-token-init', default='baseline',
+        choices=('baseline', 'cwp', 'residual_cwp')
     )
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--bootstrap-resamples', type=int, default=10000)

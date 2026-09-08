@@ -82,8 +82,12 @@ def get_args_parser():
         '--class-stable-last', action='store_true',
         help='select class-wise Top-K original 3x3 responses via low-pass stability')
     parser.add_argument(
-        '--class-token-init', default='baseline', choices=('baseline', 'cwp'),
-        help='baseline repeated DeiT CLS token or class-wise patch pooling')
+        '--class-token-init', default='baseline',
+        choices=('baseline', 'cwp', 'residual_cwp'),
+        help=(
+            'baseline repeated DeiT CLS token, class-wise patch pooling, or '
+            'the repeated CLS token plus a scaled class-wise pooled residual'
+        ))
     parser.add_argument('--bcss-variant', default='e0', choices=tuple(BCSS_VARIANTS),
                         help='BCSS screening or prespecified debug variant')
     parser.add_argument('--bcss-num-background-slots', default=1, type=int)
@@ -350,18 +354,22 @@ def main(args):
         raise ValueError(
             'LaST ablations require --patch-final-norm and forbid --final-norm'
         )
-    if args.class_token_init == 'cwp':
+    if args.class_token_init in {'cwp', 'residual_cwp'}:
         if args.model.lower() != 'mctformerplus':
-            raise ValueError('CWP first-round support requires mctformerplus Small')
+            raise ValueError(
+                'CWP initialization support requires mctformerplus Small'
+            )
         if (args.final_norm or args.patch_final_norm or args.last_mct
                 or args.class_stable_last):
-            raise ValueError('CWP requires the original MCTformer+ final readout')
+            raise ValueError(
+                'CWP initialization requires the original MCTformer+ final readout'
+            )
         if (args.attention_normalization != 'vanilla'
                 or args.bcss_variant != 'e0'
                 or args.psl_variant != 'baseline'
                 or args.cti_bgt):
             raise ValueError(
-                'CWP requires vanilla attention, BCSS E0, PSL baseline, '
+                'CWP initialization requires vanilla attention, BCSS E0, PSL baseline, '
                 'and CTI-BGT disabled'
             )
     if args.finetune == 'auto':
@@ -655,6 +663,10 @@ def main(args):
             loss_scaler,
             args.clip_grad,
             args=args)
+        if args.class_token_init == 'residual_cwp':
+            train_stats['residual_cwp_alpha_end'] = float(
+                model.class_token_pooler.alpha.detach()
+            )
         train_seconds = time.perf_counter() - train_started
         if device.type == 'cuda':
             training_peak_allocated = torch.cuda.max_memory_allocated(device)

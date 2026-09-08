@@ -54,6 +54,15 @@ class ClassWiseWeightedPooling(nn.Module):
         return pooled.to(patch_tokens.dtype), attention
 
 
+class ResidualClassWiseWeightedPooling(ClassWiseWeightedPooling):
+    """Class-wise pooling with the fixed first-round learnable residual scale."""
+
+    def __init__(
+            self, num_classes: int, embed_dim: int, initial_alpha: float = 0.1):
+        super().__init__(num_classes=num_classes, embed_dim=embed_dim)
+        self.alpha = nn.Parameter(torch.tensor(float(initial_alpha)))
+
+
 def class_token_pooling_diagnostics(
         attention: torch.Tensor, initial_class_tokens: torch.Tensor):
     """Return detached, loss-free CWP diagnostics for one mini-batch."""

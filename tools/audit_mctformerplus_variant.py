@@ -50,7 +50,8 @@ def parse_args():
     parser.add_argument('--last-mct', action='store_true')
     parser.add_argument('--class-stable-last', action='store_true')
     parser.add_argument(
-        '--class-token-init', default='baseline', choices=('baseline', 'cwp')
+        '--class-token-init', default='baseline',
+        choices=('baseline', 'cwp', 'residual_cwp')
     )
     return parser.parse_args()
 
@@ -187,7 +188,17 @@ def execute(args):
         'class_token_parameter_contract': (
             ('cls_token' in state and 'class_token_pooler.class_queries' not in state)
             if args.class_token_init == 'baseline'
-            else ('cls_token' not in state and 'class_token_pooler.class_queries' in state)
+            else (
+                'cls_token' not in state
+                and 'class_token_pooler.class_queries' in state
+                and 'class_token_pooler.alpha' not in state
+            )
+            if args.class_token_init == 'cwp'
+            else (
+                'cls_token' in state
+                and 'class_token_pooler.class_queries' in state
+                and 'class_token_pooler.alpha' in state
+            )
         ),
         'patch_head_kernel_matches': (
             tuple(training_model.head.kernel_size)
