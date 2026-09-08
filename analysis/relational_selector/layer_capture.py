@@ -65,32 +65,12 @@ class LayerRelationCollector:
                 "native token contract expected [B,804,384], got "
                 f"{tuple(tokens.shape)}"
             )
-        classes = tokens[:, : self.num_classes].float()
-        patches = tokens[:, self.num_classes :].float()
-        raw = raw_dot_scores(classes, patches)
-        mean_class = classes.mean(dim=1)
-        common = torch.einsum("bd,bpd->bp", mean_class, patches) / math.sqrt(self.width)
-        residual = raw - common[:, None, :]
         if self._labels is None or self._labels.shape[0] != tokens.shape[0]:
             raise RuntimeError("positive labels must be set before the frozen forward")
-        labels = self._labels.to(device=tokens.device)
-        positive_count = labels.sum(dim=1)
-        # G+ is diagnostic only; make unavailable single-label rows explicit.
-        positive_weights = labels.float()
-        positive_mean = torch.einsum("bc,bcd->bd", positive_weights, classes)
-        positive_mean = positive_mean / positive_count.clamp_min(1).float().unsqueeze(1)
-        positive_common = torch.einsum("bd,bpd->bp", positive_mean, patches) / math.sqrt(self.width)
-        positive_common = positive_common.masked_fill((positive_count < 2).unsqueeze(1), float("nan"))
-        if not (torch.isfinite(raw).all() and torch.isfinite(residual).all() and torch.isfinite(common).all()):
-            raise RuntimeError("Task A relation capture produced a non-finite value")
+        classes = tokens[:, : self.num_classes]
+        patches = tokens[:, self.num_classes :]
         self.records.append(
-            LayerRelations(
-                raw=raw.detach(),
-                residual=residual.detach(),
-                common=common.detach(),
-                positive_common=positive_common.detach(),
-                mean_class=mean_class.detach(),
-            )
+            compute_token_relations(classes, patches, self._labels)
         )
 
     def consume(self) -> list[LayerRelations]:
@@ -100,3 +80,39 @@ class LayerRelationCollector:
         self.records = []
         self._labels = None
         return records
+
+
+def compute_token_relations(
+        classes: torch.Tensor, patches: torch.Tensor,
+        labels: torch.Tensor) -> LayerRelations:
+    """Reduce any matched class/patch token pair to frozen Task-A maps."""
+    if classes.ndim != 3 or patches.ndim != 3 or labels.ndim != 2:
+        raise ValueError('classes, patches, labels must be [B,C,D], [B,P,D], [B,C]')
+    if (classes.shape[0] != patches.shape[0]
+            or classes.shape[:2] != labels.shape
+            or classes.shape[-1] != patches.shape[-1]):
+        raise ValueError('class, patch, and label token dimensions do not match')
+    classes = classes.float()
+    patches = patches.float()
+    width = classes.shape[-1]
+    raw = raw_dot_scores(classes, patches)
+    mean_class = classes.mean(dim=1)
+    common = torch.einsum('bd,bpd->bp', mean_class, patches) / math.sqrt(width)
+    residual = raw - common[:, None, :]
+    positive = labels.detach().to(device=classes.device, dtype=torch.bool)
+    positive_count = positive.sum(dim=1)
+    positive_mean = torch.einsum('bc,bcd->bd', positive.float(), classes)
+    positive_mean = positive_mean / positive_count.clamp_min(1).float().unsqueeze(1)
+    positive_common = torch.einsum(
+        'bd,bpd->bp', positive_mean, patches
+    ) / math.sqrt(width)
+    positive_common = positive_common.masked_fill(
+        (positive_count < 2).unsqueeze(1), float('nan')
+    )
+    if not (torch.isfinite(raw).all() and torch.isfinite(residual).all()
+            and torch.isfinite(common).all()):
+        raise RuntimeError('Task A relation capture produced a non-finite value')
+    return LayerRelations(
+        raw=raw.detach(), residual=residual.detach(), common=common.detach(),
+        positive_common=positive_common.detach(), mean_class=mean_class.detach(),
+    )

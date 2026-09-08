@@ -24,6 +24,7 @@ from models.bcss import BCSS_VARIANTS
 from models.persistent_semantic import PSL_VARIANTS, parse_interaction_layers
 from models.mctformer_plus import (
     resolve_mctformerplus_checkpoint_variant,
+    validate_mctformerplus_class_token_init_checkpoint,
     validate_mctformerplus_final_norm_checkpoint,
 )
 
@@ -59,6 +60,9 @@ def get_args_parser():
     parser.add_argument(
         '--class-stable-last', action='store_true',
         help='use class-stable LaST pooling recorded by the checkpoint')
+    parser.add_argument(
+        '--class-token-init', default='baseline', choices=('baseline', 'cwp'),
+        help='class-token initialization recorded by the checkpoint')
     parser.add_argument('--bcss-variant', default='e0', choices=tuple(BCSS_VARIANTS))
     parser.add_argument('--bcss-num-background-slots', default=1, type=int)
     parser.add_argument('--bcss-tau', default=0.5, type=float)
@@ -454,9 +458,15 @@ if __name__ == '__main__':
             checkpoint, bool(args.final_norm), bool(args.patch_final_norm),
             bool(args.last_mct), bool(args.class_stable_last),
         )
+        validate_mctformerplus_class_token_init_checkpoint(
+            checkpoint, args.class_token_init
+        )
     elif (args.final_norm or args.patch_final_norm or args.last_mct
-            or args.class_stable_last):
-        raise ValueError('FinalLN and LaST flags are supported only by MCTformer+')
+            or args.class_stable_last or args.class_token_init != 'baseline'):
+        raise ValueError(
+            'FinalLN, LaST, and class-token initialization flags are '
+            'supported only by MCTformer+'
+        )
     model = create_cam_model(args)
     if hasattr(model, 'cti_bgt_configuration'):
         validate_cti_bgt_checkpoint(checkpoint, model)

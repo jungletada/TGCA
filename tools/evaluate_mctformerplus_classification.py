@@ -30,6 +30,7 @@ from models.mctformer_plus import (  # noqa: E402
     build_mctformerplus,
     model_spec_from_instance,
     resolve_mctformerplus_checkpoint_variant,
+    validate_mctformerplus_class_token_init_checkpoint,
     validate_mctformerplus_final_norm_checkpoint,
 )
 
@@ -60,6 +61,9 @@ def parse_args():
     final_norm_group.add_argument('--patch-final-norm', action='store_true')
     parser.add_argument('--last-mct', action='store_true')
     parser.add_argument('--class-stable-last', action='store_true')
+    parser.add_argument(
+        '--class-token-init', default='baseline', choices=('baseline', 'cwp')
+    )
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--bootstrap-resamples', type=int, default=10000)
     parser.add_argument('--bootstrap-seed', type=int, default=2027)
@@ -209,6 +213,9 @@ def execute(args):
         checkpoint, bool(args.final_norm), bool(args.patch_final_norm),
         bool(args.last_mct), bool(args.class_stable_last),
     )
+    validate_mctformerplus_class_token_init_checkpoint(
+        checkpoint, args.class_token_init
+    )
     attention = checkpoint.get('attention_normalization', {})
     bcss = checkpoint.get('bcss', {'variant': 'e0'})
     psl = checkpoint.get('psl', {'variant': 'baseline'})
@@ -236,6 +243,7 @@ def execute(args):
         patch_final_norm=bool(args.patch_final_norm),
         last_mct=bool(args.last_mct),
         class_stable_last=bool(args.class_stable_last),
+        class_token_init=args.class_token_init,
     )
     state = checkpoint.get('model', checkpoint)
     incompatibility = model.load_state_dict(state, strict=True)
@@ -421,6 +429,7 @@ def execute(args):
             'patch_final_norm': bool(args.patch_final_norm),
             'last_mct': bool(args.last_mct),
             'class_stable_last': bool(args.class_stable_last),
+            'class_token_init': args.class_token_init,
             'patch_branch': patch_branch,
             'macro_definition': 'mean of 20 dataset-level one-vs-rest class AP values',
             'micro_definition': 'AP over flattened image-class pairs',

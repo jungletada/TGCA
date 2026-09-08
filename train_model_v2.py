@@ -37,7 +37,10 @@ from models.mctformer_plus import (
     adapt_deit_checkpoint_for_mctformerplus,
     get_mctformerplus_spec,
     model_spec_from_instance,
+    resolve_mctformerplus_checkpoint_variant,
     resolve_mctformerplus_variant,
+    validate_mctformerplus_class_token_init_checkpoint,
+    validate_mctformerplus_final_norm_checkpoint,
 )
 from models.cti_bgt import add_cti_bgt_arguments, adapt_cti_bgt_finetune
 from models.tgca import SUPPORTED_MODES
@@ -81,6 +84,9 @@ def get_args_parser():
     parser.add_argument(
         '--class-stable-last', action='store_true',
         help='select class-wise Top-K original 3x3 responses via low-pass stability')
+    parser.add_argument(
+        '--class-token-init', default='baseline', choices=('baseline', 'cwp'),
+        help='baseline repeated DeiT CLS token or class-wise patch pooling')
     parser.add_argument('--bcss-variant', default='e0', choices=tuple(BCSS_VARIANTS),
                         help='BCSS screening or prespecified debug variant')
     parser.add_argument('--bcss-num-background-slots', default=1, type=int)
@@ -329,9 +335,12 @@ def main(args):
     }
     is_mctformerplus = args.model.lower() in mctformerplus_names
     if (args.final_norm or args.patch_final_norm or args.last_mct
-            or args.class_stable_last) \
+            or args.class_stable_last or args.class_token_init != 'baseline') \
             and not is_mctformerplus:
-        raise ValueError('FinalLN and LaST flags are supported only by MCTformer+')
+        raise ValueError(
+            'FinalLN, LaST, and class-token initialization flags are '
+            'supported only by MCTformer+'
+        )
     if (args.last_mct or args.class_stable_last) \
             and args.model.lower() != 'mctformerplus':
         raise ValueError(
@@ -344,6 +353,24 @@ def main(args):
         raise ValueError(
             'LaST ablations require --patch-final-norm and forbid --final-norm'
         )
+    if args.class_token_init == 'cwp':
+        if args.model.lower() != 'mctformerplus':
+            raise ValueError('CWP first-round support requires mctformerplus Small')
+        if (args.final_norm or args.patch_final_norm or args.last_mct
+                or args.class_stable_last):
+            raise ValueError('CWP requires the original MCTformer+ final readout')
+        if (args.attention_normalization != 'vanilla'
+                or args.bcss_variant != 'e0'
+                or args.psl_variant != 'baseline'
+                or args.cti_bgt):
+            raise ValueError(
+                'CWP requires vanilla attention, BCSS E0, PSL baseline, '
+                'and CTI-BGT disabled'
+            )
+    if args.resume and args.finetune not in {'', 'auto'}:
+        raise ValueError('--resume and an explicit --finetune are mutually exclusive')
+    if args.resume and args.finetune == 'auto':
+        args.finetune = ''
     if args.finetune == 'auto':
         if is_mctformerplus:
             args.finetune = get_mctformerplus_spec(args.model)['pretrained_url']
@@ -427,6 +454,7 @@ def main(args):
             'patch_final_norm': args.patch_final_norm,
             'last_mct': args.last_mct,
             'class_stable_last': args.class_stable_last,
+            'class_token_init': args.class_token_init,
         }
         if is_mctformerplus else {}
     )
@@ -497,6 +525,36 @@ def main(args):
     optimizer = create_optimizer(args, model)
     loss_scaler = NativeScaler()
     lr_scheduler, _ = create_scheduler(args, optimizer)
+    resume_checkpoint = None
+    if args.resume:
+        resume_path = Path(args.resume).expanduser().resolve()
+        resume_checkpoint = torch.load(resume_path, map_location='cpu')
+        if not is_mctformerplus:
+            raise ValueError('--resume is currently supported only for MCTformer+')
+        resolve_mctformerplus_checkpoint_variant(resume_checkpoint, args.model)
+        validate_mctformerplus_class_token_init_checkpoint(
+            resume_checkpoint, args.class_token_init
+        )
+        validate_mctformerplus_final_norm_checkpoint(
+            resume_checkpoint,
+            args.final_norm,
+            expected_patch=args.patch_final_norm,
+            expected_last_mct=args.last_mct,
+            expected_class_stable_last=args.class_stable_last,
+        )
+        required_resume = {
+            'optimizer', 'lr_scheduler', 'loss_scaler', 'epoch', 'rng_state'
+        }
+        missing_resume = sorted(required_resume - set(resume_checkpoint))
+        if missing_resume:
+            raise ValueError(
+                f'Resume checkpoint lacks training state: {missing_resume}'
+            )
+        model.load_state_dict(resume_checkpoint['model'], strict=True)
+        optimizer.load_state_dict(resume_checkpoint['optimizer'])
+        lr_scheduler.load_state_dict(resume_checkpoint['lr_scheduler'])
+        loss_scaler.load_state_dict(resume_checkpoint['loss_scaler'])
+        args.start_epoch = int(resume_checkpoint['epoch']) + 1
     work_space = Path(args.work_space)
     work_space.mkdir(parents=True, exist_ok=True)
     model_spec = model_spec_from_instance(model) if is_mctformerplus else None
@@ -521,6 +579,10 @@ def main(args):
             if args.pretrained_load_report is not None else None
         ),
     }
+    if resume_checkpoint is not None:
+        pretrained_metadata = resume_checkpoint.get(
+            'pretrained', pretrained_metadata
+        )
     training_spec = {
         'seed': args.seed,
         'micro_batch_size': args.batch_size,
@@ -541,6 +603,10 @@ def main(args):
         'class_stable_last': bool(args.class_stable_last),
         'class_stable_last_configuration': (
             model.class_stable_last_configuration()
+        ),
+        'class_token_init': args.class_token_init,
+        'class_token_initialization_configuration': (
+            model.class_token_initialization_configuration()
         ),
     }
     optimizer_spec = {
@@ -591,9 +657,25 @@ def main(args):
             'class_stable_last_configuration': (
                 model.class_stable_last_configuration()
             ),
+            'class_token_init': args.class_token_init,
+            'class_token_initialization_configuration': (
+                model.class_token_initialization_configuration()
+            ),
             'epoch': epoch,
             'pretrained': pretrained_metadata,
             'training_spec': training_spec,
+            'optimizer': optimizer.state_dict(),
+            'lr_scheduler': lr_scheduler.state_dict(),
+            'loss_scaler': loss_scaler.state_dict(),
+            'rng_state': {
+                'python': random.getstate(),
+                'numpy': np.random.get_state(),
+                'torch': torch.get_rng_state(),
+                'cuda': (
+                    torch.cuda.get_rng_state_all()
+                    if torch.cuda.is_available() else None
+                ),
+            },
         }
         if model_spec is not None:
             payload['model_spec'] = model_spec
@@ -607,6 +689,18 @@ def main(args):
 
     logger.info(vars(args))
     logger.info(f'number of params:{n_parameters}')
+
+    if resume_checkpoint is not None:
+        rng_state = resume_checkpoint['rng_state']
+        random.setstate(rng_state['python'])
+        np.random.set_state(rng_state['numpy'])
+        torch.set_rng_state(rng_state['torch'])
+        if torch.cuda.is_available() and rng_state.get('cuda') is not None:
+            torch.cuda.set_rng_state_all(rng_state['cuda'])
+        logger.info(
+            f'Resumed strictly from {Path(args.resume).expanduser().resolve()} '
+            f'at epoch {args.start_epoch}'
+        )
 
     max_accuracy = 0.0
     epoch_runtime = []

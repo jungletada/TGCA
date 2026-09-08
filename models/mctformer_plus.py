@@ -25,9 +25,14 @@ from models.persistent_semantic import (
 )
 
 from models.cti_bgt import cti_bgt_maps, validate_cti_bgt
+from models.class_token_pooling import (
+    ClassWiseWeightedPooling,
+    class_token_pooling_diagnostics,
+)
 
 __all__ = [
     'ClassStableLastPooler',
+    'ClassWiseWeightedPooling',
     'LastPatchAggregator',
     'MCTFORMERPLUS_VARIANTS',
     'MCTformerPlus',
@@ -40,12 +45,14 @@ __all__ = [
     'mctformerplus_tiny',
     'model_spec_from_instance',
     'checkpoint_class_stable_last_enabled',
+    'checkpoint_class_token_init',
     'checkpoint_final_norm_enabled',
     'checkpoint_last_mct_enabled',
     'checkpoint_patch_final_norm_enabled',
     'resolve_mctformerplus_checkpoint_variant',
     'resolve_mctformerplus_variant',
     'validate_mctformerplus_final_norm_checkpoint',
+    'validate_mctformerplus_class_token_init_checkpoint',
 ]
 
 
@@ -387,8 +394,14 @@ class MCTformerPlus(VisionTransformer):
             psl_num_background_latents=1, cti_bgt=False, cti_bgt_weight=0.1,
             cti_bgt_n_layers=6, cti_bgt_affinity_start=4, final_norm=False,
             patch_final_norm=False, last_mct=False, class_stable_last=False,
-            last_topk=1, last_sigma=None, last_eps=1e-6, *args, **kwargs):
+            last_topk=1, last_sigma=None, last_eps=1e-6,
+            class_token_init='baseline', *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.class_token_init = str(class_token_init).strip().lower()
+        if self.class_token_init not in {'baseline', 'cwp'}:
+            raise ValueError(
+                "class_token_init must be one of {'baseline', 'cwp'}"
+            )
         self.final_norm = bool(final_norm)
         self.patch_final_norm = bool(patch_final_norm)
         self.last_mct = bool(last_mct)
@@ -401,6 +414,29 @@ class MCTformerPlus(VisionTransformer):
             raise ValueError(
                 'last_mct and class_stable_last are mutually exclusive'
             )
+        if self.class_token_init == 'cwp':
+            architecture = (
+                self.embed_dim,
+                len(self.blocks),
+                int(self.blocks[0].attn.num_heads),
+            )
+            if architecture != (384, 12, 6):
+                raise ValueError(
+                    'CWP first-round support is restricted to '
+                    'MCTformer+-Small (embed_dim=384, depth=12, heads=6)'
+                )
+            if self.final_norm or self.patch_final_norm:
+                raise ValueError('CWP requires final_norm=False and patch_final_norm=False')
+            if self.last_mct or self.class_stable_last:
+                raise ValueError('CWP is incompatible with LaST pooling variants')
+            if self.attention_normalization != 'vanilla':
+                raise ValueError('CWP requires vanilla attention')
+            if str(bcss_variant).lower() != 'e0':
+                raise ValueError('CWP requires BCSS E0')
+            if str(psl_variant).lower() != 'baseline':
+                raise ValueError('CWP requires PSL baseline')
+            if bool(cti_bgt):
+                raise ValueError('CWP requires CTI-BGT disabled')
         if self.last_mct or self.class_stable_last:
             expected_sigma = math.sqrt(self.embed_dim)
             requested_sigma = (
@@ -483,11 +519,22 @@ class MCTformerPlus(VisionTransformer):
         self.Hp, self.Wp = math.ceil(img_size[0] / patch_size[0]), math.ceil(img_size[1] / patch_size[1])
         self.num_patches = self.Hp * self.Wp
 
-        self.cls_token = nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim))
+        if self.class_token_init == 'baseline':
+            self.cls_token = nn.Parameter(
+                torch.zeros(1, self.num_classes, self.embed_dim)
+            )
+            self.class_token_pooler = None
+        else:
+            self.register_parameter('cls_token', None)
+            self.class_token_pooler = ClassWiseWeightedPooling(
+                num_classes=self.num_classes,
+                embed_dim=self.embed_dim,
+            )
         self.pos_embed_cls = nn.Parameter(torch.zeros(1, self.num_classes, self.embed_dim))
         self.pos_embed_pat = nn.Parameter(torch.zeros(1, self.num_patches, self.embed_dim))
 
-        trunc_normal_(self.cls_token, std=.02)
+        if self.cls_token is not None:
+            trunc_normal_(self.cls_token, std=.02)
         trunc_normal_(self.pos_embed_cls, std=.02)
         trunc_normal_(self.pos_embed_pat, std=.02)
 
@@ -653,6 +700,23 @@ class MCTformerPlus(VisionTransformer):
             'cam_map': 'original M',
         }
 
+    def class_token_initialization_configuration(self):
+        if self.class_token_init == 'baseline':
+            return {
+                'class_token_init': 'baseline',
+                'deit_cls_token_used': True,
+                'class_token_source_policy': 'repeated_for_all_classes',
+            }
+        return {
+            'class_token_init': 'cwp',
+            'deit_cls_token_used': False,
+            'deit_cls_token_policy': 'discarded',
+            'class_pooling': 'class-wise weighted pooling',
+            'pooling_softmax_axis': 'patch',
+            'class_query_shape': [self.num_classes, self.embed_dim],
+            'class_query_initialization': 'trunc_normal_std_0.02',
+        }
+
     def _cti_bgt_maps(self, patch_cam, attentions, labels=None):
         return cti_bgt_maps(
             patch_cam, attentions, labels,
@@ -740,8 +804,14 @@ class MCTformerPlus(VisionTransformer):
         else:
             x = x + self.pos_embed_pat
 
-        cls_tokens = self.cls_token.expand(B, -1, -1)
+        pooling_attention = None
+        initial_patch_tokens = x
+        if self.class_token_init == 'baseline':
+            cls_tokens = self.cls_token.expand(B, -1, -1)
+        else:
+            cls_tokens, pooling_attention = self.class_token_pooler(x)
         cls_tokens = cls_tokens + self.pos_embed_cls
+        initial_class_tokens = cls_tokens
 
         patch_count = x.shape[1]
         # BGT joins every joint self-attention block in [BG, FG, patches] order.
@@ -783,7 +853,19 @@ class MCTformerPlus(VisionTransformer):
             'patch_final_norm': self.patch_final_norm,
             'last_mct': self.last_mct,
             'class_stable_last': self.class_stable_last,
+            'class_token_init': self.class_token_init,
         }
+        if pooling_attention is not None:
+            auxiliary.update({
+                'class_token_pooling_attention': pooling_attention,
+                'initial_class_tokens': initial_class_tokens,
+                'initial_patch_tokens': initial_patch_tokens,
+                'class_token_pooling_diagnostics': (
+                    class_token_pooling_diagnostics(
+                        pooling_attention, initial_class_tokens
+                    )
+                ),
+            })
         if self.bcss_spec.backbone_register:
             auxiliary['register_tokens'] = final_tokens[
                 :, self.num_classes + patch_count:
@@ -946,7 +1028,8 @@ class MCTformerPlus(VisionTransformer):
         output.append(x_cls_logits)
         output.append(torch.stack(all_x_cls))
         output.append(x_patch_logits)
-        if self.bcss_spec.competitive_ownership or 'cti_bgt' in auxiliary:
+        if (self.bcss_spec.competitive_ownership or 'cti_bgt' in auxiliary
+                or self.class_token_init == 'cwp'):
             output.append(auxiliary)
         return output
 
@@ -1292,6 +1375,7 @@ def model_spec_from_instance(model):
             getattr(model, 'n_layers', 3)
         ),
         'cam_patch_to_patch_layers': depth,
+        'class_token_init': model.class_token_init,
     }
 
 
@@ -1374,6 +1458,59 @@ def checkpoint_class_stable_last_enabled(checkpoint):
     return value
 
 
+def checkpoint_class_token_init(checkpoint):
+    """Return and validate the class-token initialization checkpoint contract."""
+    if not isinstance(checkpoint, Mapping):
+        raise TypeError(
+            f'Checkpoint must be a mapping, got {type(checkpoint).__name__}'
+        )
+    state = _checkpoint_state_dict(checkpoint)
+    has_baseline = 'cls_token' in state
+    has_cwp = 'class_token_pooler.class_queries' in state
+    if has_baseline == has_cwp:
+        raise ValueError(
+            'Checkpoint must contain exactly one of cls_token or '
+            'class_token_pooler.class_queries'
+        )
+    state_value = 'cwp' if has_cwp else 'baseline'
+    top_value = checkpoint.get('class_token_init')
+    model_spec = checkpoint.get('model_spec')
+    spec_value = (
+        model_spec.get('class_token_init')
+        if isinstance(model_spec, Mapping) else None
+    )
+    recorded = [value for value in (top_value, spec_value) if value is not None]
+    if state_value == 'cwp' and (top_value is None or spec_value is None):
+        raise ValueError(
+            'CWP checkpoints require explicit class_token_init=cwp in both '
+            'top-level metadata and model_spec'
+        )
+    for value in recorded:
+        if not isinstance(value, str) or value not in {'baseline', 'cwp'}:
+            raise ValueError(
+                'checkpoint class_token_init must be baseline or cwp'
+            )
+        if value != state_value:
+            raise ValueError(
+                f'checkpoint class_token_init={value!r} conflicts with '
+                f'state architecture {state_value!r}'
+            )
+    return state_value
+
+
+def validate_mctformerplus_class_token_init_checkpoint(checkpoint, expected):
+    expected = str(expected).strip().lower()
+    if expected not in {'baseline', 'cwp'}:
+        raise ValueError('expected class_token_init must be baseline or cwp')
+    observed = checkpoint_class_token_init(checkpoint)
+    if observed != expected:
+        raise ValueError(
+            f'Checkpoint class_token_init={observed!r} does not match '
+            f'requested {expected!r}'
+        )
+    return observed
+
+
 def validate_mctformerplus_final_norm_checkpoint(
         checkpoint, expected, expected_patch=False, expected_last_mct=False,
         expected_class_stable_last=False):
@@ -1441,10 +1578,16 @@ def validate_mctformerplus_final_norm_checkpoint(
 
 
 def _state_architecture(state):
-    required = ('cls_token', 'patch_embed.proj.weight', 'blocks.0.attn.qkv.weight')
+    required = ('patch_embed.proj.weight', 'blocks.0.attn.qkv.weight')
     missing = [key for key in required if key not in state]
     if missing:
         raise ValueError(f'Checkpoint lacks architecture keys: {missing}')
+    has_baseline = 'cls_token' in state
+    has_cwp = 'class_token_pooler.class_queries' in state
+    if has_baseline == has_cwp:
+        raise ValueError(
+            'Checkpoint must contain exactly one class-token initializer key'
+        )
     embed_dim = int(state['patch_embed.proj.weight'].shape[0])
     patch_weight = state['patch_embed.proj.weight']
     if patch_weight.ndim != 4:
@@ -1458,7 +1601,15 @@ def _state_architecture(state):
         'depth': len(blocks),
         'block_indices': blocks,
         'patch_size': [int(patch_weight.shape[-2]), int(patch_weight.shape[-1])],
-        'class_token_count': int(state['cls_token'].shape[1]),
+        'class_token_init': 'cwp' if has_cwp else 'baseline',
+        'class_token_count': int(
+            state['class_token_pooler.class_queries'].shape[0]
+            if has_cwp else state['cls_token'].shape[1]
+        ),
+        'class_token_initializer_shape': list(
+            state['class_token_pooler.class_queries'].shape
+            if has_cwp else state['cls_token'].shape
+        ),
         'qkv_shape': list(state['blocks.0.attn.qkv.weight'].shape),
     }
 
@@ -1473,6 +1624,7 @@ def resolve_mctformerplus_checkpoint_variant(checkpoint, model_name):
     requested_name = str(model_name).strip().lower()
     state = _checkpoint_state_dict(checkpoint)
     observed = _state_architecture(state)
+    observed_class_token_init = checkpoint_class_token_init(checkpoint)
     metadata = checkpoint.get('model_spec') if isinstance(checkpoint, Mapping) else None
     legacy = metadata is None
     if legacy:
@@ -1512,6 +1664,12 @@ def resolve_mctformerplus_checkpoint_variant(checkpoint, model_name):
         'patch_size': [spec['patch_size'], spec['patch_size']],
         'class_token_count': 20,
         'qkv_shape': [3 * spec['embed_dim'], spec['embed_dim']],
+        'class_token_init': observed_class_token_init,
+        'class_token_initializer_shape': (
+            [20, spec['embed_dim']]
+            if observed_class_token_init == 'cwp'
+            else [1, 20, spec['embed_dim']]
+        ),
     }
     mismatches = {
         key: {'observed': observed[key], 'expected': value}
@@ -1533,6 +1691,9 @@ def resolve_mctformerplus_checkpoint_variant(checkpoint, model_name):
             'cam_class_to_patch_layers': 3,
             'cam_patch_to_patch_layers': spec['depth'],
         }
+        if ('class_token_init' in metadata
+                or observed_class_token_init == 'cwp'):
+            expected_metadata['class_token_init'] = observed_class_token_init
         metadata_mismatches = {
             key: {'observed': metadata.get(key), 'expected': value}
             for key, value in expected_metadata.items()
@@ -1548,6 +1709,7 @@ def resolve_mctformerplus_checkpoint_variant(checkpoint, model_name):
         'legacy_small_import': legacy,
         'model_spec_present': not legacy,
         'state_architecture': observed,
+        'class_token_init': observed_class_token_init,
         'legacy_small_import_manifest': (
             {
                 'status': 'legacy_small_import',
@@ -1621,14 +1783,20 @@ def adapt_deit_checkpoint_for_mctformerplus(checkpoint, model, num_classes=20):
     repeated_cls_token = cls_token.repeat(1, num_classes, 1)
 
     derived = {
-        'cls_token': repeated_cls_token,
         'pos_embed_cls': source_cls_position,
         'pos_embed_pat': source_patch_position,
     }
+    if model.class_token_init == 'baseline':
+        derived['cls_token'] = repeated_cls_token
     random_keys = {'head.weight', 'head.bias'}
+    if model.class_token_init == 'cwp':
+        random_keys.add('class_token_pooler.class_queries')
     ignored_classifier_keys = {
         'head.weight', 'head.bias', 'head_dist.weight', 'head_dist.bias'
     }
+    ignored_architecture_keys = (
+        {'cls_token'} if model.class_token_init == 'cwp' else set()
+    )
     adapted = OrderedDict()
     shape_mismatches = []
     missing_source_keys = []
@@ -1656,7 +1824,10 @@ def adapt_deit_checkpoint_for_mctformerplus(checkpoint, model, num_classes=20):
         adapted[key] = value
         loaded_numel += value.numel()
     unexpected_keys = sorted(
-        key for key in source if key not in target and key not in ignored_classifier_keys
+        key for key in source
+        if key not in target
+        and key not in ignored_classifier_keys
+        and key not in ignored_architecture_keys
     )
     if missing_source_keys or shape_mismatches or unexpected_keys:
         raise ValueError(
@@ -1680,7 +1851,10 @@ def adapt_deit_checkpoint_for_mctformerplus(checkpoint, model, num_classes=20):
         'target_depth': len(model.blocks),
         'source_patch_position_shape': list(position[:, 1:].shape),
         'target_patch_position_shape': list(source_patch_position.shape),
-        'target_class_token_shape': list(repeated_cls_token.shape),
+        'target_class_token_shape': (
+            list(repeated_cls_token.shape)
+            if model.class_token_init == 'baseline' else None
+        ),
         'loaded_key_count': len(adapted) - len(random_keys),
         'loaded_numel': int(loaded_numel),
         'randomly_initialized_keys': sorted(random_keys),
@@ -1690,6 +1864,7 @@ def adapt_deit_checkpoint_for_mctformerplus(checkpoint, model, num_classes=20):
         'missing_source_keys': [],
         'unexpected_keys': [],
         'shape_mismatches': [],
+        **model.class_token_initialization_configuration(),
         'passed': True,
     }
     return adapted, report

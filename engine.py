@@ -245,11 +245,17 @@ def train_one_epoch_mctplus(model: torch.nn.Module, data_loader: Iterable,
     optimizer.zero_grad()
     optimizer_updates = 0
     maximum_parameters_receiving_gradient = 0
+    cwp_query = None
+    cwp_query_before_update = None
+    if getattr(model_without_ddp, 'class_token_init', 'baseline') == 'cwp':
+        cwp_query = model_without_ddp.class_token_pooler.class_queries
 
     for micro_step, (samples, targets) in enumerate(
             metric_logger.log_every(data_loader, print_freq, header)):
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
+        if cwp_query is not None and micro_step % accum_iter == 0:
+            cwp_query_before_update = cwp_query.detach().clone()
 
         patch_outputs = None
         c_outputs = None
@@ -288,6 +294,9 @@ def train_one_epoch_mctplus(model: torch.nn.Module, data_loader: Iterable,
                 loss = loss + ploss
 
             if bcss_auxiliary is not None:
+                for key, value in bcss_auxiliary.get(
+                        'class_token_pooling_diagnostics', {}).items():
+                    metric_logger.update(**{key: value})
                 if 'cti_bgt' in bcss_auxiliary:
                     bcam_loss = cti_bcam_loss(bcss_auxiliary['cti_bgt'])
                     metric_logger.update(cti_bcam_loss=bcam_loss.item())
@@ -328,6 +337,18 @@ def train_one_epoch_mctplus(model: torch.nn.Module, data_loader: Iterable,
             create_graph=is_second_order,
         )
         if boundary:
+            if cwp_query is not None:
+                query_gradient = cwp_query.grad
+                if query_gradient is None:
+                    raise RuntimeError('CWP class queries received no gradient')
+                if not torch.isfinite(query_gradient).all():
+                    raise RuntimeError('CWP class-query gradient is non-finite')
+                metric_logger.update(
+                    cwp_query_gradient_norm=query_gradient.float().norm().item(),
+                    cwp_query_update_norm=(
+                        cwp_query.detach() - cwp_query_before_update
+                    ).float().norm().item(),
+                )
             maximum_parameters_receiving_gradient = max(
                 maximum_parameters_receiving_gradient,
                 sum(

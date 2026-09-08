@@ -43,6 +43,7 @@ def test_registered_architecture_contract(variant):
         'mlp_ratio': 4,
         'cam_class_to_patch_layers': 3,
         'cam_patch_to_patch_layers': 12,
+        'class_token_init': 'baseline',
     }
     assert len(model.blocks) == 12
     assert all(block.attn.num_heads == heads for block in model.blocks)

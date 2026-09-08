@@ -23,6 +23,7 @@ from models.mctformer_plus import (  # noqa: E402
     get_mctformerplus_spec,
     model_spec_from_instance,
     resolve_mctformerplus_checkpoint_variant,
+    validate_mctformerplus_class_token_init_checkpoint,
     validate_mctformerplus_final_norm_checkpoint,
 )
 
@@ -48,6 +49,9 @@ def parse_args():
     final_norm_group.add_argument('--patch-final-norm', action='store_true')
     parser.add_argument('--last-mct', action='store_true')
     parser.add_argument('--class-stable-last', action='store_true')
+    parser.add_argument(
+        '--class-token-init', default='baseline', choices=('baseline', 'cwp')
+    )
     return parser.parse_args()
 
 
@@ -82,6 +86,9 @@ def execute(args):
         checkpoint, bool(args.final_norm), bool(args.patch_final_norm),
         bool(args.last_mct), bool(args.class_stable_last),
     )
+    validate_mctformerplus_class_token_init_checkpoint(
+        checkpoint, args.class_token_init
+    )
     variant = resolution['variant']
     spec = get_mctformerplus_spec(variant)
     training_model = build_mctformerplus(
@@ -92,6 +99,7 @@ def execute(args):
         patch_final_norm=bool(args.patch_final_norm),
         last_mct=bool(args.last_mct),
         class_stable_last=bool(args.class_stable_last),
+        class_token_init=args.class_token_init,
     )
     cam_model = build_mctformerplus(
         variant, cam=True, num_classes=20, input_size=args.input_size,
@@ -101,6 +109,7 @@ def execute(args):
         patch_final_norm=bool(args.patch_final_norm),
         last_mct=bool(args.last_mct),
         class_stable_last=bool(args.class_stable_last),
+        class_token_init=args.class_token_init,
     )
     state = checkpoint.get('model', checkpoint)
     training_result = training_model.load_state_dict(state, strict=True)
@@ -163,6 +172,22 @@ def execute(args):
             checkpoint.get(
                 'class_stable_last_configuration', {'enabled': False}
             ) == training_model.class_stable_last_configuration()
+        ),
+        'class_token_init_matches': (
+            checkpoint.get('class_token_init', 'baseline')
+            == args.class_token_init
+        ),
+        'class_token_initialization_configuration_matches': (
+            checkpoint.get(
+                'class_token_initialization_configuration',
+                training_model.class_token_initialization_configuration()
+                if args.class_token_init == 'baseline' else None,
+            ) == training_model.class_token_initialization_configuration()
+        ),
+        'class_token_parameter_contract': (
+            ('cls_token' in state and 'class_token_pooler.class_queries' not in state)
+            if args.class_token_init == 'baseline'
+            else ('cls_token' not in state and 'class_token_pooler.class_queries' in state)
         ),
         'patch_head_kernel_matches': (
             tuple(training_model.head.kernel_size)
@@ -236,6 +261,19 @@ def execute(args):
             checkpoint_training.get(
                 'class_stable_last_configuration', {'enabled': False}
             ) == training_model.class_stable_last_configuration()
+            if modern else True
+        ),
+        'training_class_token_init_matches': (
+            checkpoint_training.get('class_token_init', 'baseline')
+            == args.class_token_init
+            if modern else True
+        ),
+        'training_class_token_initialization_configuration_matches': (
+            checkpoint_training.get(
+                'class_token_initialization_configuration',
+                training_model.class_token_initialization_configuration()
+                if args.class_token_init == 'baseline' else None,
+            ) == training_model.class_token_initialization_configuration()
             if modern else True
         ),
         'final_epoch_matches': (
@@ -313,6 +351,10 @@ def execute(args):
             'class_stable_last': bool(args.class_stable_last),
             'class_stable_last_configuration': (
                 training_model.class_stable_last_configuration()
+            ),
+            'class_token_init': args.class_token_init,
+            'class_token_initialization_configuration': (
+                training_model.class_token_initialization_configuration()
             ),
             'checks': method_checks,
         },
