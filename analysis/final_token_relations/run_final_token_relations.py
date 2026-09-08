@@ -87,7 +87,7 @@ PATCH_COUNT = 784
 PATCH_GRID = (28, 28)
 BASIS_SEED = 20260901
 
-SEMANTIC_RELATIONS_E1 = ("s_last", "s_cosine", "patch_norm", "r_native_classifier")
+SEMANTIC_RELATIONS_E1 = ("s_dot", "s_last", "s_cosine", "patch_norm", "r_native_classifier")
 SEMANTIC_RELATIONS_E2 = ("s_pos", "s_negmag")
 SEMANTIC_METRICS = (
     "target_hit",
@@ -391,6 +391,43 @@ def _summarize_multilabel(rows: Sequence[Mapping[str, object]], repeats: int, se
     return _summary_by_columns(rows, group_columns=("relation",), value_columns=metrics, repeats=repeats, seed=seed, strata=True)
 
 
+def _relation_comparison_rows(
+    *, image_id: str, image_index: int, class_id: int, label_count: int,
+    region_codes: np.ndarray, maps: Mapping[str, np.ndarray],
+) -> list[dict[str, object]]:
+    """Compare each prespecified E1 diagnostic to the raw final-token map."""
+
+    eligible = np.asarray(region_codes).reshape(-1) != 4
+    reference = np.asarray(maps["s_last"], dtype=np.float64)
+    rows: list[dict[str, object]] = []
+    for relation in ("s_dot", "s_cosine", "patch_norm", "r_native_classifier"):
+        values = np.asarray(maps[relation], dtype=np.float64)
+        overlap_05 = map_overlap_metrics(reference, values, ratio=.05, eligible=eligible)
+        overlap_10 = map_overlap_metrics(reference, values, ratio=.10, eligible=eligible)
+        overlap_20 = map_overlap_metrics(reference, values, ratio=.20, eligible=eligible)
+        rows.append({
+            "image_id": image_id, "image_index": image_index,
+            "class_id": class_id, "class_name": VOC_CLASS_NAMES[class_id],
+            "num_positive_classes": label_count, "label_stratum": _label_stratum(label_count),
+            "reference_relation": "s_last", "comparison_relation": relation,
+            "map_spearman": overlap_10["spearman"],
+            "top05_jaccard": overlap_05["topk_jaccard"],
+            "top10_jaccard": overlap_10["topk_jaccard"],
+            "top20_jaccard": overlap_20["topk_jaccard"],
+        })
+    return rows
+
+
+def _summarize_relation_comparisons(
+    rows: Sequence[Mapping[str, object]], repeats: int, seed: int,
+) -> list[dict[str, object]]:
+    return _summary_by_columns(
+        rows, group_columns=("reference_relation", "comparison_relation"),
+        value_columns=("map_spearman", "top05_jaccard", "top10_jaccard", "top20_jaccard"),
+        repeats=repeats, seed=seed, strata=True, per_class=True,
+    )
+
+
 def _present_absent_row(
     *, image_id: str, image_index: int, class_id: int, label_count: int, presence: str,
     relation: str, values: np.ndarray, foreground: np.ndarray, background: np.ndarray, valid: np.ndarray,
@@ -626,10 +663,29 @@ def _format(value: object) -> str:
 
 def _write_reports(
     output_dir: Path, *, model: Mapping[str, object], semantic_summary: Sequence[Mapping[str, object]],
-    multilabel_summary: Sequence[Mapping[str, object]], channel_summary: Sequence[Mapping[str, object]],
-    class_specificity: Sequence[Mapping[str, object]], patch_distribution: Sequence[Mapping[str, object]],
+    multilabel_summary: Sequence[Mapping[str, object]], relation_comparisons: Sequence[Mapping[str, object]],
+    positive_statistics: Sequence[Mapping[str, object]], present_absent: Sequence[Mapping[str, object]],
+    channel_summary: Sequence[Mapping[str, object]], class_specificity: Sequence[Mapping[str, object]],
+    patch_distribution: Sequence[Mapping[str, object]], decomposition: Sequence[Mapping[str, object]],
     basis: Mapping[str, object], deltas: Sequence[Mapping[str, object]], confidence: Sequence[Mapping[str, object]],
 ) -> None:
+    def find(rows: Sequence[Mapping[str, object]], metric: str, **criteria: object) -> Mapping[str, object] | None:
+        matched = [
+            row for row in rows
+            if row.get("metric") == metric and all(row.get(key) == value for key, value in criteria.items())
+        ]
+        return matched[0] if len(matched) == 1 else None
+
+    def estimate_ci(row: Mapping[str, object] | None) -> str:
+        if row is None:
+            return "NA"
+        return f"{_format(row.get('estimate'))} [{_format(row.get('ci_low'))}, {_format(row.get('ci_high'))}]"
+
+    def estimate(row: Mapping[str, object] | None) -> float:
+        return float(row["estimate"]) if row is not None else float("nan")
+
+    micro_all = {"scope": "all_positive_classes", "stratum": "all", "aggregation": "micro"}
+    all_rows_micro = {"scope": "all_rows", "stratum": "all", "aggregation": "micro"}
     e1 = [
         "# Final-Token Affinity Report", "", "## Frozen contract", "",
         f"- Native MCTformer+-Small checkpoint SHA256 `{model['checkpoint_sha256']}`; raw post-Block-12 class and patch tokens only.",
@@ -642,16 +698,54 @@ def _write_reports(
     for relation in SEMANTIC_RELATIONS_E1:
         values = [_find_metric(semantic_summary, relation, key) for key in ("auc_target_bg", "auc_target_other", "target_tail_enrich_10", "bg_tail_enrich_10", "target_hit")]
         e1.append(f"| {relation} | " + " | ".join(_format(value) for value in values) + " |")
+    e1.extend([
+        "", "## Raw-product, direction, norm, and classifier-reference comparison (micro)", "",
+        "| `S_last` comparator | Map Spearman | Top-10% Jaccard | Target-vs-BG AUROC | Target-vs-other-FG AUROC |",
+        "|---|---:|---:|---:|---:|",
+    ])
+    for relation in ("s_dot", "s_cosine", "patch_norm", "r_native_classifier"):
+        comparison = {"reference_relation": "s_last", "comparison_relation": relation, **all_rows_micro}
+        values = [
+            estimate(find(relation_comparisons, metric, **comparison))
+            for metric in ("map_spearman", "top10_jaccard")
+        ]
+        values.extend(_find_metric(semantic_summary, relation, metric) for metric in ("auc_target_bg", "auc_target_other"))
+        e1.append(f"| {relation} | " + " | ".join(_format(value) for value in values) + " |")
+    e1.extend([
+        "", "## Present / absent control for `S_last` (micro)", "",
+        "| Class status | Max score | Top-10% mean | Foreground soft mass | Background soft mass |",
+        "|---|---:|---:|---:|---:|",
+    ])
+    for presence in ("positive", "absent"):
+        values = [
+            estimate(find(present_absent, metric, relation="s_last", presence=presence, **all_rows_micro))
+            for metric in ("max_score", "top10_mean_score", "foreground_mass", "background_mass")
+        ]
+        e1.append(f"| {presence} | " + " | ".join(_format(value) for value in values) + " |")
     e1.extend(["", "## Final positive-class map overlap (micro)", "", "| Relation | Map Spearman | Top-10% Jaccard | Shared BG fraction | Dominant-object capture |", "|---|---:|---:|---:|---:|"])
     for relation in ("s_last", "s_pos"):
         def pick(metric: str) -> float:
             found = [row for row in multilabel_summary if row.get("relation") == relation and row.get("scope") == "all_rows" and row.get("stratum") == "all" and row.get("aggregation") == "micro" and row.get("metric") == metric]
             return float(found[0]["estimate"]) if len(found) == 1 else float("nan")
         e1.append(f"| {relation} | " + " | ".join(_format(pick(key)) for key in ("map_spearman", "top10_jaccard", "shared_background_fraction", "dominant_object_capture")) + " |")
+    s_last_bg = find(semantic_summary, "auc_target_bg", relation="s_last", **micro_all)
+    s_last_other = find(semantic_summary, "auc_target_other", relation="s_last", **micro_all)
+    s_last_overlap = find(multilabel_summary, "top10_jaccard", relation="s_last", **all_rows_micro)
+    cosine_other = find(semantic_summary, "auc_target_other", relation="s_cosine", **micro_all)
+    norm_other = find(semantic_summary, "auc_target_other", relation="patch_norm", **micro_all)
+    native_other = find(semantic_summary, "auc_target_other", relation="r_native_classifier", **micro_all)
     e1.extend([
+        "", "## Required E1 answers", "",
+        f"1. `S_last` target-vs-BG AUROC is {estimate_ci(s_last_bg)}. This quantifies a frozen representation-level target/background ordering only.",
+        f"2. `S_last` target-vs-other-FG AUROC is {estimate_ci(s_last_other)}; it is materially weaker than its target-vs-BG discrimination when the estimate is near 0.5.",
+        f"3. Positive-class `S_last` maps have top-10% Jaccard {estimate_ci(s_last_overlap)}. This is direct evidence about final-map overlap, not an attention or causal mechanism claim.",
+        f"4. The direction-only `S_cosine` target-vs-other-FG AUROC is {estimate_ci(cosine_other)}, versus patch-norm {estimate_ci(norm_other)}. The table above separates directional and norm-associated information without attributing cause.",
+        f"5. The native classifier reference has target-vs-other-FG AUROC {estimate_ci(native_other)}; it is a frozen reference rather than a signal fused with `S_last`.",
+        f"6. Full `S_last` passed the shared-orthogonal-basis regression: max error `{basis['maximum_s_last_error']:.3e}` < `1e-5`; transformed mean-readout max error is `{basis['maximum_readout_error']:.3e}`.",
         "", "## Basis regression", "",
         f"- Shared permutation/signed-permutation/five-Haar maximum `S_last` error: `{basis['maximum_s_last_error']:.3e}` (required <1e-5).",
         f"- Equivalent transformed mean-readout maximum logit error: `{basis['maximum_readout_error']:.3e}`.",
+        "- CSV tables contain micro, macro-class, per-class, and registered label-stratum summaries; all confidence intervals use 5,000 whole-image clustered resamples.",
         "", "## Interpretation boundary", "",
         "These are frozen representation-level diagnostics. They establish neither attention behavior, CAM behavior, semantic leakage, causal shortcut use, nor an intervention effect.", "",
     ])
@@ -672,6 +766,64 @@ def _write_reports(
     for row in deltas:
         if row.get("aggregation") == "micro" and row.get("stratum") == "all":
             e2.append(f"| {row.get('family')} | {row.get('metric')} | {_format(row.get('estimate'))} | [{_format(row.get('ci_low'))}, {_format(row.get('ci_high'))}] |")
+    e2.extend([
+        "", "## Positive-coordinate structure: GT-positive versus absent classes (micro)", "",
+        "| Class status | Positive-channel fraction | Positive mass | Negative mass | Positive/negative ratio | Native logit |",
+        "|---|---:|---:|---:|---:|---:|",
+    ])
+    for presence in ("positive", "absent"):
+        values = [
+            estimate(find(positive_statistics, metric, presence=presence, **all_rows_micro))
+            for metric in (
+                "positive_channel_fraction", "positive_contribution_mass", "negative_contribution_mass",
+                "positive_negative_mass_ratio", "native_class_logit",
+            )
+        ]
+        e2.append(f"| {presence} | " + " | ".join(_format(value) for value in values) + " |")
+    e2.extend([
+        "", "## Positive-mask/token specificity (micro)", "",
+        "| Comparison | Positive-mask Jaccard | Positive-mask cosine | ReLU-token cosine |",
+        "|---|---:|---:|---:|",
+    ])
+    for comparison in ("positive_classes_same_image", "same_class_other_images", "different_class_other_images"):
+        values = [
+            estimate(find(class_specificity, metric, comparison=comparison, **all_rows_micro))
+            for metric in ("binary_mask_jaccard", "binary_mask_cosine", "relu_token_cosine")
+        ]
+        e2.append(f"| {comparison} | " + " | ".join(_format(value) for value in values) + " |")
+    e2.extend([
+        "", "## Positive-coordinate patch distributions (micro mean)", "",
+        "| Signal | Target | Other-FG | Background | Target − BG | Target − other-FG |",
+        "|---|---:|---:|---:|---:|---:|",
+    ])
+    for signal in ("u_pos", "c_sign", "s_pos"):
+        values = [
+            estimate(find(patch_distribution, "mean", signal=signal, region=region, **all_rows_micro))
+            for region in ("target", "other_fg", "background", "target_minus_background", "target_minus_other_fg")
+        ]
+        e2.append(f"| {signal} | " + " | ".join(_format(value) for value in values) + " |")
+    e2.extend([
+        "", "## Positive/negative decomposition by region (micro)", "",
+        "| Term | Target mean | Other-FG mean | BG mean | Target-vs-BG AUROC | Target-vs-other-FG AUROC |",
+        "|---|---:|---:|---:|---:|---:|",
+    ])
+    for term in ("s_pos", "s_negmag", "s_last"):
+        values = [
+            estimate(find(decomposition, metric, term=term, **all_rows_micro))
+            for metric in ("target_mean", "other_fg_mean", "bg_mean", "auc_target_bg", "auc_target_other")
+        ]
+        e2.append(f"| {term} | " + " | ".join(_format(value) for value in values) + " |")
+    e2.extend([
+        "", "## `S_pos` confidence stratification (micro)", "",
+        "| Native-logit quintile | Target-vs-BG AUROC | Target-vs-other-FG AUROC | Target tail enrich@10% |",
+        "|---|---:|---:|---:|",
+    ])
+    for quintile in range(5):
+        values = [
+            estimate(find(confidence, metric, relation="s_pos", confidence_quintile=quintile, aggregation="micro"))
+            for metric in ("auc_target_bg", "auc_target_other", "target_tail_enrich_10")
+        ]
+        e2.append(f"| {quintile} | " + " | ".join(_format(value) for value in values) + " |")
     e2.extend(["", "## Coordinate-basis dependence", "", "| Transform | S_pos map Spearman | Top-10% Jaccard | Normalized L1 |", "|---|---:|---:|---:|"])
     basis_frame = pd.DataFrame(channel_summary)
     for transform, subset in basis_frame.groupby("transform", sort=True):
@@ -680,7 +832,17 @@ def _write_reports(
             chosen = subset[(subset["metric"] == metric) & (subset["aggregation"] == "micro") & (subset["scope"] == "all_rows") & (subset["stratum"] == "all")]
             values.append(float(chosen.iloc[0]["estimate"]) if len(chosen) == 1 else float("nan"))
         e2.append(f"| {transform} | " + " | ".join(_format(value) for value in values) + " |")
-    e2.extend(["", "## Interpretation boundary", "", "Positive-coordinate utility, if observed, is only a classifier-coordinate mechanism because signed permutations and rotations may change ReLU-coordinate selection. No selector, aggregation, loss, CAM modification, or training is implied by this analysis.", ""])
+    pos_other_delta = find(deltas, "auc_target_other", family="semantic", comparison="s_pos_minus_s_last", stratum="all", aggregation="micro")
+    pos_bg_delta = find(deltas, "auc_target_bg", family="semantic", comparison="s_pos_minus_s_last", stratum="all", aggregation="micro")
+    same_mask = find(class_specificity, "binary_mask_jaccard", comparison="positive_classes_same_image", **all_rows_micro)
+    diff_mask = find(class_specificity, "binary_mask_jaccard", comparison="different_class_other_images", **all_rows_micro)
+    e2.extend([
+        "", "## Required E2 interpretation", "",
+        f"- Relative to `S_last`, `S_pos` changes target-vs-BG AUROC by {estimate_ci(pos_bg_delta)} and target-vs-other-FG AUROC by {estimate_ci(pos_other_delta)} in paired whole-image resampling.",
+        f"- Positive-mask Jaccard is {estimate_ci(same_mask)} for different positive classes within an image and {estimate_ci(diff_mask)} for different classes across images. These are representation-coordinate similarities, not evidence of an attention or causal process.",
+        "- Ordinary permutations preserve `S_pos`; signed permutations and Haar rotations are recorded as coordinate-basis diagnostics, so any empirical utility remains classifier-coordinate-specific rather than intrinsic to the representation.",
+        "- CSV tables contain micro, macro-class, per-class, and registered label-stratum summaries; all confidence intervals use 5,000 whole-image clustered resamples.",
+        "", "## Interpretation boundary", "", "Positive-coordinate utility, if observed, is only a classifier-coordinate mechanism because signed permutations and rotations may change ReLU-coordinate selection. No selector, aggregation, loss, CAM modification, or training is implied by this analysis.", ""])
     text_dump(output_dir / "POSITIVE_CHANNEL_RELATION_REPORT.md", "\n".join(e2))
 
 
@@ -788,6 +950,7 @@ def main() -> None:
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, pin_memory=True, drop_last=False)
     transforms = generate_basis_transforms(EMBED_DIM, base_seed=BASIS_SEED, haar_count=5)
     semantic_raw: list[dict[str, object]] = []; multilabel_raw: list[dict[str, object]] = []
+    relation_comparison_raw: list[dict[str, object]] = []
     present_absent_raw: list[dict[str, object]] = []; positive_statistics_raw: list[dict[str, object]] = []
     channel_patch_raw: list[dict[str, object]] = []; decomposition_raw: list[dict[str, object]] = []
     same_image_specificity_raw: list[dict[str, object]] = []; positive_token_records: list[dict[str, object]] = []
@@ -821,6 +984,7 @@ def main() -> None:
                 raise RuntimeError(f"positive/negative logit identity failed: {identity_error}")
             raw_classifier = _raw_classifier_map(model, patches)
             all_maps = {
+                "s_dot": relations["s_dot"].detach().cpu().numpy(),
                 "s_last": relations["s_last"].detach().cpu().numpy(),
                 "s_pos": relations["s_pos"].detach().cpu().numpy(),
                 "s_negmag": relations["s_negmag"].detach().cpu().numpy(),
@@ -874,9 +1038,14 @@ def main() -> None:
                         ))
                 for class_id in positive_ids[local_index]:
                     regions = per_class_regions[local_index][int(class_id)]
+                    class_maps = {name: all_maps[name][local_index, class_id] for name in (*SEMANTIC_RELATIONS_E1, *SEMANTIC_RELATIONS_E2)}
                     semantic_raw.extend(_semantic_rows(
                         image_id=str(image_id), image_index=image_index, class_id=int(class_id), label_count=label_count, region_codes=regions,
-                        maps={name: all_maps[name][local_index, class_id] for name in (*SEMANTIC_RELATIONS_E1, *SEMANTIC_RELATIONS_E2)},
+                        maps=class_maps,
+                    ))
+                    relation_comparison_raw.extend(_relation_comparison_rows(
+                        image_id=str(image_id), image_index=image_index, class_id=int(class_id), label_count=label_count,
+                        region_codes=regions, maps=class_maps,
                     ))
                     channel_patch_raw.extend(_channel_patch_rows(
                         image_id=str(image_id), image_index=image_index, class_id=int(class_id), label_count=label_count, regions=regions,
@@ -920,6 +1089,9 @@ def main() -> None:
     log("frozen extraction complete; computing whole-image clustered bootstrap summaries")
     semantic_summary = _summarize_semantic(semantic_raw, args.bootstrap_repeats, args.bootstrap_seed)
     multilabel_summary = _summarize_multilabel(multilabel_raw, args.bootstrap_repeats, args.bootstrap_seed)
+    relation_comparison_summary = _summarize_relation_comparisons(
+        relation_comparison_raw, args.bootstrap_repeats, args.bootstrap_seed,
+    )
     positive_statistics_summary = _summary_by_columns(
         positive_statistics_raw, group_columns=("presence",),
         value_columns=("positive_channel_fraction", "positive_contribution_mass", "negative_contribution_mass", "positive_negative_mass_ratio", "native_class_logit", "D_logit_minus_pos_minus_neg_abs_error"),
@@ -963,7 +1135,8 @@ def main() -> None:
     generic_fields = tuple(dict.fromkeys([*(semantic_summary[0].keys() if semantic_summary else ()), "relation", "scope", "stratum", "class_id", "class_name", "aggregation", "metric", "estimate", "ci_low", "ci_high", "num_images", "num_images_total", "num_rows", "num_rows_total", "num_classes", "bootstrap_repeats", "bootstrap_valid_repeats", "bootstrap_valid_fraction", "bootstrap_seed", "bootstrap_base_seed"]))
     _write_csv(output_dir / "final_token_semantic_metrics.csv", semantic_summary, semantic_fields)
     _write_csv(output_dir / "final_token_multilabel_overlap.csv", multilabel_summary, generic_fields)
-    _write_csv(output_dir / "final_token_norm_cosine_decomposition.csv", [row for row in semantic_summary if row.get("relation") in ("s_last", "s_cosine", "patch_norm", "r_native_classifier")], semantic_fields)
+    _write_csv(output_dir / "final_token_norm_cosine_decomposition.csv", [row for row in semantic_summary if row.get("relation") in ("s_dot", "s_last", "s_cosine", "patch_norm", "r_native_classifier")], semantic_fields)
+    _write_csv(output_dir / "final_token_relation_comparisons.csv", relation_comparison_summary, generic_fields)
     _write_csv(output_dir / "final_token_present_absent.csv", present_absent_summary, generic_fields)
     _write_csv(output_dir / "positive_channel_statistics.csv", positive_statistics_summary, generic_fields)
     _write_csv(output_dir / "positive_channel_class_specificity.csv", class_specificity_summary, generic_fields)
@@ -975,7 +1148,7 @@ def main() -> None:
     _write_csv(output_dir / "bootstrap_deltas.csv", deltas, generic_fields)
     visual_manifest = _render_examples(output_dir=visual_dir, dataset=dataset, model=model, device=device, semantic_rows=semantic_raw, multilabel_rows=multilabel_raw, logits=logits)
     json_dump(visual_dir / "selection_manifest.json", {"examples": visual_manifest})
-    _write_reports(output_dir, model=model_metadata, semantic_summary=semantic_summary, multilabel_summary=multilabel_summary, channel_summary=basis_summary, class_specificity=class_specificity_summary, patch_distribution=patch_distribution_summary, basis=basis_payload, deltas=deltas, confidence=confidence_summary)
+    _write_reports(output_dir, model=model_metadata, semantic_summary=semantic_summary, multilabel_summary=multilabel_summary, relation_comparisons=relation_comparison_summary, positive_statistics=positive_statistics_summary, present_absent=present_absent_summary, channel_summary=basis_summary, class_specificity=class_specificity_summary, patch_distribution=patch_distribution_summary, decomposition=decomposition_summary, basis=basis_payload, deltas=deltas, confidence=confidence_summary)
     after = {"checkpoint": sha256_file(args.checkpoint), "voc_val_list": sha256_file(args.list_path)}
     if before != after:
         raise RuntimeError("immutable final-token analysis input changed during execution")
