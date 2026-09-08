@@ -450,7 +450,13 @@ def _basis_rows(
     semantic_rows: list[dict[str, object]] = []
     maximum = {"s_last": 0.0, "readout": 0.0, "permutation_s_pos": 0.0}
     classes64, patches64 = class_tokens.double(), patch_tokens.double()
-    original_last64 = original_s_last.double()
+    # Run both sides of the algebraic checks in float64.  The ordinary analysis
+    # deliberately uses the model's float32 representation, but using its
+    # already-rounded map as the reference here would turn an identity basis
+    # change into a reduction-order test rather than a basis-invariance test.
+    original_relation64 = final_token_relations(classes64, patches64)
+    original_last64 = original_relation64["s_last"]
+    original_pos64 = original_relation64["s_pos"]
     original_pos = original_s_pos.detach().cpu().numpy()
     for transform in transforms:
         matrix = torch.from_numpy(np.asarray(transform.matrix)).to(device=classes64.device, dtype=torch.float64)
@@ -460,7 +466,10 @@ def _basis_rows(
         original_logits, transformed_logits = transformed_mean_readout(classes64, matrix)
         readout_error = float((original_logits - transformed_logits).abs().max().item())
         if transform.kind == "permutation":
-            maximum["permutation_s_pos"] = max(maximum["permutation_s_pos"], float((relation["s_pos"] - final_token_relations(classes64, patches64)["s_pos"]).abs().max().item()))
+            maximum["permutation_s_pos"] = max(
+                maximum["permutation_s_pos"],
+                float((relation["s_pos"] - original_pos64).abs().max().item()),
+            )
         maximum["s_last"] = max(maximum["s_last"], last_error)
         maximum["readout"] = max(maximum["readout"], readout_error)
         transformed_pos = relation["s_pos"].detach().cpu().numpy()
@@ -748,10 +757,27 @@ def main() -> None:
     log = RunLog(output_dir / "run.log"); log(f"final-token E1/E2 started: {command_line()}")
     before = {"checkpoint": sha256_file(args.checkpoint), "voc_val_list": sha256_file(args.list_path)}
     environment = write_environment_manifests(output_dir)
-    model, model_metadata = load_native_mctformer(args.checkpoint); model.to(device).eval()
+    # Establish the exact native readout contract on CPU before moving the
+    # immutable model to CUDA.  Two independent CUDA forwards can differ by a
+    # few ulps because of reduction scheduling; CPU makes this a deterministic
+    # check of the production ``x_cls.mean(dim=-1)`` path, rather than silently
+    # loosening the pre-registered 1e-6 tolerance.
+    model, model_metadata = load_native_mctformer(args.checkpoint); model.eval()
     dataset = VOCSemanticDataset(args.voc_root, args.list_path, input_size=448, limit=args.limit)
     if not args.limit and len(dataset) != EXPECTED_VOC_IMAGES:
         raise RuntimeError(f"expected all {EXPECTED_VOC_IMAGES} VOC val images, got {len(dataset)}")
+    cpu_image = dataset[0]["image"].unsqueeze(0)
+    with torch.inference_mode():
+        cpu_classes, _, _, _, _ = model.forward_features(cpu_image, return_aux=True)
+        cpu_native_logits = model(cpu_image, return_diagnostics=True)["class_logits"]
+    native_readout_cpu_error = float((cpu_classes.mean(dim=-1) - cpu_native_logits).abs().max().item())
+    if native_readout_cpu_error >= 1e-6:
+        raise RuntimeError(
+            "deterministic extracted mean logits differ from native logits: "
+            f"{native_readout_cpu_error}"
+        )
+    log(f"deterministic CPU native mean-readout audit max_abs_error={native_readout_cpu_error:.9g}")
+    model.to(device).eval()
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, pin_memory=True, drop_last=False)
     transforms = generate_basis_transforms(EMBED_DIM, base_seed=BASIS_SEED, haar_count=5)
     semantic_raw: list[dict[str, object]] = []; multilabel_raw: list[dict[str, object]] = []
@@ -759,7 +785,7 @@ def main() -> None:
     channel_patch_raw: list[dict[str, object]] = []; decomposition_raw: list[dict[str, object]] = []
     same_image_specificity_raw: list[dict[str, object]] = []; positive_token_records: list[dict[str, object]] = []
     basis_raw: list[dict[str, object]] = []; basis_semantic_raw: list[dict[str, object]] = []
-    logits: dict[tuple[int, int], float] = {}; max_logit_identity_error = 0.0; max_native_mean_equivalence_error = 0.0; max_decomposition_error = 0.0
+    logits: dict[tuple[int, int], float] = {}; max_logit_identity_error = 0.0; max_native_mean_equivalence_error = native_readout_cpu_error; max_decomposition_error = 0.0
     basis_max = {"s_last": 0.0, "readout": 0.0, "permutation_s_pos": 0.0}
     offset = 0
     with torch.inference_mode():
@@ -771,14 +797,6 @@ def main() -> None:
             if auxiliary.get("final_norm") or auxiliary.get("patch_final_norm") or auxiliary.get("last_mct") or auxiliary.get("class_stable_last"):
                 raise RuntimeError("native baseline extraction observed an excluded variant")
             native_logits = classes.mean(dim=-1)
-            # The production CAM forward uses the same native mean readout; one
-            # deterministic equivalence pass makes this contract explicit.
-            if batch_number == 1:
-                diagnostic = model(images[:1], return_diagnostics=True)["class_logits"]
-                error = float((native_logits[:1] - diagnostic).abs().max().item())
-                if error >= 1e-6:
-                    raise RuntimeError(f"extracted mean logits differ from native logits: {error}")
-                max_native_mean_equivalence_error = max(max_native_mean_equivalence_error, error)
             relations = final_token_relations(classes, patches)
             decomposition = float((relations["s_last"] - (relations["s_pos"] - relations["s_negmag"])).abs().max().item())
             max_decomposition_error = max(max_decomposition_error, decomposition)
