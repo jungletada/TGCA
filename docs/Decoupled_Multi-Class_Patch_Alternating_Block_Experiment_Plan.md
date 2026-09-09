@@ -561,9 +561,22 @@ accum_iter = 1
 - 4 张 smoke CAM 能生成；
 - 不增加额外 loss。
 
-### 8.2 Full matched training
+### 8.2 Full matched training queue
 
-只运行一个首轮训练：
+先对完整四阶段模型做 smoke；通过后按第 10 节的预注册顺序串行运行 8 个 matched seed-0 训练：
+
+```text
+full
+no_p2c
+no_c2c
+no_p2c_no_c2c
+c2p_update_off
+p2p_update_off
+p2c_middle
+p2c_early
+```
+
+每项训练共同使用：
 
 ```text
 dataset: VOC train_aug
@@ -583,7 +596,7 @@ drop path: 0.1
 pretrained: official DeiT-S
 ```
 
-除 `--token-interaction decoupled_bidirectional` 外，命令与 canonical original MCTformer+ seed-0 run 一致。从 official DeiT-S 初始化开始，不从任何训练好的 MCTformer+、CWP 或 Residual-CWP checkpoint fine-tune。
+除 `--token-interaction decoupled_bidirectional` 与唯一的 `--decoupled-variant` 外，命令与 canonical original MCTformer+ seed-0 run 一致。从 official DeiT-S 初始化开始，不从任何训练好的 MCTformer+、CWP 或 Residual-CWP checkpoint fine-tune。队列只允许前一项训练、checkpoint audit、分类评估和 CAM 阈值评估全部完成后开始下一项。
 
 原始 MCTformer+ 结果已存在，不重训 baseline。
 
@@ -634,9 +647,9 @@ pretrained: official DeiT-S
 
 ---
 
-## 10. 后续消融候选（不混入首版实现）
+## 10. 预注册消融队列
 
-首版代码和首次训练固定使用完整四阶段顺序，不加入组合式开关。确认主模型可以稳定训练后，再按下面顺序做消融；所有消融必须保持初始化、seed、优化器、训练长度、loss、patch head 和 CAM threshold protocol 一致。
+实现使用一个互斥的 `--decoupled-variant` 枚举，禁止叠加多个布尔开关。完整模型 smoke 通过后按下面顺序做消融；所有消融必须保持初始化、seed、优化器、训练长度、loss、patch head 和 CAM threshold protocol 一致。
 
 ### 10.1 Relation necessity：第一优先级
 
@@ -649,7 +662,7 @@ pretrained: official DeiT-S
 | No-C2C | 更新 | 更新 | 删除 | 更新 | 判断 class tokens 内部通信是否必要 |
 | No-P2C-No-C2C | 更新 | 更新 | 删除 | 删除 | 最小 patch encoder + class readout |
 
-这里“删除”表示不计算该 attention 且不执行 residual update。`P2C` 和 `C2C` 不参与原生 CAM，能够干净删除。
+这里“删除”表示不计算该 attention 且不执行 residual update。`P2C` 和 `C2C` 不参与原生 CAM，能够干净删除。删除 `C2C` 时仍保留每层一次 class-token MLP；这样只消融 relation，而不同时删除 FFN。
 
 `C2P` 和 `P2P` 是 MCTformer+ CAM 的必要 readout：last-three `A_c2p` 与 all-layer `A_p2p`。因此若研究它们对 feature update 的作用，必须继续计算 attention weights，仅关闭对应的 residual value update：
 
@@ -668,7 +681,7 @@ P2P-update-off: compute A_p2p for CAM, do not add P2P value output to P
 2. `P2P → C2P → P2C → C2C`：patch 读取 C2P 后、C2C 前的 class；
 3. `P2P → P2C → C2P → C2C`：patch 先读取上一状态 class，class 随后读取已回写的 patch。
 
-Patch MLP 始终跟随 P2P，class MLP 始终跟随 C2C，不随 P2C 位置移动。这样 order ablation 只改变跨流信息的新旧程度，不同时改变 FFN 次数。
+Patch MLP 始终位于 P2P slot 后，class MLP 始终位于可选 C2C slot 后，不随 P2C 位置移动；即使 C2C 被删除，class MLP 仍执行一次。这样 order/relation ablation 不同时改变 FFN 次数。
 
 如果这三种顺序差异很小，不继续扩展到其余排列。如果差异显著，可增加一个同步 cross control：从同一对 snapshot 同时计算 C2P/P2C delta，再同时 residual update，用于去除先后方向偏置。
 
@@ -682,7 +695,7 @@ Patch MLP 始终跟随 P2P，class MLP 始终跟随 C2C，不随 P2C 位置移�
 - cross residual 固定缩放，但不得在首轮搜索可学习 gate；
 - synchronous cross 对比 sequential cross。
 
-首轮不做独立参数、LayerNorm、gate 或 layer-scope 消融，避免把“取消 concatenation”的结果与新增容量混合。
+本队列不做独立参数、LayerNorm、gate 或 layer-scope 消融，避免把“取消 concatenation”的结果与新增容量混合。
 
 ---
 
@@ -729,4 +742,4 @@ summary.json
 
 大 checkpoint、raw CAM 和大日志不提交 Git；只在训练完成后提交紧凑报告、表格与 metadata。
 
-完成该首轮实验后停止，不自行增加其他 decoupling variants。
+完成这 8 个预注册实验后停止，不自行增加其他 decoupling variants。

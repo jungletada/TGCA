@@ -45,6 +45,7 @@ def test_registered_architecture_contract(variant):
         'cam_patch_to_patch_layers': 12,
         'class_token_init': 'baseline',
         'token_interaction': 'joint',
+        'decoupled_variant': 'full',
     }
     assert len(model.blocks) == 12
     assert all(block.attn.num_heads == heads for block in model.blocks)

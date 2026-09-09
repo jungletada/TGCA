@@ -37,12 +37,14 @@ __all__ = [
     'ResidualClassWiseWeightedPooling',
     'LastPatchAggregator',
     'MCTFORMERPLUS_VARIANTS',
+    'DECOUPLED_VARIANTS',
     'TOKEN_INTERACTION_MODES',
     'MCTformerPlus',
     'MCTformerPlusCam',
     'adapt_deit_checkpoint_for_mctformerplus',
     'build_mctformerplus',
     'get_mctformerplus_spec',
+    'get_decoupled_variant_spec',
     'mctformerplus',
     'mctformerplus_base',
     'mctformerplus_tiny',
@@ -52,11 +54,13 @@ __all__ = [
     'checkpoint_final_norm_enabled',
     'checkpoint_last_mct_enabled',
     'checkpoint_patch_final_norm_enabled',
+    'checkpoint_decoupled_variant',
     'checkpoint_token_interaction',
     'resolve_mctformerplus_checkpoint_variant',
     'resolve_mctformerplus_variant',
     'validate_mctformerplus_final_norm_checkpoint',
     'validate_mctformerplus_class_token_init_checkpoint',
+    'validate_mctformerplus_decoupled_variant_checkpoint',
     'validate_mctformerplus_token_interaction_checkpoint',
 ]
 
@@ -115,6 +119,77 @@ _MCTFORMERPLUS_MODEL_TO_VARIANT = {
 }
 
 TOKEN_INTERACTION_MODES = ('joint', 'decoupled_bidirectional')
+
+_DECOUPLED_VARIANT_SPECS = {
+    'full': {
+        'use_class_self': True,
+        'use_patch_to_class': True,
+        'update_class_to_patch': True,
+        'update_patch_to_patch': True,
+        'patch_to_class_position': 'late',
+    },
+    'no_p2c': {
+        'use_class_self': True,
+        'use_patch_to_class': False,
+        'update_class_to_patch': True,
+        'update_patch_to_patch': True,
+        'patch_to_class_position': 'late',
+    },
+    'no_c2c': {
+        'use_class_self': False,
+        'use_patch_to_class': True,
+        'update_class_to_patch': True,
+        'update_patch_to_patch': True,
+        'patch_to_class_position': 'late',
+    },
+    'no_p2c_no_c2c': {
+        'use_class_self': False,
+        'use_patch_to_class': False,
+        'update_class_to_patch': True,
+        'update_patch_to_patch': True,
+        'patch_to_class_position': 'late',
+    },
+    'c2p_update_off': {
+        'use_class_self': True,
+        'use_patch_to_class': True,
+        'update_class_to_patch': False,
+        'update_patch_to_patch': True,
+        'patch_to_class_position': 'late',
+    },
+    'p2p_update_off': {
+        'use_class_self': True,
+        'use_patch_to_class': True,
+        'update_class_to_patch': True,
+        'update_patch_to_patch': False,
+        'patch_to_class_position': 'late',
+    },
+    'p2c_middle': {
+        'use_class_self': True,
+        'use_patch_to_class': True,
+        'update_class_to_patch': True,
+        'update_patch_to_patch': True,
+        'patch_to_class_position': 'middle',
+    },
+    'p2c_early': {
+        'use_class_self': True,
+        'use_patch_to_class': True,
+        'update_class_to_patch': True,
+        'update_patch_to_patch': True,
+        'patch_to_class_position': 'early',
+    },
+}
+DECOUPLED_VARIANTS = tuple(_DECOUPLED_VARIANT_SPECS)
+
+
+def get_decoupled_variant_spec(variant):
+    """Return a defensive copy of one prespecified decoupled ablation."""
+    normalized = str(variant).strip().lower()
+    if normalized not in DECOUPLED_VARIANTS:
+        raise ValueError(
+            f'Decoupled variant must be one of {DECOUPLED_VARIANTS}, '
+            f'got {variant!r}'
+        )
+    return dict(_DECOUPLED_VARIANT_SPECS[normalized])
 
 
 def resolve_mctformerplus_variant(model_name):
@@ -403,6 +478,7 @@ class MCTformerPlus(VisionTransformer):
             patch_final_norm=False, last_mct=False, class_stable_last=False,
             last_topk=1, last_sigma=None, last_eps=1e-6,
             class_token_init='baseline', token_interaction='joint',
+            decoupled_variant='full',
             *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.token_interaction = str(token_interaction).strip().lower()
@@ -410,6 +486,17 @@ class MCTformerPlus(VisionTransformer):
             raise ValueError(
                 f'token_interaction must be one of {TOKEN_INTERACTION_MODES}, '
                 f'got {token_interaction!r}'
+            )
+        self.decoupled_variant = str(decoupled_variant).strip().lower()
+        if self.decoupled_variant not in DECOUPLED_VARIANTS:
+            raise ValueError(
+                f'decoupled_variant must be one of {DECOUPLED_VARIANTS}, '
+                f'got {decoupled_variant!r}'
+            )
+        if (self.token_interaction == 'joint'
+                and self.decoupled_variant != 'full'):
+            raise ValueError(
+                'decoupled_variant must be full when token_interaction=joint'
             )
         self.class_token_init = str(class_token_init).strip().lower()
         if self.class_token_init not in {'baseline', 'cwp', 'residual_cwp'}:
@@ -762,18 +849,30 @@ class MCTformerPlus(VisionTransformer):
         if self.token_interaction == 'joint':
             return {
                 'mode': 'joint',
+                'decoupled_variant': 'full',
                 'token_concatenation': True,
                 'ordering': ['joint_self_attention'],
             }
+        variant = _DECOUPLED_VARIANT_SPECS[self.decoupled_variant]
+        ordering = ['patch_self_attention']
+        if (variant['use_patch_to_class']
+                and variant['patch_to_class_position'] == 'early'):
+            ordering.append('patch_to_class_cross_attention')
+        ordering.append('class_to_patch_cross_attention')
+        if (variant['use_patch_to_class']
+                and variant['patch_to_class_position'] == 'middle'):
+            ordering.append('patch_to_class_cross_attention')
+        if variant['use_class_self']:
+            ordering.append('class_self_attention')
+        if (variant['use_patch_to_class']
+                and variant['patch_to_class_position'] == 'late'):
+            ordering.append('patch_to_class_cross_attention')
         return {
             'mode': 'decoupled_bidirectional',
+            'decoupled_variant': self.decoupled_variant,
             'token_concatenation': False,
-            'ordering': [
-                'patch_self_attention',
-                'class_to_patch_cross_attention',
-                'class_self_attention',
-                'patch_to_class_cross_attention',
-            ],
+            'ordering': ordering,
+            **variant,
             'shared_block_parameters': True,
             'cam_relations': ['class_to_patch', 'patch_to_patch'],
         }
@@ -893,7 +992,8 @@ class MCTformerPlus(VisionTransformer):
         for block in self.blocks:
             class_tokens, patch_tokens, relations = (
                 block.forward_decoupled_bidirectional(
-                    class_tokens, patch_tokens
+                    class_tokens, patch_tokens,
+                    **_DECOUPLED_VARIANT_SPECS[self.decoupled_variant],
                 )
             )
             attentions.append(relations)
@@ -908,6 +1008,7 @@ class MCTformerPlus(VisionTransformer):
             'class_stable_last': False,
             'class_token_init': self.class_token_init,
             'token_interaction': self.token_interaction,
+            'decoupled_variant': self.decoupled_variant,
             'token_interaction_configuration': (
                 self.token_interaction_configuration()
             ),
@@ -1211,14 +1312,15 @@ class MCTformerPlusCam(MCTformerPlus):
         if self.token_interaction == 'joint':
             head_attention = torch.stack(attention_records)
             return head_attention, head_attention.mean(dim=2)
-        relation_names = (
-            'patch_to_patch', 'class_to_patch',
-            'class_to_class', 'patch_to_class',
-        )
         if not attention_records:
             raise ValueError('Decoupled attention records cannot be empty')
-        if any(set(record) != set(relation_names)
-               for record in attention_records):
+        relation_names = tuple(attention_records[0])
+        required = {'patch_to_patch', 'class_to_patch'}
+        allowed = required | {'class_to_class', 'patch_to_class'}
+        if (not required.issubset(relation_names)
+                or not set(relation_names).issubset(allowed)
+                or any(tuple(record) != relation_names
+                       for record in attention_records)):
             raise ValueError('Decoupled attention record keys are invalid')
         head_attention = {
             name: torch.stack([record[name] for record in attention_records])
@@ -1451,15 +1553,17 @@ class MCTformerPlusCam(MCTformerPlus):
             result.update({
                 'class_to_patch_heads': head_attention[
                     'class_to_patch'][:, :, :, self._foreground_slice()],
-                'patch_to_class_heads': head_attention[
-                    'patch_to_class'][:, :, :, :, self._foreground_slice()],
-                'class_to_class_heads': head_attention[
+                'patch_to_patch_heads': head_attention['patch_to_patch'],
+            })
+            if 'patch_to_class' in head_attention:
+                result['patch_to_class_heads'] = head_attention[
+                    'patch_to_class'][:, :, :, :, self._foreground_slice()]
+            if 'class_to_class' in head_attention:
+                result['class_to_class_heads'] = head_attention[
                     'class_to_class'][
                         :, :, :, self._foreground_slice(),
                         self._foreground_slice(),
-                    ],
-                'patch_to_patch_heads': head_attention['patch_to_patch'],
-            })
+                    ]
         else:
             result.update({
                 'class_to_patch_heads': head_attention[
@@ -1585,6 +1689,7 @@ def model_spec_from_instance(model):
         'cam_patch_to_patch_layers': depth,
         'class_token_init': model.class_token_init,
         'token_interaction': model.token_interaction,
+        'decoupled_variant': model.decoupled_variant,
     }
 
 
@@ -1694,6 +1799,50 @@ def checkpoint_token_interaction(checkpoint):
             'top-level and model_spec'
         )
     return values[0]
+
+
+def checkpoint_decoupled_variant(checkpoint):
+    """Return the recorded decoupled ablation, defaulting legacy runs to full."""
+    if not isinstance(checkpoint, Mapping):
+        raise TypeError(
+            f'Checkpoint must be a mapping, got {type(checkpoint).__name__}'
+        )
+    top_value = checkpoint.get('decoupled_variant')
+    model_spec = checkpoint.get('model_spec')
+    spec_value = (
+        model_spec.get('decoupled_variant')
+        if isinstance(model_spec, Mapping) else None
+    )
+    values = [value for value in (top_value, spec_value) if value is not None]
+    if not values:
+        return 'full'
+    for value in values:
+        if not isinstance(value, str) or value not in DECOUPLED_VARIANTS:
+            raise ValueError(
+                'checkpoint decoupled_variant must be one of '
+                f'{DECOUPLED_VARIANTS}'
+            )
+    if len(set(values)) != 1:
+        raise ValueError(
+            'checkpoint decoupled_variant metadata disagrees between '
+            'top-level and model_spec'
+        )
+    return values[0]
+
+
+def validate_mctformerplus_decoupled_variant_checkpoint(checkpoint, expected):
+    expected = str(expected).strip().lower()
+    if expected not in DECOUPLED_VARIANTS:
+        raise ValueError(
+            f'expected decoupled_variant must be one of {DECOUPLED_VARIANTS}'
+        )
+    observed = checkpoint_decoupled_variant(checkpoint)
+    if observed != expected:
+        raise ValueError(
+            f'Checkpoint decoupled_variant={observed!r} does not match '
+            f'requested {expected!r}'
+        )
+    return observed
 
 
 def validate_mctformerplus_token_interaction_checkpoint(checkpoint, expected):

@@ -33,6 +33,7 @@ import models.srmct
 import models.mct_adapter
 import models.mctformer_plus
 from models.mctformer_plus import (
+    DECOUPLED_VARIANTS,
     MCTformerPlus,
     TOKEN_INTERACTION_MODES,
     adapt_deit_checkpoint_for_mctformerplus,
@@ -73,6 +74,9 @@ def get_args_parser():
         '--token-interaction', default='joint',
         choices=TOKEN_INTERACTION_MODES,
         help='joint tokens or the decoupled bidirectional four-stage block')
+    parser.add_argument(
+        '--decoupled-variant', default='full', choices=DECOUPLED_VARIANTS,
+        help='prespecified relation/order ablation for decoupled blocks')
     final_norm_group = parser.add_mutually_exclusive_group()
     final_norm_group.add_argument(
         '--final-norm', action='store_true',
@@ -349,6 +353,11 @@ def main(args):
         )
     if args.token_interaction != 'joint' and not is_mctformerplus:
         raise ValueError('--token-interaction is supported only by MCTformer+')
+    if args.token_interaction == 'joint' and args.decoupled_variant != 'full':
+        raise ValueError(
+            '--decoupled-variant requires --token-interaction '
+            'decoupled_bidirectional'
+        )
     if args.token_interaction == 'decoupled_bidirectional':
         if args.model.lower() != 'mctformerplus':
             raise ValueError(
@@ -480,6 +489,7 @@ def main(args):
             'class_stable_last': args.class_stable_last,
             'class_token_init': args.class_token_init,
             'token_interaction': args.token_interaction,
+            'decoupled_variant': args.decoupled_variant,
         }
         if is_mctformerplus else {}
     )
@@ -600,6 +610,7 @@ def main(args):
             model.class_token_initialization_configuration()
         ),
         'token_interaction': args.token_interaction,
+        'decoupled_variant': args.decoupled_variant,
         'token_interaction_configuration': (
             model.token_interaction_configuration()
         ),
@@ -657,6 +668,7 @@ def main(args):
                 model.class_token_initialization_configuration()
             ),
             'token_interaction': args.token_interaction,
+            'decoupled_variant': args.decoupled_variant,
             'token_interaction_configuration': (
                 model.token_interaction_configuration()
             ),

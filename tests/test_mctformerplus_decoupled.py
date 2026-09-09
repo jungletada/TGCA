@@ -5,10 +5,14 @@ import torch
 import torch.nn.functional as F
 
 from models.mctformer_plus import (
+    DECOUPLED_VARIANTS,
     MCTformerPlus,
     build_mctformerplus,
+    checkpoint_decoupled_variant,
     checkpoint_token_interaction,
+    get_decoupled_variant_spec,
     model_spec_from_instance,
+    validate_mctformerplus_decoupled_variant_checkpoint,
     validate_mctformerplus_token_interaction_checkpoint,
 )
 from models.vit import Attention, Block
@@ -130,6 +134,76 @@ def test_four_attention_shapes_row_sums_order_and_shared_parameters(monkeypatch)
     )
 
 
+@pytest.mark.parametrize(
+    ('variant', 'expected_calls', 'expected_relations'),
+    (
+        ('full', ('p2p', 'c2p', 'c2c', 'p2c'),
+         {'patch_to_patch', 'class_to_patch', 'class_to_class', 'patch_to_class'}),
+        ('no_p2c', ('p2p', 'c2p', 'c2c'),
+         {'patch_to_patch', 'class_to_patch', 'class_to_class'}),
+        ('no_c2c', ('p2p', 'c2p', 'p2c'),
+         {'patch_to_patch', 'class_to_patch', 'patch_to_class'}),
+        ('no_p2c_no_c2c', ('p2p', 'c2p'),
+         {'patch_to_patch', 'class_to_patch'}),
+        ('c2p_update_off', ('p2p', 'c2p', 'c2c', 'p2c'),
+         {'patch_to_patch', 'class_to_patch', 'class_to_class', 'patch_to_class'}),
+        ('p2p_update_off', ('p2p', 'c2p', 'c2c', 'p2c'),
+         {'patch_to_patch', 'class_to_patch', 'class_to_class', 'patch_to_class'}),
+        ('p2c_middle', ('p2p', 'c2p', 'p2c', 'c2c'),
+         {'patch_to_patch', 'class_to_patch', 'class_to_class', 'patch_to_class'}),
+        ('p2c_early', ('p2p', 'p2c', 'c2p', 'c2c'),
+         {'patch_to_patch', 'class_to_patch', 'class_to_class', 'patch_to_class'}),
+    ),
+)
+def test_decoupled_variant_executes_only_preregistered_relations(
+        monkeypatch, variant, expected_calls, expected_relations):
+    torch.manual_seed(104)
+    block = _block().eval()
+    calls = []
+    mlp_calls = []
+    original_self = block.attn.self_attention
+    original_cross = block.attn.cross_attention
+
+    def traced_self(tokens):
+        calls.append('p2p' if tokens.shape[1] == 5 else 'c2c')
+        return original_self(tokens)
+
+    def traced_cross(query_tokens, key_value_tokens):
+        calls.append('c2p' if query_tokens.shape[1] == 3 else 'p2c')
+        return original_cross(query_tokens, key_value_tokens)
+
+    monkeypatch.setattr(block.attn, 'self_attention', traced_self)
+    monkeypatch.setattr(block.attn, 'cross_attention', traced_cross)
+    hook = block.mlp.register_forward_hook(
+        lambda _module, _inputs, _output: mlp_calls.append('mlp')
+    )
+    spec = get_decoupled_variant_spec(variant)
+    classes = torch.randn(2, 3, 24)
+    patches = torch.randn(2, 5, 24)
+    output_classes, output_patches, relations = (
+        block.forward_decoupled_bidirectional(
+            classes, patches,
+            use_class_self=spec['use_class_self'],
+            use_patch_to_class=spec['use_patch_to_class'],
+            update_class_to_patch=spec['update_class_to_patch'],
+            update_patch_to_patch=spec['update_patch_to_patch'],
+            patch_to_class_position=spec['patch_to_class_position'],
+        )
+    )
+    hook.remove()
+
+    assert DECOUPLED_VARIANTS == (
+        'full', 'no_p2c', 'no_c2c', 'no_p2c_no_c2c',
+        'c2p_update_off', 'p2p_update_off', 'p2c_middle', 'p2c_early',
+    )
+    assert tuple(calls) == expected_calls
+    assert set(relations) == expected_relations
+    assert len(mlp_calls) == 2
+    assert output_classes.shape == classes.shape
+    assert output_patches.shape == patches.shape
+    assert all(torch.isfinite(value).all() for value in relations.values())
+
+
 def test_decoupled_block_has_bidirectional_feature_and_gradient_exchange():
     torch.manual_seed(107)
     block = _block().eval()
@@ -162,6 +236,31 @@ def test_decoupled_block_has_bidirectional_feature_and_gradient_exchange():
     assert patches.grad.abs().sum() > 0
 
 
+def test_c2p_update_off_removes_patch_to_class_feature_dependency():
+    torch.manual_seed(108)
+    block = _block().eval()
+    classes = torch.randn(1, 3, 24)
+    patches = torch.randn(1, 5, 24)
+    changed_patches = patches + torch.randn_like(patches)
+    kwargs = {
+        'update_class_to_patch': False,
+        'patch_to_class_position': 'late',
+    }
+    with torch.inference_mode():
+        output_classes, _, relations = block.forward_decoupled_bidirectional(
+            classes, patches, **kwargs
+        )
+        changed_classes, _, changed_relations = (
+            block.forward_decoupled_bidirectional(
+                classes, changed_patches, **kwargs
+            )
+        )
+    torch.testing.assert_close(output_classes, changed_classes, rtol=0, atol=0)
+    assert not torch.equal(
+        relations['class_to_patch'], changed_relations['class_to_patch']
+    )
+
+
 def test_joint_default_is_numerically_identical_to_explicit_joint():
     torch.manual_seed(109)
     implicit = MCTformerPlus(**_lightweight_joint_kwargs()).eval()
@@ -175,6 +274,34 @@ def test_joint_default_is_numerically_identical_to_explicit_joint():
         explicit_outputs = explicit(inputs)
     for left, right in zip(implicit_outputs, explicit_outputs):
         torch.testing.assert_close(left, right, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize('variant', DECOUPLED_VARIANTS)
+def test_each_decoupled_variant_runs_through_all_small_model_blocks(variant):
+    torch.manual_seed(110)
+    model = build_mctformerplus(
+        'small', num_classes=2, input_size=32,
+        token_interaction='decoupled_bidirectional',
+        decoupled_variant=variant, drop_path_rate=0.0,
+    ).eval()
+    with torch.inference_mode():
+        classes, patches, records, all_classes, auxiliary = (
+            model.forward_features(torch.randn(1, 3, 32, 32), return_aux=True)
+        )
+    spec = get_decoupled_variant_spec(variant)
+    expected_relations = {'patch_to_patch', 'class_to_patch'}
+    if spec['use_class_self']:
+        expected_relations.add('class_to_class')
+    if spec['use_patch_to_class']:
+        expected_relations.add('patch_to_class')
+    assert classes.shape == (1, 2, 384)
+    assert patches.shape == (1, 4, 384)
+    assert len(records) == len(all_classes) == 12
+    assert all(set(record) == expected_relations for record in records)
+    assert auxiliary['decoupled_variant'] == variant
+    assert auxiliary['token_interaction_configuration'][
+        'decoupled_variant'
+    ] == variant
 
 
 def test_small_decoupled_forward_cct_relations_and_native_cam():
@@ -229,6 +356,28 @@ def test_small_decoupled_forward_cct_relations_and_native_cam():
     torch.testing.assert_close(cam_output, expected, rtol=0, atol=1e-6)
 
 
+def test_native_cam_remains_defined_when_optional_relations_are_removed():
+    torch.manual_seed(119)
+    kwargs = {
+        'num_classes': 2,
+        'input_size': 32,
+        'token_interaction': 'decoupled_bidirectional',
+        'decoupled_variant': 'no_p2c_no_c2c',
+        'drop_path_rate': 0.0,
+    }
+    model = build_mctformerplus('small', cam=True, **kwargs).eval()
+    inputs = torch.randn(1, 3, 32, 32)
+    with torch.inference_mode():
+        attention = model(inputs, return_attn=True)
+        diagnostics = model(inputs, return_diagnostics=True)
+        output = model(inputs)
+    assert set(attention) == {'patch_to_patch', 'class_to_patch'}
+    assert 'patch_to_class_heads' not in diagnostics
+    assert 'class_to_class_heads' not in diagnostics
+    assert output.shape == (1, 2, 2, 2)
+    assert torch.isfinite(output).all()
+
+
 def test_decoupled_scope_parameter_count_and_checkpoint_contract():
     joint = build_mctformerplus(
         'small', num_classes=2, input_size=32
@@ -245,17 +394,32 @@ def test_decoupled_scope_parameter_count_and_checkpoint_contract():
     assert model_spec_from_instance(decoupled)['token_interaction'] == (
         'decoupled_bidirectional'
     )
+    assert model_spec_from_instance(decoupled)['decoupled_variant'] == 'full'
 
     checkpoint = {
         'model': decoupled.state_dict(),
         'model_spec': model_spec_from_instance(decoupled),
         'token_interaction': 'decoupled_bidirectional',
+        'decoupled_variant': 'full',
     }
     assert checkpoint_token_interaction(checkpoint) == 'decoupled_bidirectional'
     assert validate_mctformerplus_token_interaction_checkpoint(
         checkpoint, 'decoupled_bidirectional'
     ) == 'decoupled_bidirectional'
     assert checkpoint_token_interaction({'model': joint.state_dict()}) == 'joint'
+    assert checkpoint_decoupled_variant(checkpoint) == 'full'
+    assert validate_mctformerplus_decoupled_variant_checkpoint(
+        checkpoint, 'full'
+    ) == 'full'
+    variant_checkpoint = dict(checkpoint)
+    variant_checkpoint['model_spec'] = dict(checkpoint['model_spec'])
+    variant_checkpoint['model_spec']['decoupled_variant'] = 'no_p2c'
+    variant_checkpoint['decoupled_variant'] = 'no_p2c'
+    assert checkpoint_decoupled_variant(variant_checkpoint) == 'no_p2c'
+    with pytest.raises(ValueError, match='does not match requested'):
+        validate_mctformerplus_decoupled_variant_checkpoint(
+            variant_checkpoint, 'full'
+        )
     with pytest.raises(ValueError, match='does not match requested'):
         validate_mctformerplus_token_interaction_checkpoint(
             checkpoint, 'joint'

@@ -222,40 +222,73 @@ class Block(nn.Module):
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x, weights
 
-    def forward_decoupled_bidirectional(self, class_tokens, patch_tokens):
-        """Four role-specific attentions without concatenating token streams."""
+    def forward_decoupled_bidirectional(
+            self, class_tokens, patch_tokens, *, use_class_self=True,
+            use_patch_to_class=True, update_class_to_patch=True,
+            update_patch_to_patch=True, patch_to_class_position='late'):
+        """Role-specific attentions without concatenating token streams.
+
+        The attention modules always share this block's original DeiT
+        projections.  ``update_*`` switches retain the corresponding attention
+        weights for CAM analysis while disabling only its value-residual update.
+        Disabling class self-attention deliberately retains the class-token MLP
+        so that the ablation removes one attention relation rather than the
+        entire class-token sub-block.
+        """
+        if patch_to_class_position not in {'early', 'middle', 'late'}:
+            raise ValueError(
+                'patch_to_class_position must be early, middle, or late'
+            )
+
+        attention = {}
         patch_delta, patch_to_patch = self.attn.self_attention(
             self.norm1(patch_tokens)
         )
-        patch_tokens = patch_tokens + self.drop_path(patch_delta)
+        attention['patch_to_patch'] = patch_to_patch
+        if update_patch_to_patch:
+            patch_tokens = patch_tokens + self.drop_path(patch_delta)
         patch_tokens = patch_tokens + self.drop_path(
             self.mlp(self.norm2(patch_tokens))
         )
 
+        if use_patch_to_class and patch_to_class_position == 'early':
+            patch_delta, patch_to_class = self.attn.cross_attention(
+                self.norm1(patch_tokens), self.norm1(class_tokens)
+            )
+            patch_tokens = patch_tokens + self.drop_path(patch_delta)
+            attention['patch_to_class'] = patch_to_class
+
         class_delta, class_to_patch = self.attn.cross_attention(
             self.norm1(class_tokens), self.norm1(patch_tokens)
         )
-        class_tokens = class_tokens + self.drop_path(class_delta)
+        attention['class_to_patch'] = class_to_patch
+        if update_class_to_patch:
+            class_tokens = class_tokens + self.drop_path(class_delta)
 
-        class_delta, class_to_class = self.attn.self_attention(
-            self.norm1(class_tokens)
-        )
-        class_tokens = class_tokens + self.drop_path(class_delta)
+        if use_patch_to_class and patch_to_class_position == 'middle':
+            patch_delta, patch_to_class = self.attn.cross_attention(
+                self.norm1(patch_tokens), self.norm1(class_tokens)
+            )
+            patch_tokens = patch_tokens + self.drop_path(patch_delta)
+            attention['patch_to_class'] = patch_to_class
+
+        if use_class_self:
+            class_delta, class_to_class = self.attn.self_attention(
+                self.norm1(class_tokens)
+            )
+            class_tokens = class_tokens + self.drop_path(class_delta)
+            attention['class_to_class'] = class_to_class
         class_tokens = class_tokens + self.drop_path(
             self.mlp(self.norm2(class_tokens))
         )
 
-        patch_delta, patch_to_class = self.attn.cross_attention(
-            self.norm1(patch_tokens), self.norm1(class_tokens)
-        )
-        patch_tokens = patch_tokens + self.drop_path(patch_delta)
+        if use_patch_to_class and patch_to_class_position == 'late':
+            patch_delta, patch_to_class = self.attn.cross_attention(
+                self.norm1(patch_tokens), self.norm1(class_tokens)
+            )
+            patch_tokens = patch_tokens + self.drop_path(patch_delta)
+            attention['patch_to_class'] = patch_to_class
 
-        attention = {
-            'patch_to_patch': patch_to_patch,
-            'class_to_patch': class_to_patch,
-            'class_to_class': class_to_class,
-            'patch_to_class': patch_to_class,
-        }
         return class_tokens, patch_tokens, attention
 
 

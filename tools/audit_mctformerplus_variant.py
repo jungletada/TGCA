@@ -18,13 +18,17 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from models.mctformer_plus import (  # noqa: E402
+    DECOUPLED_VARIANTS,
+    TOKEN_INTERACTION_MODES,
     adapt_deit_checkpoint_for_mctformerplus,
     build_mctformerplus,
     get_mctformerplus_spec,
     model_spec_from_instance,
     resolve_mctformerplus_checkpoint_variant,
     validate_mctformerplus_class_token_init_checkpoint,
+    validate_mctformerplus_decoupled_variant_checkpoint,
     validate_mctformerplus_final_norm_checkpoint,
+    validate_mctformerplus_token_interaction_checkpoint,
 )
 
 
@@ -52,6 +56,13 @@ def parse_args():
     parser.add_argument(
         '--class-token-init', default='baseline',
         choices=('baseline', 'cwp', 'residual_cwp')
+    )
+    parser.add_argument(
+        '--token-interaction', default='joint',
+        choices=TOKEN_INTERACTION_MODES,
+    )
+    parser.add_argument(
+        '--decoupled-variant', default='full', choices=DECOUPLED_VARIANTS,
     )
     return parser.parse_args()
 
@@ -90,6 +101,12 @@ def execute(args):
     validate_mctformerplus_class_token_init_checkpoint(
         checkpoint, args.class_token_init
     )
+    validate_mctformerplus_token_interaction_checkpoint(
+        checkpoint, args.token_interaction
+    )
+    validate_mctformerplus_decoupled_variant_checkpoint(
+        checkpoint, args.decoupled_variant
+    )
     variant = resolution['variant']
     spec = get_mctformerplus_spec(variant)
     training_model = build_mctformerplus(
@@ -101,6 +118,8 @@ def execute(args):
         last_mct=bool(args.last_mct),
         class_stable_last=bool(args.class_stable_last),
         class_token_init=args.class_token_init,
+        token_interaction=args.token_interaction,
+        decoupled_variant=args.decoupled_variant,
     )
     cam_model = build_mctformerplus(
         variant, cam=True, num_classes=20, input_size=args.input_size,
@@ -111,6 +130,8 @@ def execute(args):
         last_mct=bool(args.last_mct),
         class_stable_last=bool(args.class_stable_last),
         class_token_init=args.class_token_init,
+        token_interaction=args.token_interaction,
+        decoupled_variant=args.decoupled_variant,
     )
     state = checkpoint.get('model', checkpoint)
     training_result = training_model.load_state_dict(state, strict=True)
@@ -177,6 +198,21 @@ def execute(args):
         'class_token_init_matches': (
             checkpoint.get('class_token_init', 'baseline')
             == args.class_token_init
+        ),
+        'token_interaction_matches': (
+            checkpoint.get('token_interaction', 'joint')
+            == args.token_interaction
+        ),
+        'decoupled_variant_matches': (
+            checkpoint.get('decoupled_variant', 'full')
+            == args.decoupled_variant
+        ),
+        'token_interaction_configuration_matches': (
+            checkpoint.get(
+                'token_interaction_configuration',
+                training_model.token_interaction_configuration()
+                if args.token_interaction == 'joint' else None,
+            ) == training_model.token_interaction_configuration()
         ),
         'class_token_initialization_configuration_matches': (
             checkpoint.get(
@@ -279,6 +315,24 @@ def execute(args):
             == args.class_token_init
             if modern else True
         ),
+        'training_token_interaction_matches': (
+            checkpoint_training.get('token_interaction', 'joint')
+            == args.token_interaction
+            if modern else True
+        ),
+        'training_decoupled_variant_matches': (
+            checkpoint_training.get('decoupled_variant', 'full')
+            == args.decoupled_variant
+            if modern else True
+        ),
+        'training_token_interaction_configuration_matches': (
+            checkpoint_training.get(
+                'token_interaction_configuration',
+                training_model.token_interaction_configuration()
+                if args.token_interaction == 'joint' else None,
+            ) == training_model.token_interaction_configuration()
+            if modern else True
+        ),
         'training_class_token_initialization_configuration_matches': (
             checkpoint_training.get(
                 'class_token_initialization_configuration',
@@ -364,6 +418,11 @@ def execute(args):
                 training_model.class_stable_last_configuration()
             ),
             'class_token_init': args.class_token_init,
+            'token_interaction': args.token_interaction,
+            'decoupled_variant': args.decoupled_variant,
+            'token_interaction_configuration': (
+                training_model.token_interaction_configuration()
+            ),
             'class_token_initialization_configuration': (
                 training_model.class_token_initialization_configuration()
             ),

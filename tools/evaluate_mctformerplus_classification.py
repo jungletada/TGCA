@@ -27,11 +27,15 @@ if str(REPO_ROOT) not in sys.path:
 
 from datasets_cam import VOC12Dataset, build_transform  # noqa: E402
 from models.mctformer_plus import (  # noqa: E402
+    DECOUPLED_VARIANTS,
+    TOKEN_INTERACTION_MODES,
     build_mctformerplus,
     model_spec_from_instance,
     resolve_mctformerplus_checkpoint_variant,
     validate_mctformerplus_class_token_init_checkpoint,
+    validate_mctformerplus_decoupled_variant_checkpoint,
     validate_mctformerplus_final_norm_checkpoint,
+    validate_mctformerplus_token_interaction_checkpoint,
 )
 
 
@@ -64,6 +68,13 @@ def parse_args():
     parser.add_argument(
         '--class-token-init', default='baseline',
         choices=('baseline', 'cwp', 'residual_cwp')
+    )
+    parser.add_argument(
+        '--token-interaction', default='joint',
+        choices=TOKEN_INTERACTION_MODES,
+    )
+    parser.add_argument(
+        '--decoupled-variant', default='full', choices=DECOUPLED_VARIANTS,
     )
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--bootstrap-resamples', type=int, default=10000)
@@ -217,6 +228,12 @@ def execute(args):
     validate_mctformerplus_class_token_init_checkpoint(
         checkpoint, args.class_token_init
     )
+    validate_mctformerplus_token_interaction_checkpoint(
+        checkpoint, args.token_interaction
+    )
+    validate_mctformerplus_decoupled_variant_checkpoint(
+        checkpoint, args.decoupled_variant
+    )
     attention = checkpoint.get('attention_normalization', {})
     bcss = checkpoint.get('bcss', {'variant': 'e0'})
     psl = checkpoint.get('psl', {'variant': 'baseline'})
@@ -245,6 +262,8 @@ def execute(args):
         last_mct=bool(args.last_mct),
         class_stable_last=bool(args.class_stable_last),
         class_token_init=args.class_token_init,
+        token_interaction=args.token_interaction,
+        decoupled_variant=args.decoupled_variant,
     )
     state = checkpoint.get('model', checkpoint)
     incompatibility = model.load_state_dict(state, strict=True)
@@ -431,6 +450,8 @@ def execute(args):
             'last_mct': bool(args.last_mct),
             'class_stable_last': bool(args.class_stable_last),
             'class_token_init': args.class_token_init,
+            'token_interaction': args.token_interaction,
+            'decoupled_variant': args.decoupled_variant,
             'patch_branch': patch_branch,
             'macro_definition': 'mean of 20 dataset-level one-vs-rest class AP values',
             'micro_definition': 'AP over flattened image-class pairs',
