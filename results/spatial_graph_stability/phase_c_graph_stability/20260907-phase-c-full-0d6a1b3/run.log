@@ -1,9 +1,0 @@
-[2026-09-07T17:04:54+0900] Phase C started: /home/peng/anaconda3/envs/tgca-repro/bin/python /home/peng/code/TGCA/analysis/spatial_graph_stability/run_phase_c.py --output-dir results/spatial_graph_stability/phase_c_graph_stability/20260907-phase-c-full-0d6a1b3 --phase-b-dir results/spatial_graph_stability/phase_b_graph_validation/20260907-phase-b-full-1a54d71 --mct-checkpoint results/final_ln_ablation/20260906-mctformerplus-patch-final-ln-s0-64f2aa9/checkpoints/patch_final_ln/mctformerplus_final.pth --test-log results/spatial_graph_stability/test_logs/phase_cd_0d6a1b3.log
-[2026-09-07T17:04:56+0900] Phase C extracted and low-pass filtered 32/1449 images
-[2026-09-07T17:05:03+0900] Phase C extracted and low-pass filtered 320/1449 images
-[2026-09-07T17:05:10+0900] Phase C extracted and low-pass filtered 640/1449 images
-[2026-09-07T17:05:17+0900] Phase C extracted and low-pass filtered 960/1449 images
-[2026-09-07T17:05:24+0900] Phase C extracted and low-pass filtered 1280/1449 images
-[2026-09-07T17:05:28+0900] Phase C extracted and low-pass filtered 1449/1449 images
-[2026-09-07T17:05:28+0900] Phase C low-pass solves complete; computing image-clustered semantic diagnostics
-[2026-09-07T17:06:39+0900] Phase C complete

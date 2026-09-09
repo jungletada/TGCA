@@ -1,5 +1,0 @@
-environment=tgca-repro
-command=python -m pytest -q tests/test_mctformerplus_last_mct.py tests/test_mctformerplus_final_norm.py tests/test_mctformerplus_attention.py tests/test_mctformerplus_variants.py tests/test_mctformerplus_pretrained_loading.py tests/test_experiment2_native_cam.py
-result=51 passed in 8.96s
-status=pass
-finished=2026-09-06T22:19:34+09:00

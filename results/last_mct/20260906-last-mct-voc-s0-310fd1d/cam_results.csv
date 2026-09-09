@@ -1,4 +1,0 @@
-model,fixed_threshold,fixed_raw_cam_miou_percent,best_raw_cam_miou_percent,best_threshold,foreground_precision_percent_at_fixed_threshold,foreground_recall_percent_at_fixed_threshold
-Original MCTformer+,0.45,70.06305830908285,70.33970662277234,0.48,80.7353249256176,85.8168977759483
-PatchFinalLN MCTformer+,0.45,69.1908565369972,70.02435915114744,0.5,78.7619429298976,87.03590364874388
-Last-MCT,0.45,58.87828871294516,62.215371830012714,0.56,62.883366231323635,84.4100689901126

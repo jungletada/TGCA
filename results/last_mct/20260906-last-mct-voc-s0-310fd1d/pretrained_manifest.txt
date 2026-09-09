@@ -1,1 +1,0 @@
-cd65a15597004d0ce19d7a9daef969903972db5b398e3a5febcd3c4df1d8f59f  /home/peng/.cache/torch/hub/checkpoints/deit_small_patch16_224-cd65a155.pth

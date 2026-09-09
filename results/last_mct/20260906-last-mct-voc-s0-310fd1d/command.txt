@@ -1,1 +1,0 @@
-bash experiments/ablations/run_last_mct_voc.sh
