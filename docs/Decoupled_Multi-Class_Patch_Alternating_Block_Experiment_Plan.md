@@ -634,7 +634,59 @@ pretrained: official DeiT-S
 
 ---
 
-## 10. Go / No-Go
+## 10. 后续消融候选（不混入首版实现）
+
+首版代码和首次训练固定使用完整四阶段顺序，不加入组合式开关。确认主模型可以稳定训练后，再按下面顺序做消融；所有消融必须保持初始化、seed、优化器、训练长度、loss、patch head 和 CAM threshold protocol 一致。
+
+### 10.1 Relation necessity：第一优先级
+
+先比较四个最小模型：
+
+| Variant | P2P | C2P | C2C | P2C | 目的 |
+| --- | --- | --- | --- | --- | --- |
+| Full | 更新 | 更新 | 更新 | 更新 | 完整双向模型 |
+| No-P2C | 更新 | 更新 | 更新 | 删除 | 判断 class-to-patch 回写是否必要 |
+| No-C2C | 更新 | 更新 | 删除 | 更新 | 判断 class tokens 内部通信是否必要 |
+| No-P2C-No-C2C | 更新 | 更新 | 删除 | 删除 | 最小 patch encoder + class readout |
+
+这里“删除”表示不计算该 attention 且不执行 residual update。`P2C` 和 `C2C` 不参与原生 CAM，能够干净删除。
+
+`C2P` 和 `P2P` 是 MCTformer+ CAM 的必要 readout：last-three `A_c2p` 与 all-layer `A_p2p`。因此若研究它们对 feature update 的作用，必须继续计算 attention weights，仅关闭对应的 residual value update：
+
+```text
+C2P-update-off: compute A_c2p for CAM, do not add C2P value output to C
+P2P-update-off: compute A_p2p for CAM, do not add P2P value output to P
+```
+
+不得把“关闭 residual update”和“完全删除 attention 计算”混为同一个消融。完全删除 `C2P` 或 `P2P` 后已经无法维持原生 MCTformer+ CAM，不能放入同一主表做严格比较。
+
+### 10.2 P2C 插入时机：第二优先级
+
+不枚举全部 `4!` 排列，只比较三个有明确语义的 P2C 位置：
+
+1. `P2P → C2P → C2C → P2C`：主模型，patch 读取本层 fully updated class；
+2. `P2P → C2P → P2C → C2C`：patch 读取 C2P 后、C2C 前的 class；
+3. `P2P → P2C → C2P → C2C`：patch 先读取上一状态 class，class 随后读取已回写的 patch。
+
+Patch MLP 始终跟随 P2P，class MLP 始终跟随 C2C，不随 P2C 位置移动。这样 order ablation 只改变跨流信息的新旧程度，不同时改变 FFN 次数。
+
+如果这三种顺序差异很小，不继续扩展到其余排列。如果差异显著，可增加一个同步 cross control：从同一对 snapshot 同时计算 C2P/P2C delta，再同时 residual update，用于去除先后方向偏置。
+
+### 10.3 次级消融
+
+仅在 relation necessity 和 order 已有明确结果后考虑：
+
+- decoupling layer scope：只改 L1–L4、L5–L8 或 L9–L12；
+- 共享 QKV/proj 对比独立 projection；后者增加参数，必须单独报告容量差异；
+- shared LayerNorm 对比 stream-specific LayerNorm；后者同样增加参数；
+- cross residual 固定缩放，但不得在首轮搜索可学习 gate；
+- synchronous cross 对比 sequential cross。
+
+首轮不做独立参数、LayerNorm、gate 或 layer-scope 消融，避免把“取消 concatenation”的结果与新增容量混合。
+
+---
+
+## 11. Go / No-Go
 
 首轮判定为值得继续，至少需要同时满足：
 
@@ -648,7 +700,7 @@ pretrained: official DeiT-S
 
 ---
 
-## 11. 结果与复现文件
+## 12. 结果与复现文件
 
 最终保存：
 

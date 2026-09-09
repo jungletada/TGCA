@@ -34,6 +34,7 @@ import models.mct_adapter
 import models.mctformer_plus
 from models.mctformer_plus import (
     MCTformerPlus,
+    TOKEN_INTERACTION_MODES,
     adapt_deit_checkpoint_for_mctformerplus,
     get_mctformerplus_spec,
     model_spec_from_instance,
@@ -68,6 +69,10 @@ def get_args_parser():
     parser.add_argument(
         '--attention-gamma', default=1.0, type=float,
         help='key-group count correction exponent (TGCA modes only)')
+    parser.add_argument(
+        '--token-interaction', default='joint',
+        choices=TOKEN_INTERACTION_MODES,
+        help='joint tokens or the decoupled bidirectional four-stage block')
     final_norm_group = parser.add_mutually_exclusive_group()
     final_norm_group.add_argument(
         '--final-norm', action='store_true',
@@ -342,6 +347,24 @@ def main(args):
             'FinalLN, LaST, and class-token initialization flags are '
             'supported only by MCTformer+'
         )
+    if args.token_interaction != 'joint' and not is_mctformerplus:
+        raise ValueError('--token-interaction is supported only by MCTformer+')
+    if args.token_interaction == 'decoupled_bidirectional':
+        if args.model.lower() != 'mctformerplus':
+            raise ValueError(
+                'Decoupled bidirectional support requires mctformerplus Small'
+            )
+        if (args.class_token_init != 'baseline'
+                or args.attention_normalization != 'vanilla'
+                or args.bcss_variant != 'e0'
+                or args.psl_variant != 'baseline'
+                or args.cti_bgt
+                or args.final_norm or args.patch_final_norm
+                or args.last_mct or args.class_stable_last):
+            raise ValueError(
+                'Decoupled bidirectional first-round support requires the '
+                'original MCTformer+ Small configuration'
+            )
     if (args.last_mct or args.class_stable_last) \
             and args.model.lower() != 'mctformerplus':
         raise ValueError(
@@ -456,6 +479,7 @@ def main(args):
             'last_mct': args.last_mct,
             'class_stable_last': args.class_stable_last,
             'class_token_init': args.class_token_init,
+            'token_interaction': args.token_interaction,
         }
         if is_mctformerplus else {}
     )
@@ -575,6 +599,10 @@ def main(args):
         'class_token_initialization_configuration': (
             model.class_token_initialization_configuration()
         ),
+        'token_interaction': args.token_interaction,
+        'token_interaction_configuration': (
+            model.token_interaction_configuration()
+        ),
     }
     optimizer_spec = {
         'optimizer': args.opt,
@@ -627,6 +655,10 @@ def main(args):
             'class_token_init': args.class_token_init,
             'class_token_initialization_configuration': (
                 model.class_token_initialization_configuration()
+            ),
+            'token_interaction': args.token_interaction,
+            'token_interaction_configuration': (
+                model.token_interaction_configuration()
             ),
             'epoch': epoch,
             'pretrained': pretrained_metadata,

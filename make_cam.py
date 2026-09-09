@@ -23,9 +23,11 @@ from models.tgca import SUPPORTED_MODES
 from models.bcss import BCSS_VARIANTS
 from models.persistent_semantic import PSL_VARIANTS, parse_interaction_layers
 from models.mctformer_plus import (
+    TOKEN_INTERACTION_MODES,
     resolve_mctformerplus_checkpoint_variant,
     validate_mctformerplus_class_token_init_checkpoint,
     validate_mctformerplus_final_norm_checkpoint,
+    validate_mctformerplus_token_interaction_checkpoint,
 )
 
 
@@ -47,6 +49,10 @@ def get_args_parser():
     parser.add_argument(
         '--attention-gamma', default=1.0, type=float,
         help='key-group count correction exponent (TGCA modes only)')
+    parser.add_argument(
+        '--token-interaction', default='joint',
+        choices=TOKEN_INTERACTION_MODES,
+        help='token interaction topology recorded by the checkpoint')
     final_norm_group = parser.add_mutually_exclusive_group()
     final_norm_group.add_argument(
         '--final-norm', action='store_true',
@@ -462,12 +468,17 @@ if __name__ == '__main__':
         validate_mctformerplus_class_token_init_checkpoint(
             checkpoint, args.class_token_init
         )
+        validate_mctformerplus_token_interaction_checkpoint(
+            checkpoint, args.token_interaction
+        )
     elif (args.final_norm or args.patch_final_norm or args.last_mct
             or args.class_stable_last or args.class_token_init != 'baseline'):
         raise ValueError(
             'FinalLN, LaST, and class-token initialization flags are '
             'supported only by MCTformer+'
         )
+    elif args.token_interaction != 'joint':
+        raise ValueError('--token-interaction is supported only by MCTformer+')
     model = create_cam_model(args)
     if hasattr(model, 'cti_bgt_configuration'):
         validate_cti_bgt_checkpoint(checkpoint, model)

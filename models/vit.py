@@ -1,6 +1,7 @@
 import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from functools import partial
 
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
@@ -94,6 +95,86 @@ class Attention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
+    def _split_heads(self, tensor):
+        batch, tokens, channels = tensor.shape
+        if channels != self.qkv.in_features:
+            raise ValueError(
+                f'Attention expected embedding width {self.qkv.in_features}, '
+                f'got {channels}'
+            )
+        return tensor.reshape(
+            batch, tokens, self.num_heads, channels // self.num_heads
+        ).permute(0, 2, 1, 3)
+
+    def _attention_output(self, weights, value):
+        batch = weights.shape[0]
+        query_tokens = weights.shape[-2]
+        head_dim = self.qkv.in_features // self.num_heads
+        output = self.attn_drop(weights) @ value
+        output = output.transpose(1, 2).reshape(
+            batch, query_tokens, self.num_heads * head_dim
+        )
+        return self.proj_drop(self.proj(output))
+
+    def self_attention(self, tokens):
+        """Vanilla self-attention over one homogeneous token stream."""
+        if tokens.ndim != 3:
+            raise ValueError(
+                'Self-attention tokens must have shape [B, T, D], got '
+                f'{tuple(tokens.shape)}'
+            )
+        batch, token_count, channels = tokens.shape
+        qkv = self.qkv(tokens).reshape(
+            batch, token_count, 3, self.num_heads,
+            channels // self.num_heads,
+        ).permute(2, 0, 3, 1, 4)
+        query, key, value = qkv.unbind(0)
+        weights = torch.softmax(
+            (query @ key.transpose(-2, -1)) * self.scale, dim=-1
+        )
+        return self._attention_output(weights, value), weights
+
+    def cross_attention(self, query_tokens, key_value_tokens):
+        """Vanilla cross-attention using this module's shared QKV weights."""
+        if query_tokens.ndim != 3 or key_value_tokens.ndim != 3:
+            raise ValueError(
+                'Cross-attention inputs must have shape [B, T, D], got '
+                f'{tuple(query_tokens.shape)} and '
+                f'{tuple(key_value_tokens.shape)}'
+            )
+        if query_tokens.shape[0] != key_value_tokens.shape[0]:
+            raise ValueError('Cross-attention inputs must share the batch size')
+        channels = self.qkv.in_features
+        if (query_tokens.shape[-1] != channels
+                or key_value_tokens.shape[-1] != channels):
+            raise ValueError(
+                f'Cross-attention expected embedding width {channels}, got '
+                f'{query_tokens.shape[-1]} and {key_value_tokens.shape[-1]}'
+            )
+        bias = self.qkv.bias
+        query = F.linear(
+            query_tokens,
+            self.qkv.weight[:channels],
+            None if bias is None else bias[:channels],
+        )
+        key = F.linear(
+            key_value_tokens,
+            self.qkv.weight[channels:2 * channels],
+            None if bias is None else bias[channels:2 * channels],
+        )
+        value = F.linear(
+            key_value_tokens,
+            self.qkv.weight[2 * channels:],
+            None if bias is None else bias[2 * channels:],
+        )
+        query = self._split_heads(query)
+        key = self._split_heads(key)
+        value = self._split_heads(value)
+        weights = torch.softmax(
+            (query @ key.transpose(-2, -1)) * self.scale, dim=-1
+        )
+        return self._attention_output(weights, value), weights
+
     def forward(self, x):
         B, N, C = x.shape  # Here N = #patches + #class-tokens
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
@@ -140,6 +221,42 @@ class Block(nn.Module):
         x = x + self.drop_path(o)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x, weights
+
+    def forward_decoupled_bidirectional(self, class_tokens, patch_tokens):
+        """Four role-specific attentions without concatenating token streams."""
+        patch_delta, patch_to_patch = self.attn.self_attention(
+            self.norm1(patch_tokens)
+        )
+        patch_tokens = patch_tokens + self.drop_path(patch_delta)
+        patch_tokens = patch_tokens + self.drop_path(
+            self.mlp(self.norm2(patch_tokens))
+        )
+
+        class_delta, class_to_patch = self.attn.cross_attention(
+            self.norm1(class_tokens), self.norm1(patch_tokens)
+        )
+        class_tokens = class_tokens + self.drop_path(class_delta)
+
+        class_delta, class_to_class = self.attn.self_attention(
+            self.norm1(class_tokens)
+        )
+        class_tokens = class_tokens + self.drop_path(class_delta)
+        class_tokens = class_tokens + self.drop_path(
+            self.mlp(self.norm2(class_tokens))
+        )
+
+        patch_delta, patch_to_class = self.attn.cross_attention(
+            self.norm1(patch_tokens), self.norm1(class_tokens)
+        )
+        patch_tokens = patch_tokens + self.drop_path(patch_delta)
+
+        attention = {
+            'patch_to_patch': patch_to_patch,
+            'class_to_patch': class_to_patch,
+            'class_to_class': class_to_class,
+            'patch_to_class': patch_to_class,
+        }
+        return class_tokens, patch_tokens, attention
 
 
 class PatchEmbed(nn.Module):

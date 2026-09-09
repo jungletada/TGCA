@@ -37,6 +37,7 @@ __all__ = [
     'ResidualClassWiseWeightedPooling',
     'LastPatchAggregator',
     'MCTFORMERPLUS_VARIANTS',
+    'TOKEN_INTERACTION_MODES',
     'MCTformerPlus',
     'MCTformerPlusCam',
     'adapt_deit_checkpoint_for_mctformerplus',
@@ -51,10 +52,12 @@ __all__ = [
     'checkpoint_final_norm_enabled',
     'checkpoint_last_mct_enabled',
     'checkpoint_patch_final_norm_enabled',
+    'checkpoint_token_interaction',
     'resolve_mctformerplus_checkpoint_variant',
     'resolve_mctformerplus_variant',
     'validate_mctformerplus_final_norm_checkpoint',
     'validate_mctformerplus_class_token_init_checkpoint',
+    'validate_mctformerplus_token_interaction_checkpoint',
 ]
 
 
@@ -110,6 +113,8 @@ _MCTFORMERPLUS_MODEL_TO_VARIANT = {
     spec['model_name']: variant
     for variant, spec in MCTFORMERPLUS_VARIANTS.items()
 }
+
+TOKEN_INTERACTION_MODES = ('joint', 'decoupled_bidirectional')
 
 
 def resolve_mctformerplus_variant(model_name):
@@ -397,8 +402,15 @@ class MCTformerPlus(VisionTransformer):
             cti_bgt_n_layers=6, cti_bgt_affinity_start=4, final_norm=False,
             patch_final_norm=False, last_mct=False, class_stable_last=False,
             last_topk=1, last_sigma=None, last_eps=1e-6,
-            class_token_init='baseline', *args, **kwargs):
+            class_token_init='baseline', token_interaction='joint',
+            *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.token_interaction = str(token_interaction).strip().lower()
+        if self.token_interaction not in TOKEN_INTERACTION_MODES:
+            raise ValueError(
+                f'token_interaction must be one of {TOKEN_INTERACTION_MODES}, '
+                f'got {token_interaction!r}'
+            )
         self.class_token_init = str(class_token_init).strip().lower()
         if self.class_token_init not in {'baseline', 'cwp', 'residual_cwp'}:
             raise ValueError(
@@ -417,6 +429,37 @@ class MCTformerPlus(VisionTransformer):
             raise ValueError(
                 'last_mct and class_stable_last are mutually exclusive'
             )
+        if self.token_interaction == 'decoupled_bidirectional':
+            architecture = (
+                self.embed_dim,
+                len(self.blocks),
+                int(self.blocks[0].attn.num_heads),
+            )
+            if architecture != (384, 12, 6):
+                raise ValueError(
+                    'Decoupled bidirectional support is restricted to '
+                    'MCTformer+-Small (embed_dim=384, depth=12, heads=6)'
+                )
+            incompatible = []
+            if self.class_token_init != 'baseline':
+                incompatible.append('class_token_init')
+            if self.attention_normalization != 'vanilla':
+                incompatible.append('attention_normalization')
+            if str(bcss_variant).lower() != 'e0':
+                incompatible.append('bcss_variant')
+            if str(psl_variant).lower() != 'baseline':
+                incompatible.append('psl_variant')
+            if bool(cti_bgt):
+                incompatible.append('cti_bgt')
+            if self.final_norm or self.patch_final_norm:
+                incompatible.append('final_norm')
+            if self.last_mct or self.class_stable_last:
+                incompatible.append('LaST')
+            if incompatible:
+                raise ValueError(
+                    'Decoupled bidirectional first-round scope rejects: '
+                    + ', '.join(incompatible)
+                )
         if self.class_token_init in {'cwp', 'residual_cwp'}:
             architecture = (
                 self.embed_dim,
@@ -715,6 +758,26 @@ class MCTformerPlus(VisionTransformer):
             'cam_map': 'original M',
         }
 
+    def token_interaction_configuration(self):
+        if self.token_interaction == 'joint':
+            return {
+                'mode': 'joint',
+                'token_concatenation': True,
+                'ordering': ['joint_self_attention'],
+            }
+        return {
+            'mode': 'decoupled_bidirectional',
+            'token_concatenation': False,
+            'ordering': [
+                'patch_self_attention',
+                'class_to_patch_cross_attention',
+                'class_self_attention',
+                'patch_to_class_cross_attention',
+            ],
+            'shared_block_parameters': True,
+            'cam_relations': ['class_to_patch', 'patch_to_patch'],
+        }
+
     def class_token_initialization_configuration(self):
         if self.class_token_init == 'baseline':
             return {
@@ -820,6 +883,44 @@ class MCTformerPlus(VisionTransformer):
             return result + (auxiliary,)
         return result
 
+    def _forward_decoupled_features(
+            self, class_tokens, patch_tokens, initial_class_tokens,
+            initial_patch_tokens, return_aux):
+        class_tokens = self.pos_drop(class_tokens)
+        patch_tokens = self.pos_drop(patch_tokens)
+        attentions = []
+        all_class_tokens = []
+        for block in self.blocks:
+            class_tokens, patch_tokens, relations = (
+                block.forward_decoupled_bidirectional(
+                    class_tokens, patch_tokens
+                )
+            )
+            attentions.append(relations)
+            all_class_tokens.append(class_tokens)
+
+        auxiliary = {
+            'variant': self.bcss_variant,
+            'patch_count': patch_tokens.shape[1],
+            'final_norm': False,
+            'patch_final_norm': False,
+            'last_mct': False,
+            'class_stable_last': False,
+            'class_token_init': self.class_token_init,
+            'token_interaction': self.token_interaction,
+            'token_interaction_configuration': (
+                self.token_interaction_configuration()
+            ),
+            'initial_class_tokens': initial_class_tokens,
+            'initial_patch_tokens': initial_patch_tokens,
+        }
+        result = (
+            class_tokens, patch_tokens, attentions, all_class_tokens,
+        )
+        if return_aux:
+            return result + (auxiliary,)
+        return result
+
     def forward_features(self, x, n=12, active_labels=None, return_aux=False):
         if self.psl_spec.enabled:
             return self._forward_psl_features(x, return_aux)
@@ -845,6 +946,12 @@ class MCTformerPlus(VisionTransformer):
             )
         cls_tokens = cls_tokens + self.pos_embed_cls
         initial_class_tokens = cls_tokens
+
+        if self.token_interaction == 'decoupled_bidirectional':
+            return self._forward_decoupled_features(
+                cls_tokens, x, initial_class_tokens,
+                initial_patch_tokens, return_aux,
+            )
 
         patch_count = x.shape[1]
         # BGT joins every joint self-attention block in [BG, FG, patches] order.
@@ -887,6 +994,10 @@ class MCTformerPlus(VisionTransformer):
             'last_mct': self.last_mct,
             'class_stable_last': self.class_stable_last,
             'class_token_init': self.class_token_init,
+            'token_interaction': self.token_interaction,
+            'token_interaction_configuration': (
+                self.token_interaction_configuration()
+            ),
         }
         if pooling_attention is not None:
             pooling_diagnostics = class_token_pooling_diagnostics(
@@ -1096,6 +1207,29 @@ class MCTformerPlusCam(MCTformerPlus):
         super().__init__(decay_parameter, input_size, *args, **kwargs)
         self.n_layers = 3
 
+    def _stack_attention_records(self, attention_records):
+        if self.token_interaction == 'joint':
+            head_attention = torch.stack(attention_records)
+            return head_attention, head_attention.mean(dim=2)
+        relation_names = (
+            'patch_to_patch', 'class_to_patch',
+            'class_to_class', 'patch_to_class',
+        )
+        if not attention_records:
+            raise ValueError('Decoupled attention records cannot be empty')
+        if any(set(record) != set(relation_names)
+               for record in attention_records):
+            raise ValueError('Decoupled attention record keys are invalid')
+        head_attention = {
+            name: torch.stack([record[name] for record in attention_records])
+            for name in relation_names
+        }
+        mean_attention = {
+            name: values.mean(dim=2)
+            for name, values in head_attention.items()
+        }
+        return head_attention, mean_attention
+
     def _psl_class_to_patch(self, auxiliary):
         relations = auxiliary.get('psl_relations', ())
         if not relations:
@@ -1114,6 +1248,11 @@ class MCTformerPlusCam(MCTformerPlus):
         patch_slice = self._attention_patch_slice(h * w)
         if self.psl_spec.enabled:
             cls2pat = self._psl_class_to_patch(auxiliary)
+        elif getattr(self, 'token_interaction', 'joint') == (
+                'decoupled_bidirectional'):
+            cls2pat = attn_weights['class_to_patch'][
+                -self.n_layers:
+            ].mean(0)[:, self._foreground_slice()]
         else:
             cls2pat = attn_weights[-self.n_layers:].mean(0)\
                 [:, self._foreground_slice(), patch_slice]
@@ -1136,7 +1275,11 @@ class MCTformerPlusCam(MCTformerPlus):
         cams = cls2pat * feature_map  # B * C * 14 * 14
         cams = torch.sqrt(cams)
         
-        patch_attn = attn_weights[:, :, patch_slice, patch_slice]
+        if getattr(self, 'token_interaction', 'joint') == (
+                'decoupled_bidirectional'):
+            patch_attn = attn_weights['patch_to_patch']
+        else:
+            patch_attn = attn_weights[:, :, patch_slice, patch_slice]
         patch_attn = torch.sum(patch_attn, dim=0) # B x Np x Np
         B, _, hp, wp = cams.shape
         cams = torch.matmul(
@@ -1152,6 +1295,11 @@ class MCTformerPlusCam(MCTformerPlus):
         n, c, h, w = feature_map.shape
         if self.psl_spec.enabled:
             cls2pat = self._psl_class_to_patch(auxiliary)
+        elif getattr(self, 'token_interaction', 'joint') == (
+                'decoupled_bidirectional'):
+            cls2pat = attn_weights['class_to_patch'][
+                -self.n_layers:
+            ].mean(0)[:, self._foreground_slice()]
         else:
             cls2pat = attn_weights[-self.n_layers:].mean(0)[
                 :, self._foreground_slice(), self._patch_slice(h * w)]
@@ -1193,8 +1341,14 @@ class MCTformerPlusCam(MCTformerPlus):
         x_patch = x_patch.permute([0, 3, 1, 2]).contiguous()
         x_patch = self.head(x_patch)
 
-        attn_weights = torch.mean(
-            torch.stack(attn_weights), dim=2).detach()
+        _, attn_weights = self._stack_attention_records(attn_weights)
+        if isinstance(attn_weights, Mapping):
+            attn_weights = {
+                name: values.detach()
+                for name, values in attn_weights.items()
+            }
+        else:
+            attn_weights = attn_weights.detach()
         
         cls_label = torch.ones(b, self.num_classes).to(x.device)
         cls_label[cls_logits <= 0] = 0
@@ -1219,8 +1373,9 @@ class MCTformerPlusCam(MCTformerPlus):
         x_cls_last, x_patch_tokens, attn_weights, class_embeddings, auxiliary = self.forward_features(
             x, active_labels=active_labels, return_aux=True)
         # 12 * B * H * N * N -> 12 * B * N * N
-        head_attention = torch.stack(attn_weights)
-        attn_weights = torch.mean(head_attention, dim=2)
+        head_attention, attn_weights = self._stack_attention_records(
+            attn_weights
+        )
         if return_attn:
             return attn_weights
         if return_token:
@@ -1253,6 +1408,10 @@ class MCTformerPlusCam(MCTformerPlus):
         if self.psl_spec.enabled:
             relations = auxiliary['psl_relations']
             class_to_patch = self._psl_class_to_patch(auxiliary)
+        elif self.token_interaction == 'decoupled_bidirectional':
+            class_to_patch = attn_weights['class_to_patch'][
+                -self.n_layers:
+            ].mean(0)[:, self._foreground_slice()]
         else:
             class_to_patch = attn_weights[-self.n_layers:].mean(0)[
                 :, self._foreground_slice(), patch_slice]
@@ -1287,6 +1446,19 @@ class MCTformerPlusCam(MCTformerPlus):
                 'write_gates': torch.stack([
                     item['write_gate'] for item in relations
                 ]),
+            })
+        elif self.token_interaction == 'decoupled_bidirectional':
+            result.update({
+                'class_to_patch_heads': head_attention[
+                    'class_to_patch'][:, :, :, self._foreground_slice()],
+                'patch_to_class_heads': head_attention[
+                    'patch_to_class'][:, :, :, :, self._foreground_slice()],
+                'class_to_class_heads': head_attention[
+                    'class_to_class'][
+                        :, :, :, self._foreground_slice(),
+                        self._foreground_slice(),
+                    ],
+                'patch_to_patch_heads': head_attention['patch_to_patch'],
             })
         else:
             result.update({
@@ -1348,7 +1520,7 @@ class MCTformerPlusCam(MCTformerPlus):
             self.forward_features(x, return_aux=True)
         )
         # 12 * B * H * N * N -> 12 * B * N * N
-        attn_weights = torch.mean(torch.stack(attn_weights), dim=2)
+        _, attn_weights = self._stack_attention_records(attn_weights)
         if return_type == 'all':
             return attn_weights
         
@@ -1412,6 +1584,7 @@ def model_spec_from_instance(model):
         ),
         'cam_patch_to_patch_layers': depth,
         'class_token_init': model.class_token_init,
+        'token_interaction': model.token_interaction,
     }
 
 
@@ -1492,6 +1665,50 @@ def checkpoint_class_stable_last_enabled(checkpoint):
             'checkpoint class_stable_last metadata must be a boolean'
         )
     return value
+
+
+def checkpoint_token_interaction(checkpoint):
+    """Return the recorded token topology, defaulting legacy checkpoints joint."""
+    if not isinstance(checkpoint, Mapping):
+        raise TypeError(
+            f'Checkpoint must be a mapping, got {type(checkpoint).__name__}'
+        )
+    top_value = checkpoint.get('token_interaction')
+    model_spec = checkpoint.get('model_spec')
+    spec_value = (
+        model_spec.get('token_interaction')
+        if isinstance(model_spec, Mapping) else None
+    )
+    values = [value for value in (top_value, spec_value) if value is not None]
+    if not values:
+        return 'joint'
+    for value in values:
+        if not isinstance(value, str) or value not in TOKEN_INTERACTION_MODES:
+            raise ValueError(
+                'checkpoint token_interaction must be one of '
+                f'{TOKEN_INTERACTION_MODES}'
+            )
+    if len(set(values)) != 1:
+        raise ValueError(
+            'checkpoint token_interaction metadata disagrees between '
+            'top-level and model_spec'
+        )
+    return values[0]
+
+
+def validate_mctformerplus_token_interaction_checkpoint(checkpoint, expected):
+    expected = str(expected).strip().lower()
+    if expected not in TOKEN_INTERACTION_MODES:
+        raise ValueError(
+            f'expected token_interaction must be one of {TOKEN_INTERACTION_MODES}'
+        )
+    observed = checkpoint_token_interaction(checkpoint)
+    if observed != expected:
+        raise ValueError(
+            f'Checkpoint token_interaction={observed!r} does not match '
+            f'requested {expected!r}'
+        )
+    return observed
 
 
 def checkpoint_class_token_init(checkpoint):
