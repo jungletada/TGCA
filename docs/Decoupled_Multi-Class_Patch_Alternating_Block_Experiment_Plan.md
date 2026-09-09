@@ -1,10 +1,10 @@
-# Decoupled Multi-Class/Patch Alternating Transformer for MCTformer+
+# Decoupled Bidirectional Multi-Class/Patch Alternating Transformer for MCTformer+
 
 ## 1. 实验目标
 
 本实验停止继续优化 Residual CWP。Residual CWP、CWP、FinalLN、LaST、TGCA、BCSS、PSL 和 CTI-BGT 均不与本实验组合。
 
-本实验只研究一个问题：MCTformer+ 将 multi-class tokens 与 patch tokens 拼接后送入同一个全局 self-attention，是否会让 patch stream 反向读取 class-token information，并损害 patch 的空间语义所有权。
+本实验只研究一个问题：MCTformer+ 将 multi-class tokens 与 patch tokens 拼接后送入同一个全局 self-attention，使两类 token 共享同一 attention normalization；将它们改为不拼接的 role-specific self/cross attention，同时保留双向信息交换，是否能改善分类与定位。
 
 原始 MCTformer+ 每层为：
 
@@ -23,33 +23,36 @@ P\text{-Self Attention}
 C\leftarrow P\text{ Cross Attention}
 \rightarrow
 C\text{-Self Attention}
+\rightarrow
+P\leftarrow C\text{ Cross Attention}
 }
 \]
 
-其中 patch tokens 从不读取 class tokens：
+其中两个 stream 均能读取对方的信息，但任何一次 attention 都不拼接两类 token。Patch tokens 先完成自身空间更新，class tokens 再读取更新后的 patch tokens并完成 class self-attention，最后 patch tokens 读取本层已经更新的 class tokens：
 
 \[
-P^l=f_l(P^{l-1}),
+\widehat P^l=f_l(P^{l-1}),
 \]
-
-而 class tokens 先读取当前层已经更新的 patch tokens，再进行 class-token 内部交互：
-
 \[
-\widetilde C^l=g_l(C^{l-1},P^l),
+\widetilde C^l=g_l(C^{l-1},\widehat P^l),
 \qquad
-C^l=h_l(\widetilde C^l).
+C^l=h_l(\widetilde C^l),
+\qquad
+P^l=r_l(\widehat P^l,C^l).
 \]
+
+因此这不是切断 class-to-patch 信息，而是把原 joint self-attention 中的四种 token relation 拆成显式的 `P2P`、`C2P`、`C2C` 和 `P2C` operation。
 
 首轮方法暂命名为：
 
 ```text
-MCTformer+-DecoupledAlternating
+MCTformer+-DecoupledBidirectional
 ```
 
 配置名固定为：
 
 ```text
-token_interaction = joint | decoupled_alternating
+token_interaction = joint | decoupled_bidirectional
 ```
 
 默认值为 `joint`，必须保持当前 MCTformer+ 数值行为不变。
@@ -60,7 +63,7 @@ token_interaction = joint | decoupled_alternating
 
 实现时首先完成模型核心模块、单元测试和 official DeiT 权重映射。训练 runner 和 CAM runner 只能在核心模块测试通过后接入。
 
-首轮不复制三套独立 attention，也不引入新的 projection、gate 或 loss。每个 layer 继续只保留原 DeiT block 的一套：
+首轮不复制四套独立 attention，也不引入新的 projection、gate 或 loss。每个 layer 继续只保留原 DeiT block 的一套：
 
 ```text
 norm1
@@ -71,7 +74,7 @@ mlp
 drop_path
 ```
 
-这套参数在三种 attention operation 中共享。其目的有三点：
+这套参数在四种 attention operation 中共享。其目的有三点：
 
 1. block 参数量与原始 MCTformer+ 完全相同；
 2. official DeiT-S block 权重能够逐键、严格加载；
@@ -123,9 +126,8 @@ class SharedRoleAttention(nn.Module):
         ...
 
     def cross_attention(self, query_tokens, key_value_tokens):
-        # query_tokens:     [B,C,D]
-        # key_value_tokens: [B,N,D]
-        # returns output [B,C,D], weights [B,H,C,N]
+        # Supports C<-P and P<-C without concatenating the streams.
+        # returns output shaped like query_tokens and weights [B,H,Tq,Tkv]
         ...
 ```
 
@@ -160,7 +162,7 @@ weights = softmax((q @ k.transpose(-2, -1)) * self.scale, dim=-1)
 output = self.proj(merge_heads(self.attn_drop(weights) @ v))
 ```
 
-这样 cross-attention 的 query 是 multi-class tokens，key/value 只来自 patch tokens：
+同一个接口分别计算两个方向。Class-to-patch 的 query 是 multi-class tokens，key/value 只来自 patch tokens：
 
 \[
 A_{c2p}^l
@@ -171,11 +173,22 @@ Q(C)K(P)^\top/\sqrt{d_h}
 \right).
 \]
 
-不得让 cross-attention 的 key/value 包含 class tokens。
+Patch-to-class 则反向使用 patch queries 和 class-only key/value：
+
+\[
+A_{p2c}^l
+=
+\operatorname{softmax}_{C}
+\left(
+Q(P)K(C)^\top/\sqrt{d_h}
+\right).
+\]
+
+两个方向都必须保持 query stream 与 key/value stream 分离；不得在 cross-attention 内重新拼接 token。
 
 ### 2.3 每层的固定更新顺序
 
-每层只使用一次 patch MLP 和一次 class MLP。Cross-attention 后不额外增加 MLP，以避免 class stream 每层拥有两套 FFN update。
+每层只使用一次 patch MLP 和一次 class MLP。两个 cross-attention 后都不额外增加 MLP，以避免任一 stream 每层拥有重复的 FFN update。
 
 核心 forward 固定为：
 
@@ -207,15 +220,23 @@ class DecoupledAlternatingBlock(nn.Module):
             self.mlp(self.norm2(class_tokens))
         )
 
+        # Part 4: patch queries read the fully updated class stream.
+        patch_cross_delta, attn_p2c = self.attn.cross_attention(
+            self.norm1(patch_tokens),
+            self.norm1(class_tokens),
+        )
+        patch_tokens = patch_tokens + self.drop_path(patch_cross_delta)
+
         attention = {
             "patch_to_patch": attn_p2p,  # [B,H,N,N]
             "class_to_patch": attn_c2p,  # [B,H,C,N]
             "class_to_class": attn_c2c,  # [B,H,C,C]
+            "patch_to_class": attn_p2c,  # [B,H,N,C]
         }
         return class_tokens, patch_tokens, attention
 ```
 
-这里 `norm1`、`norm2`、`attn`、`mlp` 和 `drop_path` 均是同一个 layer 内从 original DeiT block 继承的一套模块，不是三份独立参数。
+这里 `norm1`、`norm2`、`attn`、`mlp` 和 `drop_path` 均是同一个 layer 内从 original DeiT block 继承的一套模块，不是四份独立参数。第四步不改变 class tokens，所以该层的 CCT class-token snapshot 可以在第三步之后或整个 block 返回时记录；两者必须数值相同。
 
 ### 2.4 12 层主干
 
@@ -259,10 +280,11 @@ class_loss = F.multilabel_soft_margin_loss(class_logits, targets)
 
 ### 3.2 CCT
 
-`all_x_cls` 保存每层完整完成以下三步后的 raw class tokens：
+`all_x_cls` 保存每层 class stream 完整更新后的 raw class tokens；记录发生在整个四阶段 block 返回时：
 
 ```text
-P-SA -> C2P cross-attention -> C-SA -> class MLP
+P-SA -> patch MLP -> C2P cross-attention -> C-SA -> class MLP
+     -> P2C cross-attention
 ```
 
 CCT 的公式、层数、权重和调用位置全部沿用 MCTformer+。不得对 `all_x_cls` 应用 FinalLN，不得增加辅助 relation loss。
@@ -356,7 +378,9 @@ CAM_c
 
 保留 `forward_with_label` 中原始 class-logit 与 GWRP patch-logit gating，保留 `make_cam.py` 的 multi-scale、flip、resize、per-class normalization 和保存格式。
 
-新 attention 的 key group 是单一同质集合，因此每个 `A_c2p` 和 `A_p2p` row 自然各自和为 1。不得为了模拟原 joint-softmax group mass 再增加人工缩放；这属于新拓扑的内在归一化，不是修改 CAM 公式。
+新 attention 的 key group 是单一同质集合，因此 `A_c2p`、`A_p2c`、`A_p2p` 和 `A_c2c` 的每个 row 都自然和为 1。不得为了模拟原 joint-softmax group mass 再增加人工缩放；这属于新拓扑的内在归一化，不是修改 CAM 公式。
+
+`A_p2c` 参与 patch-token feature update，但不加入 CAM refinement。原生 MCTformer+ CAM 只读取 `A_c2p` 和 `A_p2p`，这一 readout contract 保持不变。
 
 不得伪造一个 `[C+N,C+N]` joint attention matrix。模型应返回结构化 attention：
 
@@ -365,6 +389,7 @@ CAM_c
     "class_to_patch": ...,
     "patch_to_patch": ...,
     "class_to_class": ...,
+    "patch_to_class": ...,
 }
 ```
 
@@ -393,7 +418,7 @@ blocks.L.norm2.*
 blocks.L.mlp.*
 ```
 
-因此同一个 pretrained block 参数由三个 operation 共享调用，不进行复制。`patch_embed`、12 个 blocks 和位置编码继续使用同一个 official DeiT-S checkpoint。
+因此同一个 pretrained block 参数由四个 operation 共享调用，不进行复制。`patch_embed`、12 个 blocks 和位置编码继续使用同一个 official DeiT-S checkpoint。
 
 CLS token 与当前 MCTformer+ 相同：
 
@@ -410,7 +435,13 @@ self.pos_embed_cls = source_cls_position.repeat(1, 20, 1)
 trainable_parameter_count(decoupled) == trainable_parameter_count(baseline)
 ```
 
-虽然参数量相同，cross-attention 和第二次 class-side attention 会增加投影调用，因此必须实测训练显存、吞吐和推理延迟，不得仅依据 attention matrix 大小声称零开销。
+虽然参数量相同，四个 operation 会重复调用共享的 QKV/output projection。四张 attention score matrix 的元素总数满足
+
+\[
+N^2+NC+C^2+CN=(N+C)^2,
+\]
+
+但 projection 计算量高于一次 joint attention，因此必须实测训练显存、吞吐和推理延迟，不得仅依据 attention matrix 元素总数声称零开销。
 
 ---
 
@@ -439,7 +470,7 @@ class_stable_last = false
 - TGCA/split softmax；
 - 独立的 patch/class/cross 参数；
 - cross-attention gate；
-- reverse patch-to-class cross-attention；
+- 必需的双向 cross-attention 之外的第三种 cross/gating 路径；
 - background/register tokens；
 - 额外 LayerNorm、MLP 或 classifier；
 - layer-order、层数或超参数 sweep。
@@ -453,16 +484,17 @@ class_stable_last = false
 1. Patch self-attention 输出 `[B,N,D]`，权重 `[B,H,N,N]`；
 2. Class-to-patch cross-attention 输出 `[B,C,D]`，权重 `[B,H,C,N]`；
 3. Class self-attention 输出 `[B,C,D]`，权重 `[B,H,C,C]`；
-4. 三种 attention 的 row sum 均为 1；
-5. cross-attention 与显式 `F.linear` reference 数值一致；
-6. 所有 operation 使用同一个 `qkv` 和 `proj` 参数对象。
+4. Patch-to-class cross-attention 输出 `[B,N,D]`，权重 `[B,H,N,C]`；
+5. 四种 attention 的 row sum 均为 1；
+6. 两个 cross-attention 均与显式 `F.linear` reference 数值一致；
+7. 所有 operation 使用同一个 `qkv` 和 `proj` 参数对象。
 
 ### 7.2 解耦不变量
 
 固定 patch input，只扰动初始 class tokens：
 
 ```text
-final patch tokens 必须 bit-exact 不变
+Part 1 的 patch-self 输出必须不变；完整 block 的 final patch tokens 必须变化
 ```
 
 固定 class tokens、扰动 patch input：
@@ -471,11 +503,13 @@ final patch tokens 必须 bit-exact 不变
 class tokens 必须发生变化
 ```
 
-检查 patch stream 的 autograd graph 不依赖 `cls_token`：仅对最终 patch-token scalar backward 时，`cls_token.grad` 必须为 `None` 或严格为零。
+检查双向 autograd：final patch-token scalar backward 必须能向 `cls_token` 传播有限非零梯度；final class-token scalar backward 必须能向 patch input/embedding 传播有限非零梯度。
+
+另外验证 relation topology：`A_c2p` 的 key 轴严格只有 `N` 个 patch tokens，`A_p2c` 的 key 轴严格只有 `C` 个 class tokens，任何 cross operation 内都不存在 `[C;P]` 拼接。
 
 ### 7.3 顺序与训练输出
 
-1. Hook 验证每层顺序严格为 P-SA、C2P、C-SA；
+1. Hook 验证每层顺序严格为 P-SA、C2P、C-SA、P2C；
 2. `all_x_cls` 恰好包含 12 层完成更新后的 raw class tokens；
 3. class logits、patch logits、loss shapes 与 baseline 一致；
 4. CCT 接收新 `all_x_cls`，其公式未变；
@@ -521,8 +555,8 @@ accum_iter = 1
 确认：
 
 - 三项原始 loss 有限；
-- 12 层三种 attention 有限且 row sum 正确；
-- patch-output 对 class-token perturbation 不变；
+- 12 层四种 attention 有限且 row sum 正确；
+- class 与 patch perturbation test 证明双向信息交换均有效；
 - checkpoint 严格加载；
 - 4 张 smoke CAM 能生成；
 - 不增加额外 loss。
@@ -549,7 +583,7 @@ drop path: 0.1
 pretrained: official DeiT-S
 ```
 
-除 `--token-interaction decoupled_alternating` 外，命令与 canonical original MCTformer+ seed-0 run 一致。从 official DeiT-S 初始化开始，不从任何训练好的 MCTformer+、CWP 或 Residual-CWP checkpoint fine-tune。
+除 `--token-interaction decoupled_bidirectional` 外，命令与 canonical original MCTformer+ seed-0 run 一致。从 official DeiT-S 初始化开始，不从任何训练好的 MCTformer+、CWP 或 Residual-CWP checkpoint fine-tune。
 
 原始 MCTformer+ 结果已存在，不重训 baseline。
 
@@ -582,18 +616,19 @@ pretrained: official DeiT-S
 - positive-class-pair Top-10 Jaccard；
 - target / other-FG / background top-k composition；
 - `A_c2p` 的 conditional region mass；
+- `A_p2c` 对 present/absent class keys 的 conditional mass、entropy 和 top-1 class 命中率；
 - raw patch CAM、class-attention CAM 和 final propagated CAM 的语义所有权；
 - patch-token class-similarity trajectory。
 
-新模型不存在 `A_p2c`，因此该方向报告为“architecturally absent”，不得填零后与 baseline 当作连续数值比较。
+新模型的 `A_p2c` 是独立归一化的真实 cross-attention。与 baseline 比较时，baseline joint attention 的 patch-query/class-key slice 必须先在 class-key 轴上重新条件归一化；不得把 baseline 未归一化的 group mass 与新模型 row-sum-one 的 `A_p2c` 直接比较。
 
 所有不确定性分析以 image 为 cluster 做 paired bootstrap；不得把同图 patch 或 image-class pair 当成独立样本。
 
 ### 9.3 解释边界
 
-如果 CAM 提升且 patch semantic ownership 改善，可以说明禁止 patch 读取 class tokens 与结果一致，但单个训练对照仍不能把所有变化唯一归因于某一层。
+如果 CAM 提升且 patch semantic ownership 改善，只能说明 role-specific、双向、非拼接 attention 与结果一致。由于 operation 被串行化且每层调用共享 projection 多次，单个训练对照不能把增益唯一归因于取消 concatenation 或某一个 relation。
 
-如果 localization 下降，即使 patch leakage 指标改善，也必须报告 decoupling 删除了可能有用的 class-conditioned contextualization，不得只强调纯度指标。
+如果 localization 下降，即使某些语义所有权指标改善，也必须报告 joint normalization 或并行 relation mixing 可能是有用的 inductive bias，不得只强调纯度指标。
 
 如果仅 best threshold 改善而 fixed threshold 不改善，应优先解释为 calibration 改变。
 
@@ -609,7 +644,7 @@ pretrained: official DeiT-S
 4. 改善不是只来自 method-specific threshold；
 5. 开销仍可接受。
 
-若 fixed CAM、best CAM 和 classification 均不改善，则停止该方向，不自动实现独立参数、gate、reverse cross-attention 或其他 ordering。
+若 fixed CAM、best CAM 和 classification 均不改善，则停止该方向，不自动实现独立参数、gate、额外 cross-attention 或其他 ordering。
 
 ---
 
