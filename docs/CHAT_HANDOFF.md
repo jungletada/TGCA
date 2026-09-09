@@ -1,6 +1,6 @@
 # TGCA Operational Handoff
 
-Updated: 2026-09-09 15:36 JST
+Updated: 2026-09-09 21:13 JST
 
 This file was absent at the start of the current task and was created to restore
 the operational handoff required by `AGENTS.md`. It records the live server
@@ -20,9 +20,9 @@ under `results/` and in Git history.
 - DeiT-S SHA256:
   `cd65a15597004d0ce19d7a9daef969903972db5b398e3a5febcd3c4df1d8f59f`
 
-## Active experiment
+## Stopped experiment queue
 
-- tmux session: `mct-decoupled-q-20260909`
+- Former tmux session: `mct-decoupled-q-20260909` (stopped and absent)
 - Run ID: `20260909-mctformerplus-decoupled-s0-b1b4830`
 - Result root:
   `/home/peng/code/TGCA/results/decoupled_bidirectional/20260909-mctformerplus-decoupled-s0-b1b4830`
@@ -31,9 +31,10 @@ under `results/` and in Git history.
 - Exact commands: `<result root>/exact_commands.sh`
 
 The 100-update, batch-32, 448 smoke passed with finite class/CCT/patch
-losses, strict checkpoint audit, and four completed single-scale CAMs. The first
-full matched run (`full`) started at 2026-09-09 15:35 JST. Do not restart or
-duplicate this queue.
+losses, strict checkpoint audit, and four completed single-scale CAMs. At the
+user's request, the complete queue was stopped at 2026-09-09 21:13 JST. No
+queue, training, evaluation, or CAM process remains active on the GPU. Do not
+restart or duplicate this queue without a new user request.
 
 The serialized queue order is:
 
@@ -46,12 +47,21 @@ The serialized queue order is:
 7. `p2c_middle`
 8. `p2c_early`
 
-Each item runs 45-epoch seed-0 training, strict checkpoint audit, 1449-image
+The first four items completed 45-epoch seed-0 training, strict checkpoint
+audit, 1449-image
 single-scale classification evaluation with image bootstrap, native multiscale
 CAM generation on the 1464-image train split, and the fixed 0.45 / common
 threshold-grid evaluation. The existing original joint MCTformer+ result is
 referenced read-only from
 `results/final_ln_ablation/20260906-mctformerplus-final-ln-matched-s0-0ef6bd8`.
+
+Completed variants, each with `VARIANT_COMPLETE`, are `full`, `no_p2c`,
+`no_c2c`, and `no_p2c_no_c2c`. `c2p_update_off` was interrupted after epoch 1;
+its partial best checkpoint and logs are preserved but it has no final
+checkpoint, audit, classification evaluation, CAM evaluation, or completion
+marker and must not be reported as a completed experiment. `p2p_update_off`,
+`p2c_middle`, and `p2c_early` were not started. The run root correctly has no
+`EXPERIMENT_COMPLETE` or `PIPELINE_COMPLETE` marker.
 
 ## Validation completed before launch
 
@@ -62,15 +72,14 @@ referenced read-only from
 - Preflight peak allocated CUDA memory: 15.13 GiB.
 - Model parameter count: 22,050,836, identical to original MCTformer+-Small.
 
-## Safe monitoring
+## Safe status checks
 
 ```bash
-tmux capture-pane -pt mct-decoupled-q-20260909:0 -S -120
 tail -n 120 results/decoupled_bidirectional/20260909-mctformerplus-decoupled-s0-b1b4830/pipeline.log
 nvidia-smi
+tmux ls
 ```
 
-Completion requires both `EXPERIMENT_COMPLETE` and `PIPELINE_COMPLETE` under
-the result root. On failure, inspect the last pipeline stage and the immutable
-per-variant files before taking any action. Do not delete checkpoints, CAMs, or
-partial results.
+The overall queue is intentionally incomplete. Inspect the immutable
+per-variant completion markers before using results. Do not delete completed
+checkpoints, CAMs, or the preserved partial `c2p_update_off` files.
