@@ -10,6 +10,12 @@ seen earlier is resolved (580.178.04, CUDA available in `tgca-repro`).
 New queue entry point: `python -m experiments.baselines.run_default_voc_coco`.
 Current tmux: `mct-default-voc-coco-20260912-r2`.
 Output: `results/default_mctformerplus/20260912-voc-coco-s0-r2`.
+Verified live at 2026-09-12 17:19 JST: both smoke training/CAM/evaluation
+pipelines passed; full VOC epoch 0 is active with finite losses and normal GPU
+utilization. COCO full training is pending behind VOC training + raw CAM eval.
+Execution code SHA: `eba5069` (full SHA in output `manifest.json`).
+Queue log: `results/default_mctformerplus/20260912-voc-coco-s0-r2.queue.log`.
+Training log: `<output>/VOC12/train.log`; later `<output>/COCO/train.log`.
 The first attempt (same path without `-r2`, code `f759165`) passed both
 smoke trainings and VOC CAM evaluation, then stopped at COCO CAM checkpoint
 resolution: an old validator hardcoded 20 class tokens. Its logs/checkpoints
