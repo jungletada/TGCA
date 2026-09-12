@@ -57,7 +57,7 @@ def threshold_grid(start, stop, step):
     return np.round(values, decimals=10)
 
 
-def load_cam_winner(path, empty_spatial_shape=None):
+def load_cam_winner(path, empty_spatial_shape=None, num_classes=NUM_CLASSES):
     payload = np.load(path, allow_pickle=True).item()
     if not isinstance(payload, dict):
         raise ValueError(f'Expected a CAM dictionary: {path}')
@@ -80,8 +80,8 @@ def load_cam_winner(path, empty_spatial_shape=None):
     class_ids = np.asarray([int(key) + 1 for key, _ in items], dtype=np.int64)
     if len(np.unique(class_ids)) != len(class_ids):
         raise ValueError(f'Duplicate CAM class IDs: {path}')
-    if np.any((class_ids < 1) | (class_ids >= NUM_CLASSES)):
-        raise ValueError(f'CAM class ID outside VOC range: {path}')
+    if np.any((class_ids < 1) | (class_ids >= num_classes)):
+        raise ValueError(f'CAM class ID outside dataset range: {path}')
     cams = np.stack([np.asarray(value, dtype=np.float32) for _, value in items])
     if cams.ndim != 3 or not np.isfinite(cams).all():
         raise ValueError(f'Invalid CAM array in {path}: {cams.shape}')
@@ -91,7 +91,8 @@ def load_cam_winner(path, empty_spatial_shape=None):
     return scores, classes
 
 
-def image_threshold_confusions(scores, classes, target, thresholds):
+def image_threshold_confusions(scores, classes, target, thresholds,
+                               num_classes=NUM_CLASSES):
     if scores.shape != classes.shape or scores.shape != target.shape:
         raise ValueError(
             f'CAM/target shape mismatch: {scores.shape}, {target.shape}'
@@ -100,23 +101,25 @@ def image_threshold_confusions(scores, classes, target, thresholds):
     target = target[valid].astype(np.int64, copy=False)
     scores = scores[valid]
     classes = classes[valid]
-    if np.any((target < 0) | (target >= NUM_CLASSES)):
-        raise ValueError('VOC target contains an invalid non-void label')
+    if np.any((target < 0) | (target >= num_classes)):
+        raise ValueError('Target contains an invalid non-void label')
+    if np.any((classes < 1) | (classes >= num_classes)):
+        raise ValueError('Invalid foreground prediction label')
     # k is the count of thresholds strictly below the score.  Therefore a
     # pixel is foreground at grid index i exactly when k > i, matching score>t.
     passed_count = np.searchsorted(thresholds, scores, side='left')
-    pair = target * (NUM_CLASSES - 1) + (classes - 1)
+    pair = target * (num_classes - 1) + (classes - 1)
     width = len(thresholds) + 1
     histogram = np.bincount(
         pair * width + passed_count,
-        minlength=NUM_CLASSES * (NUM_CLASSES - 1) * width,
-    ).reshape(NUM_CLASSES, NUM_CLASSES - 1, width)
+        minlength=num_classes * (num_classes - 1) * width,
+    ).reshape(num_classes, num_classes - 1, width)
     foreground = np.cumsum(histogram[..., ::-1], axis=-1)[..., ::-1][..., 1:]
     confusion = np.zeros(
-        (len(thresholds), NUM_CLASSES, NUM_CLASSES), dtype=np.int32
+        (len(thresholds), num_classes, num_classes), dtype=np.int32
     )
     confusion[:, :, 1:] = foreground.transpose(2, 0, 1).astype(np.int32)
-    target_counts = np.bincount(target, minlength=NUM_CLASSES)
+    target_counts = np.bincount(target, minlength=num_classes)
     confusion[:, :, 0] = (
         target_counts[None] - confusion[:, :, 1:].sum(axis=2)
     ).astype(np.int32)

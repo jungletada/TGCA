@@ -1,5 +1,39 @@
 # TGCA Operational Handoff
 
+## 2026-09-12 fresh default VOC / COCO task
+
+The user explicitly requested fresh default MCTformer+ training on both VOC
+and COCO, stopping at raw CAM evaluation. This is NOT a restart of the stopped
+decoupled queue below. Live main started at `f120611`; the GPU driver mismatch
+seen earlier is resolved (580.178.04, CUDA available in `tgca-repro`).
+
+New queue entry point: `python -m experiments.baselines.run_default_voc_coco`.
+Planned tmux: `mct-default-voc-coco-20260912`.
+Output: `results/default_mctformerplus/20260912-voc-coco-s0`.
+Launch only once; inspect this directory and tmux before doing anything else.
+Both dataset smokes precede full VOC, then full COCO. Training uses the existing
+MCTformer+ baseline recipe (not legacy `mcta` COCO script): Small, vanilla joint
+attention, no experimental flags, 448, seed 0, batch 32, 45 epochs, nominal LR
+5e-4, min LR 1e-5, AdamW/cosine and remaining original settings. Native LR batch
+scaling is unchanged. Initialization is the DeiT-S file recorded below.
+Training lists: VOC train_aug 10,582 / val 1,449; COCO train2014 82,783 /
+val2014 40,504. All listed images/labels and CAM evaluation masks passed a
+read-only existence audit. Raw CAM evaluation: final checkpoint, train split
+(VOC 1,464; COCO 82,783), native scales 1,.75,1.25 and image-level label gating.
+Threshold grid 0.00:0.01:0.59, fixed 0.45; global confusion accumulation includes
+empty CAM predictions. No CRF/refinement/segmentation stages.
+
+Tests: `python -m pytest -q tests/test_raw_cam_streaming.py tests/test_width_scaling_aggregation.py`
+passed (7 tests). Queue repeats and saves these tests. Exact commands, environment
+manifests, dataset hashes, code SHA, optimizer specs, logs and checkpoint hashes
+are written under the new output. Final compact files: `cam_summary.csv`,
+`RAW_CAM_REPORT.md`, and each dataset's `raw_cam/metrics.json` and
+`raw_cam/threshold_curve.csv`. `QUEUE_COMPLETE` means both full runs finished;
+`QUEUE_FAILED` means inspect logs. These full results do not exist yet at setup.
+
+The historical state below is retained for provenance and is superseded by this
+section for the current task.
+
 Updated: 2026-09-09 21:13 JST
 
 This file was absent at the start of the current task and was created to restore
