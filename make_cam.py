@@ -464,7 +464,7 @@ if __name__ == '__main__':
     variant_resolution = None
     if args.model.lower() in mctformerplus_names:
         variant_resolution = resolve_mctformerplus_checkpoint_variant(
-            checkpoint, args.model
+            checkpoint, args.model, num_classes=args.num_classes
         )
         validate_mctformerplus_final_norm_checkpoint(
             checkpoint, bool(args.final_norm), bool(args.patch_final_norm),

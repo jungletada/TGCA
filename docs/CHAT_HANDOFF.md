@@ -8,8 +8,13 @@ decoupled queue below. Live main started at `f120611`; the GPU driver mismatch
 seen earlier is resolved (580.178.04, CUDA available in `tgca-repro`).
 
 New queue entry point: `python -m experiments.baselines.run_default_voc_coco`.
-Planned tmux: `mct-default-voc-coco-20260912`.
-Output: `results/default_mctformerplus/20260912-voc-coco-s0`.
+Current tmux: `mct-default-voc-coco-20260912-r2`.
+Output: `results/default_mctformerplus/20260912-voc-coco-s0-r2`.
+The first attempt (same path without `-r2`, code `f759165`) passed both
+smoke trainings and VOC CAM evaluation, then stopped at COCO CAM checkpoint
+resolution: an old validator hardcoded 20 class tokens. Its logs/checkpoints
+remain untouched. The follow-up fix passes the actual dataset class count
+into that validator; it does not change model computation or training.
 Launch only once; inspect this directory and tmux before doing anything else.
 Both dataset smokes precede full VOC, then full COCO. Training uses the existing
 MCTformer+ baseline recipe (not legacy `mcta` COCO script): Small, vanilla joint
@@ -23,8 +28,9 @@ read-only existence audit. Raw CAM evaluation: final checkpoint, train split
 Threshold grid 0.00:0.01:0.59, fixed 0.45; global confusion accumulation includes
 empty CAM predictions. No CRF/refinement/segmentation stages.
 
-Tests: `python -m pytest -q tests/test_raw_cam_streaming.py tests/test_width_scaling_aggregation.py`
-passed (7 tests). Queue repeats and saves these tests. Exact commands, environment
+Tests: `python -m pytest -q tests/test_raw_cam_streaming.py tests/test_width_scaling_aggregation.py tests/test_mctformerplus_variants.py`
+passed after the class-count fix (29 tests).
+Queue repeats and saves these tests. Exact commands, environment
 manifests, dataset hashes, code SHA, optimizer specs, logs and checkpoint hashes
 are written under the new output. Final compact files: `cam_summary.csv`,
 `RAW_CAM_REPORT.md`, and each dataset's `raw_cam/metrics.json` and

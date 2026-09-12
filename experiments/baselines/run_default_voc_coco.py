@@ -123,7 +123,8 @@ def main():
     run([sys.executable, '-m', 'pip', 'freeze'], args.output, 'pip_freeze')
     run(['/home/peng/anaconda3/bin/conda', 'list', '-n', 'tgca-repro', '--explicit'], args.output, 'conda_explicit')
     run([sys.executable, '-m', 'pytest', '-q', 'tests/test_raw_cam_streaming.py',
-         'tests/test_width_scaling_aggregation.py'], args.output, 'tests')
+         'tests/test_width_scaling_aggregation.py', 'tests/test_mctformerplus_variants.py'],
+        args.output, 'tests')
     try:
         for spec in specs:
             experiment(spec, args.output / (spec['name'] + '_smoke'), True)

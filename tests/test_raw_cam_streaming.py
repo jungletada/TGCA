@@ -5,6 +5,20 @@ from tools.evaluate_cam_threshold_grid import image_threshold_confusions, load_c
 from tools.evaluate_raw_cam_streaming import evaluate
 
 
+@pytest.mark.parametrize('n', [20, 80])
+def test_cam_checkpoint_resolution_uses_dataset_class_count(n):
+    from models.mctformer_plus import (
+        build_mctformerplus, model_spec_from_instance,
+        resolve_mctformerplus_checkpoint_variant,
+    )
+    model = build_mctformerplus('small', num_classes=n, input_size=224)
+    payload = {'model': model.state_dict(), 'model_spec': model_spec_from_instance(model)}
+    result = resolve_mctformerplus_checkpoint_variant(payload, 'mctformerplus', n)
+    assert result['state_architecture']['class_token_count'] == n
+    with pytest.raises(ValueError, match='architecture mismatch'):
+        resolve_mctformerplus_checkpoint_variant(payload, 'mctformerplus', 100-n)
+
+
 @pytest.mark.parametrize('n', [21, 81])
 def test_confusions_match_direct_with_ties_and_void(n):
     rng = np.random.default_rng(5)

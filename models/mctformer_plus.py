@@ -2034,7 +2034,7 @@ def _state_architecture(state):
     }
 
 
-def resolve_mctformerplus_checkpoint_variant(checkpoint, model_name):
+def resolve_mctformerplus_checkpoint_variant(checkpoint, model_name, num_classes=20):
     """Validate CLI/checkpoint architecture and return import provenance.
 
     A checkpoint without ``model_spec`` is accepted only for the canonical
@@ -2082,13 +2082,13 @@ def resolve_mctformerplus_checkpoint_variant(checkpoint, model_name):
         'depth': spec['depth'],
         'block_indices': list(range(spec['depth'])),
         'patch_size': [spec['patch_size'], spec['patch_size']],
-        'class_token_count': 20,
+        'class_token_count': num_classes,
         'qkv_shape': [3 * spec['embed_dim'], spec['embed_dim']],
         'class_token_init': observed_class_token_init,
         'class_token_initializer_shape': (
-            [20, spec['embed_dim']]
+            [num_classes, spec['embed_dim']]
             if observed_class_token_init in {'cwp', 'residual_cwp'}
-            else [1, 20, spec['embed_dim']]
+            else [1, num_classes, spec['embed_dim']]
         ),
     }
     mismatches = {
