@@ -30,6 +30,7 @@ from models.mctformer_plus import (
     validate_mctformerplus_decoupled_variant_checkpoint,
     validate_mctformerplus_final_norm_checkpoint,
     validate_mctformerplus_token_interaction_checkpoint,
+    validate_mctformerplus_patch_first_checkpoint,
 )
 
 
@@ -43,6 +44,7 @@ def get_args_parser():
     parser.add_argument('--model', default='mctformer', type=str, metavar='MODEL',
                         help='Name of model to train')
     parser.add_argument('--checkpoint', default='', help='checkpoint for generating maps')
+    parser.add_argument('--patch-first', action='store_true')
     parser.add_argument('--input_size', default=448, type=int, help='images input size')
     parser.add_argument('--min_size', default=448, type=int, help='images input size')
     parser.add_argument(
@@ -466,6 +468,7 @@ if __name__ == '__main__':
         variant_resolution = resolve_mctformerplus_checkpoint_variant(
             checkpoint, args.model, num_classes=args.num_classes
         )
+        validate_mctformerplus_patch_first_checkpoint(checkpoint, args.patch_first)
         validate_mctformerplus_final_norm_checkpoint(
             checkpoint, bool(args.final_norm), bool(args.patch_final_norm),
             bool(args.last_mct), bool(args.class_stable_last),
@@ -485,6 +488,8 @@ if __name__ == '__main__':
             'FinalLN, LaST, and class-token initialization flags are '
             'supported only by MCTformer+'
         )
+    elif args.patch_first:
+        raise ValueError('--patch-first is supported only by MCTformer+')
     elif args.token_interaction != 'joint':
         raise ValueError('--token-interaction is supported only by MCTformer+')
     elif args.decoupled_variant != 'full':

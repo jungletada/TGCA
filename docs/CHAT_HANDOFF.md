@@ -1,5 +1,40 @@
 # TGCA Operational Handoff
 
+## 2026-09-13 patch-first order ablation
+
+User requested exchanging concatenation order only, keeping everything else
+unchanged. Plan: `docs/MCTformerPlus_Patch_First_Ablation.md`.
+Entry point: `python -m experiments.ablations.run_patch_first --output results/patch_first/20260913-voc-s0`.
+Tmux name reserved: `mct-patch-first-voc-20260913`.
+One VOC seed-0 run is planned (COCO is not queued); exact completed default VOC
+baseline settings, 45 epochs, 448, batch 32, DeiT-S, nominal LR 5e-4/min 1e-5.
+Only new argument: `--patch-first`. All blocks see [patch,class]; CCT takes raw
+tail class tokens. Semantic readout and CAM attention indices are restored
+outside the blocks; original head/loss/CAM formulas are unchanged. Positions
+follow tokens, so this is a permutation-equivalent control in exact arithmetic.
+Tests precede smoke; smoke precedes full training and original raw CAM eval.
+Queue never overwrites existing files. Do not relaunch if tmux/output exists.
+Output `manifest.json` records actual code SHA; `commands.sh` and stage logs
+reside in each run. Results will be `comparison.csv` and `PATCH_FIRST_REPORT.md`.
+The unrelated existing results and checkpoints remain untouched.
+
+## 2026-09-13 completion verified
+
+The fresh default VOC / COCO queue below completed at 2026-09-13 13:11:42
+JST (`QUEUE_COMPLETE`). Both 45-epoch runs, native CAM generation and raw CAM
+evaluation have completed. No experiment tmux or GPU process remains active.
+Read-only verification at 20:14 JST confirmed checkpoint SHA256 matches for
+both datasets and exact CAM coverage: VOC 1,464 / COCO 82,783, no missing or
+extra image files. Tests: 29 passed. Execution SHA remains `eba5069`.
+
+Raw CAM train-split mIoU: VOC fixed 0.45 = 70.063%, best 0.48 = 70.340%;
+COCO fixed 0.45 = 42.667%, best 0.44 = 42.688%. These are native three-scale
+CAMs with image-level label gating, not validation-split or segmentation-model
+results. No CRF or downstream segmentation was run. Compact results are in
+`results/default_mctformerplus/20260912-voc-coco-s0-r2/RAW_CAM_REPORT.md` and
+`cam_summary.csv`; each dataset has `raw_cam/metrics.json` and the complete
+`raw_cam/threshold_curve.csv`. Do not restart the completed queue.
+
 ## 2026-09-12 fresh default VOC / COCO task
 
 The user explicitly requested fresh default MCTformer+ training on both VOC

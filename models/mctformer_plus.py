@@ -478,9 +478,17 @@ class MCTformerPlus(VisionTransformer):
             patch_final_norm=False, last_mct=False, class_stable_last=False,
             last_topk=1, last_sigma=None, last_eps=1e-6,
             class_token_init='baseline', token_interaction='joint',
-            decoupled_variant='full',
+            decoupled_variant='full', patch_first=False,
             *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.patch_first = bool(patch_first)
+        if self.patch_first and (
+                token_interaction != 'joint' or class_token_init != 'baseline'
+                or self.attention_normalization != 'vanilla'
+                or bcss_variant != 'e0' or psl_variant != 'baseline'
+                or cti_bgt or final_norm or patch_final_norm
+                or last_mct or class_stable_last):
+            raise ValueError('patch_first requires the unmodified vanilla MCTformer+ baseline')
         self.token_interaction = str(token_interaction).strip().lower()
         if self.token_interaction not in TOKEN_INTERACTION_MODES:
             raise ValueError(
@@ -1060,6 +1068,8 @@ class MCTformerPlus(VisionTransformer):
             bg = self.bg_token.expand(B, -1, -1) + self.pos_embed_bg
             cls_tokens = torch.cat((bg, cls_tokens), dim=1)
         token_parts = [cls_tokens, x]
+        if self.patch_first:
+            token_parts = [x, cls_tokens]
         if self.bcss_spec.backbone_register:
             register = self.register_token.expand(B, -1, -1) + self.pos_embed_register
             token_parts.append(register)
@@ -1074,7 +1084,14 @@ class MCTformerPlus(VisionTransformer):
         for i, blk in enumerate(self.blocks):
             x, weights_i = blk(x)
             attn_weights.append(weights_i)
-            all_x_cls.append(x[:, self._foreground_slice()])
+            all_x_cls.append(
+                x[:, patch_count:] if self.patch_first
+                else x[:, self._foreground_slice()])
+
+        if self.patch_first:
+            # Only canonicalize the readout, AFTER all 12 blocks. Every block
+            # operates on [patch, class]; downstream heads retain [class, patch].
+            x = torch.cat((x[:, patch_count:], x[:, :patch_count]), dim=1)
             
         # MCTformer+-FinalLN changes only the readout of the complete final
         # token sequence. Per-block class tokens above intentionally remain
@@ -1311,6 +1328,14 @@ class MCTformerPlusCam(MCTformerPlus):
     def _stack_attention_records(self, attention_records):
         if self.token_interaction == 'joint':
             head_attention = torch.stack(attention_records)
+            if self.patch_first:
+                # Records follow the actual [patch, class] block layout. Map
+                # both axes back for the unchanged native C2P / P2P CAM code.
+                count = head_attention.shape[-1] - self.num_classes
+                order = torch.cat((
+                    torch.arange(count, count + self.num_classes, device=head_attention.device),
+                    torch.arange(count, device=head_attention.device)))
+                head_attention = head_attention.index_select(-2, order).index_select(-1, order)
             return head_attention, head_attention.mean(dim=2)
         if not attention_records:
             raise ValueError('Decoupled attention records cannot be empty')
@@ -1690,7 +1715,14 @@ def model_spec_from_instance(model):
         'class_token_init': model.class_token_init,
         'token_interaction': model.token_interaction,
         'decoupled_variant': model.decoupled_variant,
+        'patch_first': model.patch_first,
     }
+
+
+def validate_mctformerplus_patch_first_checkpoint(checkpoint, expected):
+    observed = checkpoint.get('model_spec', {}).get('patch_first', False)
+    if not isinstance(observed, bool) or observed != bool(expected):
+        raise ValueError(f'Checkpoint patch_first={observed!r} does not match CLI {expected!r}')
 
 
 def _checkpoint_state_dict(checkpoint):

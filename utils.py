@@ -208,6 +208,7 @@ def create_cam_model(args):
             class_token_init=getattr(args, 'class_token_init', 'baseline'),
             token_interaction=getattr(args, 'token_interaction', 'joint'),
             decoupled_variant=getattr(args, 'decoupled_variant', 'full'),
+            patch_first=getattr(args, 'patch_first', False),
             cti_bgt=getattr(args, 'cti_bgt', False),
             cti_bgt_weight=getattr(args, 'cti_bgt_weight', 0.1),
             cti_bgt_n_layers=getattr(args, 'cti_bgt_n_layers', 6),
