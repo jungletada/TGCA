@@ -5,8 +5,12 @@
 User requested exchanging concatenation order only, keeping everything else
 unchanged. Plan: `docs/MCTformerPlus_Patch_First_Ablation.md`.
 Entry point: `python -m experiments.ablations.run_patch_first --output results/patch_first/20260913-voc-s0`.
-Tmux name reserved: `mct-patch-first-voc-20260913`.
-One VOC seed-0 run is planned (COCO is not queued); exact completed default VOC
+Active tmux: `mct-patch-first-voc-20260913`.
+Verified 2026-09-13 20:22 JST: 32 tests passed, smoke training/CAM/evaluation
+passed, full VOC epoch 0 is running with finite losses. Code SHA `638394d`.
+Queue log: `results/patch_first/20260913-voc-s0.queue.log`.
+Training log: `results/patch_first/20260913-voc-s0/VOC12/train.log`.
+One VOC seed-0 run is active (COCO is not queued); exact completed default VOC
 baseline settings, 45 epochs, 448, batch 32, DeiT-S, nominal LR 5e-4/min 1e-5.
 Only new argument: `--patch-first`. All blocks see [patch,class]; CCT takes raw
 tail class tokens. Semantic readout and CAM attention indices are restored
