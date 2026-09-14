@@ -1,6 +1,6 @@
 # TGCA Operational Handoff
 
-## 2026-09-14 C2P product pooling two-run queue setup
+## 2026-09-14 C2P product pooling two-run queue active
 
 User requested element-wise multiplication across layers instead of mean for
 both last3 and all C2P patch pooling. Plan: `docs/MCTformerPlus_C2P_Product.md`.
@@ -15,9 +15,9 @@ Class initialization and other training settings are unchanged.
 59 relevant tests passed, including FP64 direct-product forward/backward
 equivalence, underflow/normalization, all selected layer gradients, finite AMP,
 mean/GWRP compatibility, checkpoint config and native CAM/gating parity.
-Runner (launch-ready, not yet active at this setup commit):
+Runner:
 `python -m experiments.ablations.run_c2p_product --output results/c2p_pooling/20260914-voc-product-s0`.
-Planned tmux: `mct-c2p-product-voc-20260914`.
+Active tmux: `mct-c2p-product-voc-20260914`.
 Queue log: `results/c2p_pooling/20260914-voc-product-s0.queue.log`.
 Both last3/all product smokes precede full last3_product -> all_product,
 sequentially including classification and CAM evaluation for each.
@@ -26,6 +26,19 @@ Existing GWRP and both mean controls are reused read-only, not retrained.
 Root comparison.csv/C2P_PRODUCT_REPORT.md update after each completed variant;
 QUEUE_COMPLETE means both runs finished. Check live state before any action;
 never duplicate a running queue. Existing source results/checkpoints are immutable.
+
+Verified 2026-09-14 18:44 JST: runner repeated 59 passing tests. Both product
+smokes (64 images/two batches, 448/batch32) completed training, strict checkpoint
+load, native CAM/raw evaluation and classification. Smoke checkpoint hashes
+match; layer/reduction metadata is correct and CAM remains last3 mean.
+Full last3_product is active at epoch0 past batch40/330, with finite decreasing
+losses; all_product full training is queued, NOT yet started. Code SHA `d7090fe`
+(full SHA in manifest). Optimizer specs and pretraining load reports already
+match all three existing controls exactly. Full comparison metrics are pending.
+Active log: `results/c2p_pooling/20260914-voc-product-s0/last3_product/train.log`.
+Later log: `results/c2p_pooling/20260914-voc-product-s0/all_product/train.log`.
+The original GradScaler is unchanged; the historical optimizer_updates log
+counts attempted batch boundaries, not necessarily non-skipped AMP steps.
 
 ## 2026-09-14 C2P all-layer pooling completion verified
 
