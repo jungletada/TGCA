@@ -68,6 +68,7 @@ def parse_args():
     parser.add_argument('--class-stable-last', action='store_true')
     parser.add_argument('--patch-pooling', choices=('gwrp', 'c2p'), default='gwrp')
     parser.add_argument('--c2p-pooling-layers', choices=('last3', 'all'), default='last3')
+    parser.add_argument('--c2p-pooling-reduction', choices=('mean', 'product'), default='mean')
     parser.add_argument(
         '--class-token-init', default='baseline',
         choices=('baseline', 'cwp', 'residual_cwp')
@@ -222,7 +223,7 @@ def execute(args):
 
     checkpoint = torch.load(args.checkpoint, map_location='cpu')
     validate_mctformerplus_patch_pooling_checkpoint(
-        checkpoint, args.patch_pooling, args.c2p_pooling_layers)
+        checkpoint, args.patch_pooling, args.c2p_pooling_layers, args.c2p_pooling_reduction)
     resolution = resolve_mctformerplus_checkpoint_variant(
         checkpoint, args.model
     )
@@ -271,6 +272,7 @@ def execute(args):
         decoupled_variant=args.decoupled_variant,
         patch_pooling=args.patch_pooling,
         c2p_pooling_layers=args.c2p_pooling_layers,
+        c2p_pooling_reduction=args.c2p_pooling_reduction,
     )
     state = checkpoint.get('model', checkpoint)
     incompatibility = model.load_state_dict(state, strict=True)
@@ -464,6 +466,7 @@ def execute(args):
             'patch_branch': patch_branch,
             'patch_pooling': args.patch_pooling,
             'c2p_pooling_layers': args.c2p_pooling_layers,
+            'c2p_pooling_reduction': args.c2p_pooling_reduction,
             'macro_definition': 'mean of 20 dataset-level one-vs-rest class AP values',
             'micro_definition': 'AP over flattened image-class pairs',
             'legacy_definition': 'mean AP over the 20-class vector within each image',

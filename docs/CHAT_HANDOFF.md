@@ -1,5 +1,32 @@
 # TGCA Operational Handoff
 
+## 2026-09-14 C2P product pooling two-run queue setup
+
+User requested element-wise multiplication across layers instead of mean for
+both last3 and all C2P patch pooling. Plan: `docs/MCTformerPlus_C2P_Product.md`.
+New CLI: `--c2p-pooling-reduction product` with `--patch-pooling c2p` and
+`--c2p-pooling-layers last3|all`. Default mean preserves previous checkpoints.
+Heads are averaged within each layer; layers are multiplied pointwise and
+normalized over patches. Stable implementation uses FP32 softmax(sum(log(a_l)))
+with machine-tiny log floor; no geometric root/temperature/detach/new loss.
+Raw patch logits and native CAM formulas are unchanged (CAM still last3 mean).
+Class initialization and other training settings are unchanged.
+
+59 relevant tests passed, including FP64 direct-product forward/backward
+equivalence, underflow/normalization, all selected layer gradients, finite AMP,
+mean/GWRP compatibility, checkpoint config and native CAM/gating parity.
+Runner (launch-ready, not yet active at this setup commit):
+`python -m experiments.ablations.run_c2p_product --output results/c2p_pooling/20260914-voc-product-s0`.
+Planned tmux: `mct-c2p-product-voc-20260914`.
+Queue log: `results/c2p_pooling/20260914-voc-product-s0.queue.log`.
+Both last3/all product smokes precede full last3_product -> all_product,
+sequentially including classification and CAM evaluation for each.
+Each is a fresh matched seed0 DeiT-S / VOC / 45 epochs / 448 / batch32 run.
+Existing GWRP and both mean controls are reused read-only, not retrained.
+Root comparison.csv/C2P_PRODUCT_REPORT.md update after each completed variant;
+QUEUE_COMPLETE means both runs finished. Check live state before any action;
+never duplicate a running queue. Existing source results/checkpoints are immutable.
+
 ## 2026-09-14 C2P all-layer pooling completion verified
 
 The all-layer queue completed at 2026-09-14 18:07:40 JST. All 45 epochs,

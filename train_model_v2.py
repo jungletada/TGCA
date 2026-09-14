@@ -54,6 +54,7 @@ def get_args_parser():
                         help='MCTformer+ concatenate [patch, class] in every block')
     parser.add_argument('--patch-pooling', choices=('gwrp', 'c2p'), default='gwrp')
     parser.add_argument('--c2p-pooling-layers', choices=('last3', 'all'), default='last3')
+    parser.add_argument('--c2p-pooling-reduction', choices=('mean', 'product'), default='mean')
     parser.add_argument(
         '--accum-iter', default=1, type=int,
         help='number of micro-batches accumulated per optimizer update')
@@ -501,6 +502,7 @@ def main(args):
             'patch_first': args.patch_first,
             'patch_pooling': args.patch_pooling,
             'c2p_pooling_layers': args.c2p_pooling_layers,
+            'c2p_pooling_reduction': args.c2p_pooling_reduction,
         }
         if is_mctformerplus else {}
     )

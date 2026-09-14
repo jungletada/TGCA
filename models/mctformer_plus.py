@@ -480,11 +480,15 @@ class MCTformerPlus(VisionTransformer):
             class_token_init='baseline', token_interaction='joint',
             decoupled_variant='full', patch_first=False, patch_pooling='gwrp',
             c2p_pooling_layers='last3',
+            c2p_pooling_reduction='mean',
             *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.patch_first = bool(patch_first)
         self.patch_pooling = patch_pooling
         self.c2p_pooling_layers = c2p_pooling_layers
+        self.c2p_pooling_reduction = c2p_pooling_reduction
+        if c2p_pooling_reduction not in {'mean', 'product'}:
+            raise ValueError('c2p_pooling_reduction must be mean or product')
         if c2p_pooling_layers not in {'last3', 'all'}:
             raise ValueError('c2p_pooling_layers must be last3 or all')
         if patch_pooling not in {'gwrp', 'c2p'}:
@@ -1202,6 +1206,13 @@ class MCTformerPlus(VisionTransformer):
         ])
         if responses.dtype in (torch.float16, torch.bfloat16):
             responses = responses.float()
+        if self.c2p_pooling_reduction == 'product':
+            # [layers, batch, heads, classes, patches]: mean heads, multiply
+            # layers, then normalize patches. Log space avoids underflow of
+            # the 12-factor product. SUM logs, not mean (no geometric root).
+            a_layers = responses.mean(dim=2)
+            log_product = a_layers.clamp_min(torch.finfo(a_layers.dtype).tiny).log().sum(dim=0)
+            return log_product.softmax(dim=-1)
         a = responses.mean(dim=(0, 2))
         return a / a.sum(dim=-1, keepdim=True).clamp_min(1e-8)
 
@@ -1761,16 +1772,21 @@ def model_spec_from_instance(model):
         'patch_first': model.patch_first,
         'patch_pooling': model.patch_pooling,
         'c2p_pooling_layers': model.c2p_pooling_layers,
+        'c2p_pooling_reduction': model.c2p_pooling_reduction,
     }
 
 
-def validate_mctformerplus_patch_pooling_checkpoint(checkpoint, expected, expected_layers='last3'):
+def validate_mctformerplus_patch_pooling_checkpoint(
+        checkpoint, expected, expected_layers='last3', expected_reduction='mean'):
     observed = checkpoint.get('model_spec', {}).get('patch_pooling', 'gwrp')
     if observed != expected:
         raise ValueError(f'Checkpoint patch_pooling={observed!r} does not match CLI {expected!r}')
     layers = checkpoint.get('model_spec', {}).get('c2p_pooling_layers', 'last3')
     if expected == 'c2p' and layers != expected_layers:
         raise ValueError(f'Checkpoint c2p_pooling_layers={layers!r} does not match CLI {expected_layers!r}')
+    reduction = checkpoint.get('model_spec', {}).get('c2p_pooling_reduction', 'mean')
+    if expected == 'c2p' and reduction != expected_reduction:
+        raise ValueError(f'Checkpoint c2p_pooling_reduction={reduction!r} does not match CLI {expected_reduction!r}')
 
 
 def validate_mctformerplus_patch_first_checkpoint(checkpoint, expected):
