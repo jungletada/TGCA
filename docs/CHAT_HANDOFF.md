@@ -1,6 +1,6 @@
 # TGCA Operational Handoff
 
-## 2026-09-14 C2P all-layer pooling experiment setup
+## 2026-09-14 C2P all-layer pooling experiment active
 
 User requested changing actual pooling from last-three to all-layer A_c2p.
 Plan: `docs/MCTformerPlus_C2P_All_Layers.md`.
@@ -12,9 +12,9 @@ still uses last3 C2P, sqrt, all-layer P2P. No additional variants or COCO run.
 Tests: 49 passed, including all-layer formula/gradients, original last3/GWRP,
 same-weight CAM parity, checkpoint selection and finite CUDA AMP backward.
 
-Launch-ready runner (not yet training at this setup checkpoint):
+Runner:
 `python -m experiments.ablations.run_c2p_all_layers --output results/c2p_pooling/20260914-voc-all-layers-s0`.
-Planned tmux: `mct-c2p-all-layers-voc-20260914`.
+Active tmux: `mct-c2p-all-layers-voc-20260914`.
 Queue log: `results/c2p_pooling/20260914-voc-all-layers-s0.queue.log`.
 Tests -> smoke train/save/load/CAM/classification -> full 45-epoch seed-0 VOC
 training -> native CAM evaluation -> two-head classification -> report.
@@ -23,6 +23,19 @@ Existing GWRP and last3 results are reused read-only, not retrained.
 Final files: `comparison.csv` (three methods), `C2P_ALL_LAYERS_REPORT.md`;
 commands/config/environment/Git SHA/source hashes and stage logs in the run root.
 Check live tmux/logs and QUEUE_COMPLETE/QUEUE_FAILED before taking any action.
+
+Verified live 2026-09-14 16:35 JST: 49 runner tests passed; smoke train (2
+updates at actual 448/batch32), checkpoint save/load, native three-scale CAM,
+raw CAM evaluation and two-head classification all completed. Full training
+started at 16:35:08, epoch 0 past update 90/330 with finite, decreasing losses.
+Execution SHA `5b2c618` (full SHA in manifest); training max allocated memory
+16,675 MiB so far. Full metrics are pending, not completed evidence.
+Read-only three-way comparison confirmed optimizer_spec and pretraining load
+reports exactly match GWRP and C2P-last3. Only model-spec difference versus
+last3 is c2p_pooling_layers=all. Source checkpoints/results are untouched.
+Training log: `results/c2p_pooling/20260914-voc-all-layers-s0/VOC12/train.log`.
+Do not duplicate or restart the running job. Queue automatically evaluates and
+writes the three-way comparison/report after full training.
 
 ## 2026-09-14 paired layer-wise GWRP/C2P attention audit completed
 
