@@ -11,12 +11,14 @@ def model(pooling='c2p', **kwargs):
                                patch_pooling=pooling, **kwargs)
 
 
-def test_weights_formula_last3_uniform_gap_and_gradients():
-    m = model()
+@pytest.mark.parametrize('layers', ['last3', 'all'])
+def test_weights_formula_last3_uniform_gap_and_gradients(layers):
+    m = model(c2p_pooling_layers=layers)
     records = [torch.rand(2, 6, 24, 24, requires_grad=True) for _ in range(12)]
     logits = torch.randn(2, 20, 2, 2, requires_grad=True)
     w = m.c2p_spatial_weights(records, 4)
-    direct = torch.stack(records[-3:]).mean((0, 2))[:, :20, 20:]
+    used = records if layers == 'all' else records[-3:]
+    direct = torch.stack(used).mean((0, 2))[:, :20, 20:]
     direct = direct / direct.sum(-1, keepdim=True).clamp_min(1e-8)
     torch.testing.assert_close(w, direct)
     torch.testing.assert_close(w.sum(-1), torch.ones(2, 20))
@@ -25,8 +27,9 @@ def test_weights_formula_last3_uniform_gap_and_gradients():
     torch.testing.assert_close(z, (direct * logits.flatten(2)).sum(-1))
     z.square().mean().backward()
     assert logits.grad is not None and logits.grad.abs().sum() > 0
-    assert all(t.grad is None for t in records[:-3])
-    assert all(t.grad is not None and t.grad.abs().sum() > 0 for t in records[-3:])
+    if layers == 'last3':
+        assert all(t.grad is None for t in records[:-3])
+    assert all(t.grad is not None and t.grad.abs().sum() > 0 for t in used)
     uniform = [torch.ones_like(t) for t in records]
     torch.testing.assert_close(m.c2p_pool(logits, uniform), logits.mean((2, 3)))
 
@@ -54,8 +57,9 @@ def test_initialization_untouched_and_gwrp_exact(initializer):
         torch.testing.assert_close(out[1], torch.stack(raw), rtol=0, atol=0)
 
 
-def test_actual_training_attention_and_no_sort(monkeypatch):
-    m = model().train()
+@pytest.mark.parametrize('layers', ['last3', 'all'])
+def test_actual_training_attention_and_no_sort(monkeypatch, layers):
+    m = model(c2p_pooling_layers=layers).train()
     records = []
     def save(module, args, output):
         output[1].retain_grad()
@@ -68,26 +72,29 @@ def test_actual_training_attention_and_no_sort(monkeypatch):
     out = m(torch.randn(2, 3, 32, 32))
     out[2].square().mean().backward()
     assert m.head.weight.grad.abs().sum() > 0
-    for attention in records[-3:]:
+    for attention in (records if layers == 'all' else records[-3:]):
         assert attention.grad is not None
         assert attention.grad[:, :, :20, 20:].abs().sum() > 0
     for h in handles:
         h.remove()
 
 
-def test_checkpoint_and_native_cam_unchanged(tmp_path):
+@pytest.mark.parametrize('layers', ['last3', 'all'])
+def test_checkpoint_and_native_cam_unchanged(tmp_path, layers):
     a = model('gwrp', cam=True).eval()
-    b = model('c2p', cam=True).eval()
+    b = model('c2p', cam=True, c2p_pooling_layers=layers).eval()
     b.load_state_dict(a.state_dict(), strict=True)
     payload = {'model': b.state_dict(), 'model_spec': model_spec_from_instance(b)}
     path = tmp_path / 'checkpoint.pth'
     torch.save(payload, path)
     loaded = torch.load(path)
-    validate_mctformerplus_patch_pooling_checkpoint(loaded, 'c2p')
+    validate_mctformerplus_patch_pooling_checkpoint(loaded, 'c2p', layers)
+    with pytest.raises(ValueError, match='c2p_pooling_layers'):
+        validate_mctformerplus_patch_pooling_checkpoint(loaded, 'c2p', 'all' if layers == 'last3' else 'last3')
     validate_mctformerplus_patch_pooling_checkpoint({}, 'gwrp')
     with pytest.raises(ValueError, match='patch_pooling'):
         validate_mctformerplus_patch_pooling_checkpoint(loaded, 'gwrp')
-    classifier = model().eval()
+    classifier = model(c2p_pooling_layers=layers).eval()
     classifier.load_state_dict(loaded['model'], strict=True)
     x = torch.randn(2, 3, 32, 32)
     torch.testing.assert_close(a(x), b(x), rtol=0, atol=0)
@@ -99,11 +106,38 @@ def test_checkpoint_and_native_cam_unchanged(tmp_path):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA required')
-def test_amp_finite():
-    m = model().cuda().train()
+@pytest.mark.parametrize('layers', ['last3', 'all'])
+def test_amp_finite(layers):
+    m = model(c2p_pooling_layers=layers).cuda().train()
     with torch.autocast('cuda', dtype=torch.float16):
         out = m(torch.randn(2, 3, 32, 32, device='cuda'))
         loss = out[2].square().mean()
     loss.backward()
     assert torch.isfinite(loss)
     assert all(torch.isfinite(p.grad).all() for p in m.parameters() if p.grad is not None)
+
+
+def test_old_checkpoint_last3_default_and_unchanged_initialization():
+    validate_mctformerplus_patch_pooling_checkpoint({'model_spec': {'patch_pooling': 'c2p'}}, 'c2p')
+    torch.manual_seed(7)
+    a = model().eval()
+    torch.manual_seed(7)
+    b = model(c2p_pooling_layers='all').eval()
+    for k in a.state_dict():
+        torch.testing.assert_close(a.state_dict()[k], b.state_dict()[k], rtol=0, atol=0)
+    x = torch.randn(2, 3, 32, 32)
+    with torch.no_grad():
+        old, new = a(x), b(x)
+    torch.testing.assert_close(old[0], new[0], rtol=0, atol=0)
+    torch.testing.assert_close(old[1], new[1], rtol=0, atol=0)
+    assert not torch.allclose(old[2], new[2])
+
+
+def test_average_raw_attention_before_conditionalizing():
+    m = model(c2p_pooling_layers='all')
+    records = [torch.ones(1, 6, 24, 24) for _ in range(12)]
+    # Unequal layer patch mass: averaging conditional maps would be incorrect.
+    records[0][:, :, :20, 20:] = torch.tensor([90., 10., 0., 0.])
+    w = m.c2p_spatial_weights(records, 4)
+    reference = torch.tensor([101., 21., 11., 11.]) / 144
+    torch.testing.assert_close(w, reference.expand(1, 20, 4))

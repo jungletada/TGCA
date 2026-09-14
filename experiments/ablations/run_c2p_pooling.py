@@ -14,12 +14,13 @@ from experiments.baselines.run_default_voc_coco import (
 from tools.evaluate_cam_threshold_grid import sha256_file
 
 
-def classification(checkpoint, output, spec, pooling, stage, limit=0):
+def classification(checkpoint, output, spec, pooling, stage, limit=0, c2p_pooling_layers='last3'):
     run([sys.executable, '-u', 'tools/evaluate_mctformerplus_classification.py',
          '--checkpoint', checkpoint, '--model', 'mctformerplus',
          '--voc-root', spec['root'], '--list-path', spec['val'],
          '--input-size', '448', '--batch-size', '16', '--num-workers', '8',
          '--patch-pooling', pooling, '--bootstrap-resamples', '0',
+         '--c2p-pooling-layers', c2p_pooling_layers,
          '--limit', str(limit), '--output-dir', output / stage], output, stage)
 
 

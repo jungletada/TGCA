@@ -1,5 +1,29 @@
 # TGCA Operational Handoff
 
+## 2026-09-14 C2P all-layer pooling experiment setup
+
+User requested changing actual pooling from last-three to all-layer A_c2p.
+Plan: `docs/MCTformerPlus_C2P_All_Layers.md`.
+CLI: `--patch-pooling c2p --c2p-pooling-layers all`.
+Raw attention is averaged over all 12 layers and 6 heads BEFORE patch-key
+normalization. Existing last3 default/checkpoints are preserved. No initializer,
+class/CCT branch, loss, optimizer, schedule or CAM formula changes. Native CAM
+still uses last3 C2P, sqrt, all-layer P2P. No additional variants or COCO run.
+Tests: 49 passed, including all-layer formula/gradients, original last3/GWRP,
+same-weight CAM parity, checkpoint selection and finite CUDA AMP backward.
+
+Launch-ready runner (not yet training at this setup checkpoint):
+`python -m experiments.ablations.run_c2p_all_layers --output results/c2p_pooling/20260914-voc-all-layers-s0`.
+Planned tmux: `mct-c2p-all-layers-voc-20260914`.
+Queue log: `results/c2p_pooling/20260914-voc-all-layers-s0.queue.log`.
+Tests -> smoke train/save/load/CAM/classification -> full 45-epoch seed-0 VOC
+training -> native CAM evaluation -> two-head classification -> report.
+Same 448/batch32/DeiT-S/AdamW/cosine/nominal5e-4/min1e-5 recipe as C2P-last3.
+Existing GWRP and last3 results are reused read-only, not retrained.
+Final files: `comparison.csv` (three methods), `C2P_ALL_LAYERS_REPORT.md`;
+commands/config/environment/Git SHA/source hashes and stage logs in the run root.
+Check live tmux/logs and QUEUE_COMPLETE/QUEUE_FAILED before taking any action.
+
 ## 2026-09-14 paired layer-wise GWRP/C2P attention audit completed
 
 Read-only frozen FP32 evaluation: all 1,449 VOC val images, deterministic

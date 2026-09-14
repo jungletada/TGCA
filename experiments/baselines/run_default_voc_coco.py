@@ -63,7 +63,8 @@ def audit(spec):
     return report
 
 
-def experiment(spec, directory, smoke, patch_first=False, patch_pooling='gwrp'):
+def experiment(spec, directory, smoke, patch_first=False, patch_pooling='gwrp',
+               c2p_pooling_layers='last3'):
     directory.mkdir(exist_ok=False)
     train, val, cam = [spec[k] for k in ('train', 'val', 'cam')]
     if smoke:
@@ -83,6 +84,8 @@ def experiment(spec, directory, smoke, patch_first=False, patch_pooling='gwrp'):
         common.append('--patch-first')
     if patch_pooling != 'gwrp':
         common.extend(['--patch-pooling', patch_pooling])
+    if c2p_pooling_layers != 'last3':
+        common.extend(['--c2p-pooling-layers', c2p_pooling_layers])
     run([sys.executable, '-u', 'train_model_v2.py', *common,
          '--train_list', train, '--val_list', val, '--input-size', '448',
          '--epochs', '1' if smoke else '45', '--batch_size', '32',

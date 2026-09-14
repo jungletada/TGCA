@@ -479,10 +479,14 @@ class MCTformerPlus(VisionTransformer):
             last_topk=1, last_sigma=None, last_eps=1e-6,
             class_token_init='baseline', token_interaction='joint',
             decoupled_variant='full', patch_first=False, patch_pooling='gwrp',
+            c2p_pooling_layers='last3',
             *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.patch_first = bool(patch_first)
         self.patch_pooling = patch_pooling
+        self.c2p_pooling_layers = c2p_pooling_layers
+        if c2p_pooling_layers not in {'last3', 'all'}:
+            raise ValueError('c2p_pooling_layers must be last3 or all')
         if patch_pooling not in {'gwrp', 'c2p'}:
             raise ValueError('patch_pooling must be gwrp or c2p')
         if patch_pooling == 'c2p' and (
@@ -1179,19 +1183,22 @@ class MCTformerPlus(VisionTransformer):
         return x_patch_logits
 
     def c2p_spatial_weights(self, attention_records, patch_count):
-        """Actual last-three block attention; no detach or CAM helper.
+        """Actual block attention for patch pooling; no detach or CAM helper.
 
         Slice before stacking to avoid copying full NxN attention matrices.
         Pooling accumulation uses float32 under AMP (1e-8 underflows in FP16).
+        Layer selection does not change the native last-three CAM refinement.
         """
         if self.patch_first:
             class_slice, patch_slice = slice(patch_count, None), slice(0, patch_count)
         else:
             class_slice = self._foreground_slice()
             patch_slice = self._patch_slice(patch_count)
+        pooling_records = (attention_records if self.c2p_pooling_layers == 'all'
+                           else attention_records[-3:])
         responses = torch.stack([
             attention[:, :, class_slice, patch_slice]
-            for attention in attention_records[-3:]
+            for attention in pooling_records
         ])
         if responses.dtype in (torch.float16, torch.bfloat16):
             responses = responses.float()
@@ -1753,13 +1760,17 @@ def model_spec_from_instance(model):
         'decoupled_variant': model.decoupled_variant,
         'patch_first': model.patch_first,
         'patch_pooling': model.patch_pooling,
+        'c2p_pooling_layers': model.c2p_pooling_layers,
     }
 
 
-def validate_mctformerplus_patch_pooling_checkpoint(checkpoint, expected):
+def validate_mctformerplus_patch_pooling_checkpoint(checkpoint, expected, expected_layers='last3'):
     observed = checkpoint.get('model_spec', {}).get('patch_pooling', 'gwrp')
     if observed != expected:
         raise ValueError(f'Checkpoint patch_pooling={observed!r} does not match CLI {expected!r}')
+    layers = checkpoint.get('model_spec', {}).get('c2p_pooling_layers', 'last3')
+    if expected == 'c2p' and layers != expected_layers:
+        raise ValueError(f'Checkpoint c2p_pooling_layers={layers!r} does not match CLI {expected_layers!r}')
 
 
 def validate_mctformerplus_patch_first_checkpoint(checkpoint, expected):
