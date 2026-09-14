@@ -1,5 +1,30 @@
 # TGCA Operational Handoff
 
+## 2026-09-14 C2P all-layer pooling completion verified
+
+The all-layer queue completed at 2026-09-14 18:07:40 JST. All 45 epochs,
+native CAM generation/evaluation and two-head classification completed;
+QUEUE_COMPLETE and all stage markers exist, with no QUEUE_FAILED or active
+experiment tmux/GPU process. Execution code SHA `5b2c618`.
+Run: `results/c2p_pooling/20260914-voc-all-layers-s0`.
+
+Read-only completion audit: 49 tests passed; exactly 1464 CAM image files;
+1449 classification evaluation rows; final checkpoint SHA256 matches
+`fb8df1df2fa051b0158391df1758dcc9702168354ac0ce0b6e288ac909ae026e`.
+All source hashes still match the before/after manifest. Optimizer specs and
+pretraining load reports match both GWRP and C2P-last3 exactly.
+
+GWRP / C2P-last3 / C2P-all:
+class macro AP 92.9063 / 93.0787 / 93.1194%; patch macro AP
+93.2577 / 93.3819 / 93.4894%. Raw train CAM mIoU at fixed .45:
+70.0631 / 72.0397 / 72.0840%; best-grid 70.3397 / 72.1650 / 72.1024%
+at thresholds .48 / .43 / .44. All vs last3 fixed mIoU +0.0443 pp,
+best-grid -0.0626 pp: essentially similar point estimates, not evidence of
+an additional robust gain. This is one seed; no equivalence/significance
+claim is justified. All vs last3 FG precision -0.1785 pp, recall +0.4225 pp.
+Reports: `C2P_ALL_LAYERS_REPORT.md`, `comparison.csv`; commands under
+`commands.sh` and `VOC12/commands.sh`. No new runs launched by this status check.
+
 ## 2026-09-14 C2P all-layer pooling experiment active
 
 User requested changing actual pooling from last-three to all-layer A_c2p.
