@@ -11,7 +11,18 @@ initialization. CLI: `--patch-pooling gwrp|c2p` (default gwrp).
 
 Plan: `docs/MCTformerPlus_C2P_Pooling.md`.
 Runner: `python -m experiments.ablations.run_c2p_pooling --output results/c2p_pooling/20260914-voc-s0`.
-Reserved tmux: `mct-c2p-pooling-voc-20260914`.
+Active tmux: `mct-c2p-pooling-voc-20260914`.
+Verified 2026-09-14 10:39 JST: smoke train/checkpoint/CAM/classification passed;
+full c2p VOC epoch 0 is running with finite losses. Execution SHA `18c490e`.
+Queue log: `results/c2p_pooling/20260914-voc-s0.queue.log`.
+Full training log: `results/c2p_pooling/20260914-voc-s0/VOC12/train.log`.
+Read-only comparison confirmed identical optimizer specs and pretraining load
+reports versus the GWRP baseline. New `patch_first=False` metadata merely
+records the unchanged default; only `patch_pooling=c2p` changes computation.
+Frozen GWRP baseline classification completed: macro class-token AP 92.9063%,
+patch-head AP 93.2577%, class loss .0506326, patch loss .0497795. Its historical
+mean-image AP is 96.4100% (class) / 96.7885% (patch), a different metric.
+Full c2p classification and CAM results are pending, not completed evidence.
 Tests passed: 43 (C2P formula/GAP/gradient/GWRP parity/initializer parity,
 checkpoint/CAM, AMP, existing variants and evaluators). No model weights or
 source results overwritten. Baseline is the completed ordinary VOC GWRP run
