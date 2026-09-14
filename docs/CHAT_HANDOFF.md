@@ -1,5 +1,52 @@
 # TGCA Operational Handoff
 
+## 2026-09-14 C2P product + P2P affinity approved and implemented
+
+User approved exactly two runs from `docs/MCTformerPlus_C2P_Product_P2P_Outline.md`,
+section 3: propagate product C2P weights with all-12-layer head-mean P2P, normalize,
+then weight raw patch logits. The alternative propagate-weighted-logits is NOT selected.
+New `--c2p-pooling-affinity` defaults off; requires c2p/product. All existing
+initialization modules, class/CCT branches, patch classifier and native CAM stay unchanged.
+Training and frozen classification/gating share the same differentiable helper.
+Necessary tests: 66 passed in tgca-repro (including CUDA AMP); runner repeats and logs them.
+Command: `/home/peng/anaconda3/envs/tgca-repro/bin/python -u -m experiments.ablations.run_c2p_affinity --output results/c2p_pooling/20260914-voc-product-affinity-s0`.
+Queue will run both smokes (training/checkpoint/CAM/classification/readout audit), then
+last3-product-affinity full train/eval/audit, then all-product-affinity full train/eval/audit.
+Matched seed0/45 epochs/448/batch32/DeiT-S recipe. Five existing results read-only;
+source checkpoint/result hashes rechecked, matched model/optimizer/pretrain metadata audited.
+Compact outputs: comparison.csv, C2P_AFFINITY_REPORT.md, per-variant classification/,
+raw_cam/, weight_diagnostics/ (image-level CSV, 5000 paired bootstrap, six prespecified examples).
+Preflight: RTX A6000 idle, 48505 MiB free, disk 80 GB free; no active experiment session.
+At this implementation checkpoint the queue has NOT yet been launched.
+
+## 2026-09-14 C2P product pooling completion verified
+
+Both product variants and the queue completed at 2026-09-14 21:40:50 JST.
+Run: `results/c2p_pooling/20260914-voc-product-s0`; code SHA `d7090fe`.
+QUEUE_COMPLETE and both VARIANT_COMPLETE markers exist; no failure marker or
+active experiment tmux/GPU process. Read-only audit verified 45 epochs per
+variant, exactly 1464 CAM files and 1449 classification rows per variant,
+matching optimizer/pretraining reports, unchanged original source hashes,
+and both new final checkpoint hashes. Tests: 59 passed.
+Final SHA256 last3_product:
+`b2f125afc9b750f04979ab1065f9e712c7979d667d3fe79ec79c18abcb368fd2`;
+all_product:
+`ce7bde924fe6a1780151db6e4541eb8937b5f595078483cbbae222ba14f9ef0b`.
+
+Last3-product: class/patch macro AP 93.2205/93.3221%; fixed .45 CAM mIoU
+71.6654%, best 71.6700% at .44; fixed FG P/R 82.8805/83.5499%.
+All-product: class/patch macro AP 92.4420/92.8639%; fixed .45 CAM mIoU
+72.3154%, also best-grid at .45; fixed FG P/R 83.3181/84.6544%.
+Compared to corresponding means, fixed CAM changes are -0.3744 pp (last3)
+and +0.2315 pp (all). All-product lowers class/patch AP by .6775/.6255 pp
+versus all-mean while increasing recall by 1.0912 pp and reducing precision
+by .6281 pp. No uniform product benefit; all-product has highest observed
+fixed CAM among the five runs, but the small extra gain is single-seed only.
+Do not infer a semantic or causal mechanism from these metrics alone.
+Compact outputs: `comparison.csv`, `C2P_PRODUCT_REPORT.md`; each variant has
+`commands.sh`, `classification/`, `raw_cam/` and checkpoint_sha256.txt.
+No additional experiments were launched during this completion check.
+
 ## 2026-09-14 C2P product pooling two-run queue active
 
 User requested element-wise multiplication across layers instead of mean for

@@ -15,7 +15,7 @@ from tools.evaluate_cam_threshold_grid import sha256_file
 
 
 def classification(checkpoint, output, spec, pooling, stage, limit=0,
-                   c2p_pooling_layers='last3', c2p_pooling_reduction='mean'):
+                   c2p_pooling_layers='last3', c2p_pooling_reduction='mean', c2p_pooling_affinity=False):
     run([sys.executable, '-u', 'tools/evaluate_mctformerplus_classification.py',
          '--checkpoint', checkpoint, '--model', 'mctformerplus',
          '--voc-root', spec['root'], '--list-path', spec['val'],
@@ -23,6 +23,7 @@ def classification(checkpoint, output, spec, pooling, stage, limit=0,
          '--patch-pooling', pooling, '--bootstrap-resamples', '0',
          '--c2p-pooling-layers', c2p_pooling_layers,
          '--c2p-pooling-reduction', c2p_pooling_reduction,
+         *(['--c2p-pooling-affinity'] if c2p_pooling_affinity else []),
          '--limit', str(limit), '--output-dir', output / stage], output, stage)
 
 

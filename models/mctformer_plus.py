@@ -480,13 +480,16 @@ class MCTformerPlus(VisionTransformer):
             class_token_init='baseline', token_interaction='joint',
             decoupled_variant='full', patch_first=False, patch_pooling='gwrp',
             c2p_pooling_layers='last3',
-            c2p_pooling_reduction='mean',
+            c2p_pooling_reduction='mean', c2p_pooling_affinity=False,
             *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.patch_first = bool(patch_first)
         self.patch_pooling = patch_pooling
         self.c2p_pooling_layers = c2p_pooling_layers
         self.c2p_pooling_reduction = c2p_pooling_reduction
+        self.c2p_pooling_affinity = bool(c2p_pooling_affinity)
+        if self.c2p_pooling_affinity and (patch_pooling != 'c2p' or c2p_pooling_reduction != 'product'):
+            raise ValueError('c2p_pooling_affinity requires c2p product pooling')
         if c2p_pooling_reduction not in {'mean', 'product'}:
             raise ValueError('c2p_pooling_reduction must be mean or product')
         if c2p_pooling_layers not in {'last3', 'all'}:
@@ -1216,9 +1219,28 @@ class MCTformerPlus(VisionTransformer):
         a = responses.mean(dim=(0, 2))
         return a / a.sum(dim=-1, keepdim=True).clamp_min(1e-8)
 
+    def c2p_affinity_weights(self, weights, attention_records, patch_count):
+        """One native-direction P2P propagation of weights, not logits.
+
+        P[i,j] collects key j into query i. Sum all layers' head-mean P2P;
+        do not condition, symmetrize, or otherwise renormalize P itself.
+        Slice/reduce each layer separately to avoid a full attention stack.
+        """
+        patch_slice = slice(0, patch_count) if self.patch_first else self._patch_slice(patch_count)
+        with torch.autocast(device_type=weights.device.type, enabled=False):
+            dtype = torch.float64 if weights.dtype == torch.float64 else torch.float32
+            affinity = None
+            for attention in attention_records:
+                layer = attention[:, :, patch_slice, patch_slice].to(dtype).mean(dim=1)
+                affinity = layer if affinity is None else affinity + layer
+            propagated = torch.bmm(weights.to(dtype), affinity.transpose(-1, -2))
+            return propagated / propagated.sum(dim=-1, keepdim=True).clamp_min(1e-8)
+
     def c2p_pool(self, class_map, attention_records):
         logits = class_map.flatten(2)
         weights = self.c2p_spatial_weights(attention_records, logits.shape[-1])
+        if self.c2p_pooling_affinity:
+            weights = self.c2p_affinity_weights(weights, attention_records, logits.shape[-1])
         return (weights * logits).sum(dim=-1)
 
     def last_low_pass(self, patch_tokens):
@@ -1773,11 +1795,12 @@ def model_spec_from_instance(model):
         'patch_pooling': model.patch_pooling,
         'c2p_pooling_layers': model.c2p_pooling_layers,
         'c2p_pooling_reduction': model.c2p_pooling_reduction,
+        'c2p_pooling_affinity': model.c2p_pooling_affinity,
     }
 
 
 def validate_mctformerplus_patch_pooling_checkpoint(
-        checkpoint, expected, expected_layers='last3', expected_reduction='mean'):
+        checkpoint, expected, expected_layers='last3', expected_reduction='mean', expected_affinity=False):
     observed = checkpoint.get('model_spec', {}).get('patch_pooling', 'gwrp')
     if observed != expected:
         raise ValueError(f'Checkpoint patch_pooling={observed!r} does not match CLI {expected!r}')
@@ -1787,6 +1810,9 @@ def validate_mctformerplus_patch_pooling_checkpoint(
     reduction = checkpoint.get('model_spec', {}).get('c2p_pooling_reduction', 'mean')
     if expected == 'c2p' and reduction != expected_reduction:
         raise ValueError(f'Checkpoint c2p_pooling_reduction={reduction!r} does not match CLI {expected_reduction!r}')
+    affinity = checkpoint.get('model_spec', {}).get('c2p_pooling_affinity', False)
+    if affinity != expected_affinity:
+        raise ValueError(f'Checkpoint c2p_pooling_affinity={affinity!r} does not match CLI {expected_affinity!r}')
 
 
 def validate_mctformerplus_patch_first_checkpoint(checkpoint, expected):

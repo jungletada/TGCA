@@ -50,6 +50,7 @@ def test_registered_architecture_contract(variant):
         'patch_pooling': 'gwrp',
         'c2p_pooling_layers': 'last3',
         'c2p_pooling_reduction': 'mean',
+        'c2p_pooling_affinity': False,
     }
     assert len(model.blocks) == 12
     assert all(block.attn.num_heads == heads for block in model.blocks)

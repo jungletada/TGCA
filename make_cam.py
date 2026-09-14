@@ -49,6 +49,7 @@ def get_args_parser():
     parser.add_argument('--patch-pooling', choices=('gwrp', 'c2p'), default='gwrp')
     parser.add_argument('--c2p-pooling-layers', choices=('last3', 'all'), default='last3')
     parser.add_argument('--c2p-pooling-reduction', choices=('mean', 'product'), default='mean')
+    parser.add_argument('--c2p-pooling-affinity', action='store_true')
     parser.add_argument('--input_size', default=448, type=int, help='images input size')
     parser.add_argument('--min_size', default=448, type=int, help='images input size')
     parser.add_argument(
@@ -474,7 +475,8 @@ if __name__ == '__main__':
         )
         validate_mctformerplus_patch_first_checkpoint(checkpoint, args.patch_first)
         validate_mctformerplus_patch_pooling_checkpoint(
-            checkpoint, args.patch_pooling, args.c2p_pooling_layers, args.c2p_pooling_reduction)
+            checkpoint, args.patch_pooling, args.c2p_pooling_layers, args.c2p_pooling_reduction,
+            args.c2p_pooling_affinity)
         validate_mctformerplus_final_norm_checkpoint(
             checkpoint, bool(args.final_norm), bool(args.patch_final_norm),
             bool(args.last_mct), bool(args.class_stable_last),
