@@ -1,5 +1,51 @@
 # TGCA Operational Handoff
 
+## 2026-09-14 paired layer-wise GWRP/C2P attention audit completed
+
+Read-only frozen FP32 evaluation: all 1,449 VOC val images, deterministic
+resize-short-side 512 / center-crop 448, actual 6-head-mean A_c2p for L1-L12.
+522 multi-label images (375 two-label, 147 three-plus); class-pair statistics
+averaged within image, then equally over images. 5,000 paired image bootstrap.
+Output: `results/c2p_pooling_attention/20260914-voc-val-s0` (`COMPLETE`).
+Code commits: extraction/tests `469d2d5`, native-last3 postprocessing `020e817`.
+Tests: 5 passed. Both strict loads passed; reconstructed native-last3 spatial
+weights agree with the model helper (max absolute errors 2.98e-8 / 5.96e-8).
+Both source checkpoints and audited root metadata hashes unchanged. No model
+or training edits, no segmentation GT, no running analysis tmux left at completion.
+
+Main finding: sharing varies by layer, not a universal collapse. C2P has lower
+top10%-support Jaccard/Pearson at L10/L11 but higher at L12. L12 pair top1
+coincidence 30.98% -> 36.25%, top10% Jaccard .419 -> .551. All-positive-classes
+same top1 occurs on 26.82% -> 31.80% of multi-label images (not all images).
+Native-last3 must not be equated with L12: pair top1 8.30% -> 5.96% (paired CI
+includes zero), top10% Jaccard .255 -> .275, Pearson .450 -> .409.
+No semantic ownership or causal CAM-improvement claim is established.
+Reports: `ATTENTION_COMPARISON_REPORT.md`, `FIGURES.md`; six label-prespecified
+paired image heatmaps with all 12 layers, both raw and conditional versions.
+`layer_summary.csv`, `native_last3_summary.csv`, per-image metrics and manifests
+are compact. Positive-only raw NPZ maps are optional and excluded from download bundle.
+
+## 2026-09-14 C2P pooling completion verified
+
+The C2P pooling queue finished at 2026-09-14 12:03:11 JST. `QUEUE_COMPLETE`
+exists under `results/c2p_pooling/20260914-voc-s0`, with no failure marker or
+active experiment tmux/GPU job. Both final checkpoints' SHA256 hashes match;
+all 1,464 C2P CAM files exist without missing/extra IDs. Optimizer specs and
+pretraining load reports match the GWRP baseline. Both classification evaluations
+cover the same 1,449 VOC val images and retain `class_token_init=baseline`.
+Tests: 43 passed; execution SHA `18c490e`.
+
+GWRP -> C2P: class macro AP 92.9063 -> 93.0787%; patch macro AP 93.2577 ->
+93.3819%; class val loss .0506326 -> .0495640; patch val loss .0497795 ->
+.0489571. Raw train CAM mIoU at fixed .45: 70.0631 -> 72.0397% (+1.9767 pp).
+Best grid mIoU 70.3397% at .48 -> 72.1650% at .43 (+1.8253 pp); best-grid
+values are diagnostic, not independently selected thresholds. Fixed-threshold
+semantic FG precision 80.7353 -> 84.1247%, recall 85.8169 -> 83.1407%.
+This is a single-seed result, not evidence of statistical robustness or a
+specific semantic mechanism. No additional variants were launched.
+Compact output: `C2P_POOLING_REPORT.md`, `comparison.csv`; exact training
+command: `VOC12/commands.sh`, all relative to the result root above.
+
 ## 2026-09-14 C2P patch pooling experiment
 
 New user task: ONLY replace original patch GWRP pooling with last-three-layer,
