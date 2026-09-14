@@ -1,5 +1,25 @@
 # TGCA Operational Handoff
 
+## 2026-09-14 22:28 JST C2P affinity queue active
+
+Implementation SHA: `04aa6b870f14a807c5ffdb37c273d218cd5b9414` (local only).
+tmux: `mct-c2p-affinity-voc-20260914`, launched 22:26:57 JST.
+Run root: `results/c2p_pooling/20260914-voc-product-affinity-s0`.
+Queue log: `results/c2p_pooling/20260914-voc-product-affinity-s0.queue.log`.
+Runner's clean-checkout test repeat: **66 passed**, recorded in `tests.log`.
+Both `last3_product_affinity_smoke` and `all_product_affinity_smoke` finished
+training, checkpoint save/load, native CAM evaluation, classification and readout diagnostics.
+Smoke model specs match corresponding prior product runs except affinity=true.
+Full `last3_product_affinity` started at 22:27:38 JST; observed epoch0 step80/330,
+finite loss decreasing (running loss 4.4596), GPU peak allocation ~19065 MiB.
+Its optimizer and pretrained-load reports exactly match prior last3-product.
+`all_product_affinity` is queued after last3 train/eval/readout completion, not running yet.
+Do not restart/duplicate. The queue automatically saves classification/CAM results,
+readout bootstrap/plots, source integrity audit and C2P_AFFINITY_REPORT.md.
+Full results are **pending**, not completed; check QUEUE_COMPLETE/QUEUE_FAILED and
+per-variant VARIANT_COMPLETE before reporting final values. Current handoff-only
+commit does not change the implementation SHA recorded by the runner.
+
 ## 2026-09-14 C2P product + P2P affinity approved and implemented
 
 User approved exactly two runs from `docs/MCTformerPlus_C2P_Product_P2P_Outline.md`,
