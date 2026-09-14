@@ -478,10 +478,17 @@ class MCTformerPlus(VisionTransformer):
             patch_final_norm=False, last_mct=False, class_stable_last=False,
             last_topk=1, last_sigma=None, last_eps=1e-6,
             class_token_init='baseline', token_interaction='joint',
-            decoupled_variant='full', patch_first=False,
+            decoupled_variant='full', patch_first=False, patch_pooling='gwrp',
             *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.patch_first = bool(patch_first)
+        self.patch_pooling = patch_pooling
+        if patch_pooling not in {'gwrp', 'c2p'}:
+            raise ValueError('patch_pooling must be gwrp or c2p')
+        if patch_pooling == 'c2p' and (
+                token_interaction != 'joint' or psl_variant != 'baseline'
+                or bcss_variant != 'e0' or cti_bgt or last_mct or class_stable_last):
+            raise ValueError('c2p pooling requires joint self-attention and the original patch head')
         if self.patch_first and (
                 token_interaction != 'joint' or class_token_init != 'baseline'
                 or self.attention_normalization != 'vanilla'
@@ -1171,6 +1178,31 @@ class MCTformerPlus(VisionTransformer):
         x_patch_logits = torch.sum(sorted_patch_token * weights.unsqueeze(0).unsqueeze(-1), dim=-2) / weights.sum()
         return x_patch_logits
 
+    def c2p_spatial_weights(self, attention_records, patch_count):
+        """Actual last-three block attention; no detach or CAM helper.
+
+        Slice before stacking to avoid copying full NxN attention matrices.
+        Pooling accumulation uses float32 under AMP (1e-8 underflows in FP16).
+        """
+        if self.patch_first:
+            class_slice, patch_slice = slice(patch_count, None), slice(0, patch_count)
+        else:
+            class_slice = self._foreground_slice()
+            patch_slice = self._patch_slice(patch_count)
+        responses = torch.stack([
+            attention[:, :, class_slice, patch_slice]
+            for attention in attention_records[-3:]
+        ])
+        if responses.dtype in (torch.float16, torch.bfloat16):
+            responses = responses.float()
+        a = responses.mean(dim=(0, 2))
+        return a / a.sum(dim=-1, keepdim=True).clamp_min(1e-8)
+
+    def c2p_pool(self, class_map, attention_records):
+        logits = class_map.flatten(2)
+        weights = self.c2p_spatial_weights(attention_records, logits.shape[-1])
+        return (weights * logits).sum(dim=-1)
+
     def last_low_pass(self, patch_tokens):
         if not self.last_mct:
             raise RuntimeError('last_low_pass requires last_mct=True')
@@ -1271,6 +1303,8 @@ class MCTformerPlus(VisionTransformer):
                     patch_tokens=x_patch_tokens,
                     original_class_map=x_patch[:, self._foreground_slice()],
                 )
+            elif self.patch_pooling == 'c2p':
+                x_patch_logits = self.c2p_pool(x_patch, attentions)
             else:
                 x_patch_flattened = x_patch.view(
                     x_patch.shape[0], x_patch.shape[1], -1
@@ -1468,6 +1502,8 @@ class MCTformerPlusCam(MCTformerPlus):
         x_patch = x_patch.permute([0, 3, 1, 2]).contiguous()
         x_patch = self.head(x_patch)
 
+        if self.patch_pooling == 'c2p':
+            x_logits = self.c2p_pool(x_patch, attn_weights)
         _, attn_weights = self._stack_attention_records(attn_weights)
         if isinstance(attn_weights, Mapping):
             attn_weights = {
@@ -1485,7 +1521,7 @@ class MCTformerPlusCam(MCTformerPlus):
                 x_patch_tokens,
                 x_patch[:, self._foreground_slice()],
             )
-        elif not self.last_mct:
+        elif not self.last_mct and self.patch_pooling == 'gwrp':
             x_logits = self.gwrp(x_patch[:, self._foreground_slice()])
         patch_label = torch.ones(b, self.num_classes).to(x.device)
         patch_label[x_logits <= 0] = 0
@@ -1716,7 +1752,14 @@ def model_spec_from_instance(model):
         'token_interaction': model.token_interaction,
         'decoupled_variant': model.decoupled_variant,
         'patch_first': model.patch_first,
+        'patch_pooling': model.patch_pooling,
     }
+
+
+def validate_mctformerplus_patch_pooling_checkpoint(checkpoint, expected):
+    observed = checkpoint.get('model_spec', {}).get('patch_pooling', 'gwrp')
+    if observed != expected:
+        raise ValueError(f'Checkpoint patch_pooling={observed!r} does not match CLI {expected!r}')
 
 
 def validate_mctformerplus_patch_first_checkpoint(checkpoint, expected):

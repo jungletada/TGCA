@@ -47,6 +47,7 @@ def test_registered_architecture_contract(variant):
         'token_interaction': 'joint',
         'decoupled_variant': 'full',
         'patch_first': False,
+        'patch_pooling': 'gwrp',
     }
     assert len(model.blocks) == 12
     assert all(block.attn.num_heads == heads for block in model.blocks)

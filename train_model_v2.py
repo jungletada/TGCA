@@ -52,6 +52,7 @@ def get_args_parser():
     parser.add_argument('--batch_size', default=32, type=int)
     parser.add_argument('--patch-first', action='store_true',
                         help='MCTformer+ concatenate [patch, class] in every block')
+    parser.add_argument('--patch-pooling', choices=('gwrp', 'c2p'), default='gwrp')
     parser.add_argument(
         '--accum-iter', default=1, type=int,
         help='number of micro-batches accumulated per optimizer update')
@@ -348,6 +349,8 @@ def main(args):
     is_mctformerplus = args.model.lower() in mctformerplus_names
     if args.patch_first and not is_mctformerplus:
         raise ValueError('--patch-first requires MCTformer+')
+    if args.patch_pooling != 'gwrp' and not is_mctformerplus:
+        raise ValueError('--patch-pooling c2p requires MCTformer+')
     if (args.final_norm or args.patch_final_norm or args.last_mct
             or args.class_stable_last or args.class_token_init != 'baseline') \
             and not is_mctformerplus:
@@ -495,6 +498,7 @@ def main(args):
             'token_interaction': args.token_interaction,
             'decoupled_variant': args.decoupled_variant,
             'patch_first': args.patch_first,
+            'patch_pooling': args.patch_pooling,
         }
         if is_mctformerplus else {}
     )

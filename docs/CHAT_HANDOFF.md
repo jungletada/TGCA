@@ -1,5 +1,45 @@
 # TGCA Operational Handoff
 
+## 2026-09-14 C2P patch pooling experiment
+
+New user task: ONLY replace original patch GWRP pooling with last-three-layer,
+all-head actual Transformer C2P spatial attention pooling, preserving gradients
+and raw 3x3 classifier logits. No changes to class-token initialization code or
+configuration. Current matched default remains `class_token_init=baseline`;
+CWP/residual CWP options and parameters are untouched and tested for identical
+initialization. CLI: `--patch-pooling gwrp|c2p` (default gwrp).
+
+Plan: `docs/MCTformerPlus_C2P_Pooling.md`.
+Runner: `python -m experiments.ablations.run_c2p_pooling --output results/c2p_pooling/20260914-voc-s0`.
+Reserved tmux: `mct-c2p-pooling-voc-20260914`.
+Tests passed: 43 (C2P formula/GAP/gradient/GWRP parity/initializer parity,
+checkpoint/CAM, AMP, existing variants and evaluators). No model weights or
+source results overwritten. Baseline is the completed ordinary VOC GWRP run
+under `results/default_mctformerplus/20260912-voc-coco-s0-r2/VOC12`, NOT the
+patch-first run. Only c2p is trained, using the identical 45-epoch seed-0 recipe.
+Order: tests -> smoke train/CAM/classification -> frozen baseline classification
+-> full c2p train/CAM -> frozen c2p classification -> compact comparison/report.
+No new COCO run, refinement or segmentation. Results pending at setup.
+Final outputs: `comparison.csv`, `C2P_POOLING_REPORT.md`; exact stage commands,
+tests, environment, config and checkpoint hashes are saved under the new root.
+Both heads' classification is measured with the same frozen FP32 448 evaluator;
+training's historical mean-image AP must not be labeled macro-class AP.
+Do not duplicate a live tmux/output; inspect `QUEUE_COMPLETE`/`QUEUE_FAILED`.
+
+## 2026-09-14 patch-first completion verified
+
+The patch-first VOC queue completed at 2026-09-13 21:44:35 JST.
+`results/patch_first/20260913-voc-s0/QUEUE_COMPLETE` exists; no failure marker
+or active experiment tmux/GPU process. Read-only verification confirmed all
+1,464 CAM files (no missing/extra), final checkpoint SHA256, and optimizer
+configuration equality against the default VOC baseline. Tests: 32 passed.
+Final validation class-token mAP 96.426%; raw train CAM mIoU at .45 68.745%
+versus baseline 70.063% (-1.318 pp). Best-grid mIoU 68.901% at .47 versus
+baseline 70.340% at .48 (-1.439 pp). This single seed shows no improvement;
+it does not establish a structural order effect for a permutation-equivalent
+model. Code SHA `638394d`; reports: `PATCH_FIRST_REPORT.md`, `comparison.csv`
+under the run root. No COCO patch-first run was launched. Do not restart.
+
 ## 2026-09-13 patch-first order ablation
 
 User requested exchanging concatenation order only, keeping everything else

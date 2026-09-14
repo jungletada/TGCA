@@ -63,7 +63,7 @@ def audit(spec):
     return report
 
 
-def experiment(spec, directory, smoke, patch_first=False):
+def experiment(spec, directory, smoke, patch_first=False, patch_pooling='gwrp'):
     directory.mkdir(exist_ok=False)
     train, val, cam = [spec[k] for k in ('train', 'val', 'cam')]
     if smoke:
@@ -81,6 +81,8 @@ def experiment(spec, directory, smoke, patch_first=False):
               spec['root_flag'], spec['root'], '--work_space', directory]
     if patch_first:
         common.append('--patch-first')
+    if patch_pooling != 'gwrp':
+        common.extend(['--patch-pooling', patch_pooling])
     run([sys.executable, '-u', 'train_model_v2.py', *common,
          '--train_list', train, '--val_list', val, '--input-size', '448',
          '--epochs', '1' if smoke else '45', '--batch_size', '32',

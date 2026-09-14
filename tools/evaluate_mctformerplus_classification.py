@@ -36,6 +36,7 @@ from models.mctformer_plus import (  # noqa: E402
     validate_mctformerplus_decoupled_variant_checkpoint,
     validate_mctformerplus_final_norm_checkpoint,
     validate_mctformerplus_token_interaction_checkpoint,
+    validate_mctformerplus_patch_pooling_checkpoint,
 )
 
 
@@ -65,6 +66,7 @@ def parse_args():
     final_norm_group.add_argument('--patch-final-norm', action='store_true')
     parser.add_argument('--last-mct', action='store_true')
     parser.add_argument('--class-stable-last', action='store_true')
+    parser.add_argument('--patch-pooling', choices=('gwrp', 'c2p'), default='gwrp')
     parser.add_argument(
         '--class-token-init', default='baseline',
         choices=('baseline', 'cwp', 'residual_cwp')
@@ -218,6 +220,7 @@ def execute(args):
         raise RuntimeError('CUDA is unavailable')
 
     checkpoint = torch.load(args.checkpoint, map_location='cpu')
+    validate_mctformerplus_patch_pooling_checkpoint(checkpoint, args.patch_pooling)
     resolution = resolve_mctformerplus_checkpoint_variant(
         checkpoint, args.model
     )
@@ -264,6 +267,7 @@ def execute(args):
         class_token_init=args.class_token_init,
         token_interaction=args.token_interaction,
         decoupled_variant=args.decoupled_variant,
+        patch_pooling=args.patch_pooling,
     )
     state = checkpoint.get('model', checkpoint)
     incompatibility = model.load_state_dict(state, strict=True)
@@ -338,6 +342,8 @@ def execute(args):
             if args.class_stable_last else 'patch_gwrp'
         )
     )
+    if args.patch_pooling == 'c2p':
+        patch_branch = 'patch_c2p'
     branch_scores = {
         'class_token': class_scores,
         patch_branch: patch_scores,
@@ -453,6 +459,7 @@ def execute(args):
             'token_interaction': args.token_interaction,
             'decoupled_variant': args.decoupled_variant,
             'patch_branch': patch_branch,
+            'patch_pooling': args.patch_pooling,
             'macro_definition': 'mean of 20 dataset-level one-vs-rest class AP values',
             'micro_definition': 'AP over flattened image-class pairs',
             'legacy_definition': 'mean AP over the 20-class vector within each image',
