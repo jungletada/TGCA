@@ -59,6 +59,11 @@ def threshold_grid(start, stop, step):
 
 def load_cam_winner(path, empty_spatial_shape=None, num_classes=NUM_CLASSES):
     payload = np.load(path, allow_pickle=True).item()
+    return cam_payload_winner(payload, empty_spatial_shape, num_classes, path)
+
+
+def cam_payload_winner(payload, empty_spatial_shape=None, num_classes=NUM_CLASSES, path='<memory>'):
+    """Same winner/tie handling for native CAMs in memory or loaded from disk."""
     if not isinstance(payload, dict):
         raise ValueError(f'Expected a CAM dictionary: {path}')
     if not payload:

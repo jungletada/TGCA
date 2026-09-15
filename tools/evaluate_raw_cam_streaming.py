@@ -8,7 +8,7 @@ import numpy as np
 from PIL import Image
 
 from tools.evaluate_cam_threshold_grid import (
-    confusion_metrics, image_threshold_confusions, load_cam_winner,
+    confusion_metrics, image_threshold_confusions, load_cam_winner, cam_payload_winner,
     sha256_file, threshold_grid,
 )
 
@@ -29,6 +29,10 @@ def evaluate(cam_dir, mask_dir, id_list, num_classes, output_dir):
             scores, classes, target, thresholds, num_classes)
         if i % 500 == 0:
             print(f'raw CAM evaluation {i + 1}/{len(ids)}', flush=True)
+    return save_summary(total, thresholds, len(ids), num_classes, output_dir, cam_dir, mask_dir, id_list)
+
+
+def save_summary(total, thresholds, num_images, num_classes, output_dir, cam_dir, mask_dir, id_list):
     metrics = confusion_metrics(total)
     rows = []
     for i, t in enumerate(thresholds):
@@ -41,7 +45,7 @@ def evaluate(cam_dir, mask_dir, id_list, num_classes, output_dir):
         writer.writeheader()
         writer.writerows(rows)
     best = int(np.nanargmax(metrics['mean_iou']))
-    summary = {'num_images': len(ids), 'num_classes_including_bg': num_classes,
+    summary = {'num_images': num_images, 'num_classes_including_bg': num_classes,
                'fixed': rows[45], 'best': rows[best],
                'cam_dir': str(cam_dir), 'mask_dir': str(mask_dir),
                'id_list': str(id_list), 'id_list_sha256': sha256_file(id_list),
@@ -52,6 +56,35 @@ def evaluate(cam_dir, mask_dir, id_list, num_classes, output_dir):
                         thresholds=thresholds, confusion=total)
     (output_dir / 'EVAL_COMPLETE').write_text('complete\n')
     return summary
+
+
+class OnlineCamEvaluator:
+    """Accumulate native per-image payloads without persisting large CAM arrays."""
+    def __init__(self, mask_dir, id_list, num_classes, output_dir):
+        self.mask_dir, self.id_list, self.output_dir = map(Path, (mask_dir, id_list, output_dir))
+        self.output_dir.mkdir(parents=True, exist_ok=False)
+        self.ids = self.id_list.read_text().splitlines()
+        if not self.ids or len(self.ids) != len(set(self.ids)):
+            raise ValueError('Empty or duplicate image IDs')
+        self.num_classes = num_classes
+        self.thresholds = threshold_grid(0, .59, .01)
+        self.total = np.zeros((len(self.thresholds), num_classes, num_classes), np.int64)
+        self.processed = []
+
+    def update(self, name, payload):
+        if name != self.ids[len(self.processed)]:
+            raise ValueError('Online CAM image order/coverage mismatch')
+        with Image.open(self.mask_dir / f'{name}.png') as image:
+            target = np.asarray(image)
+        scores, classes = cam_payload_winner(payload, target.shape, self.num_classes)
+        self.total += image_threshold_confusions(scores, classes, target, self.thresholds, self.num_classes)
+        self.processed.append(name)
+
+    def finish(self):
+        if self.processed != self.ids:
+            raise ValueError('Incomplete online CAM coverage')
+        return save_summary(self.total, self.thresholds, len(self.ids), self.num_classes,
+                            self.output_dir, '<online: native CAMs not persisted>', self.mask_dir, self.id_list)
 
 
 if __name__ == '__main__':

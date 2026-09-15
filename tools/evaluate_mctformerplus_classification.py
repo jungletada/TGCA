@@ -25,7 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from datasets_cam import VOC12Dataset, build_transform  # noqa: E402
+from datasets_cam import VOC12Dataset, COCOClsDataset, build_transform  # noqa: E402
 from models.mctformer_plus import (  # noqa: E402
     DECOUPLED_VARIANTS,
     TOKEN_INTERACTION_MODES,
@@ -55,7 +55,8 @@ def parse_args():
             'mctformerplus_tiny', 'mctformerplus', 'mctformerplus_base'),
         required=True,
     )
-    parser.add_argument('--voc-root', type=Path, required=True)
+    parser.add_argument('--voc-root', '--data-root', dest='voc_root', type=Path, required=True)
+    parser.add_argument('--dataset', choices=['VOC12', 'COCO'], default='VOC12')
     parser.add_argument('--list-path', type=Path, required=True)
     parser.add_argument('--input-size', type=int, default=448)
     parser.add_argument('--batch-size', type=int, default=16)
@@ -222,12 +223,14 @@ def execute(args):
     if device.type == 'cuda' and not torch.cuda.is_available():
         raise RuntimeError('CUDA is unavailable')
 
+    num_classes = 80 if args.dataset == 'COCO' else 20
+    class_names = tuple(f'coco_label_index_{i}' for i in range(80)) if args.dataset == 'COCO' else CLASS_NAMES
     checkpoint = torch.load(args.checkpoint, map_location='cpu')
     validate_mctformerplus_patch_pooling_checkpoint(
         checkpoint, args.patch_pooling, args.c2p_pooling_layers, args.c2p_pooling_reduction,
         args.c2p_pooling_affinity)
     resolution = resolve_mctformerplus_checkpoint_variant(
-        checkpoint, args.model
+        checkpoint, args.model, num_classes=num_classes
     )
     validate_mctformerplus_final_norm_checkpoint(
         checkpoint, bool(args.final_norm), bool(args.patch_final_norm),
@@ -258,7 +261,7 @@ def execute(args):
     model = build_mctformerplus(
         resolution['variant'],
         cam=False,
-        num_classes=20,
+        num_classes=num_classes,
         input_size=args.input_size,
         attention_normalization='vanilla',
         attention_gamma=1.0,
@@ -284,8 +287,9 @@ def execute(args):
     model.to(device).eval()
 
     transform_args = argparse.Namespace(input_size=args.input_size)
-    dataset = VOC12Dataset(
-        voc12_root=str(args.voc_root),
+    dataset_class = COCOClsDataset if args.dataset == 'COCO' else VOC12Dataset
+    dataset = dataset_class(
+        str(args.voc_root),
         list_path=str(args.list_path),
         transform=build_transform(False, False, transform_args),
     )
@@ -315,7 +319,7 @@ def execute(args):
                 raise RuntimeError('Unexpected MCTformer+ classification output')
             class_logits = outputs[0]
             patch_logits = outputs[2]
-            if class_logits.shape != patch_logits.shape or class_logits.shape[1] != 20:
+            if class_logits.shape != patch_logits.shape or class_logits.shape[1] != num_classes:
                 raise RuntimeError(
                     f'Invalid output shapes: {class_logits.shape}, {patch_logits.shape}'
                 )
@@ -384,7 +388,7 @@ def execute(args):
         )
 
     class_rows = []
-    for class_id, class_name in enumerate(CLASS_NAMES):
+    for class_id, class_name in enumerate(class_names):
         class_rows.append({
             'class_id': class_id,
             'class_name': class_name,
@@ -440,10 +444,10 @@ def execute(args):
 
     metrics = {
         'schema_version': 1,
-        'dataset': 'PASCAL VOC 2012',
+        'dataset': 'MS COCO 2014' if args.dataset == 'COCO' else 'PASCAL VOC 2012',
         'split': args.list_path.stem,
         'num_images': len(image_ids),
-        'class_names': list(CLASS_NAMES),
+        'class_names': list(class_names),
         'model_spec': model_spec_from_instance(model),
         'variant_resolution': resolution,
         'checkpoint': {
@@ -471,9 +475,9 @@ def execute(args):
             'c2p_pooling_layers': args.c2p_pooling_layers,
             'c2p_pooling_reduction': args.c2p_pooling_reduction,
             'c2p_pooling_affinity': args.c2p_pooling_affinity,
-            'macro_definition': 'mean of 20 dataset-level one-vs-rest class AP values',
+            'macro_definition': f'mean of {num_classes} dataset-level one-vs-rest class AP values',
             'micro_definition': 'AP over flattened image-class pairs',
-            'legacy_definition': 'mean AP over the 20-class vector within each image',
+            'legacy_definition': f'mean AP over the {num_classes}-class vector within each image',
         },
         'metrics_fraction': {
             branch: scalar_metrics(values, 1.0)

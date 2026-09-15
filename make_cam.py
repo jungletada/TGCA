@@ -50,6 +50,10 @@ def get_args_parser():
     parser.add_argument('--c2p-pooling-layers', choices=('last3', 'all'), default='last3')
     parser.add_argument('--c2p-pooling-reduction', choices=('mean', 'product'), default='mean')
     parser.add_argument('--c2p-pooling-affinity', action='store_true')
+    parser.add_argument('--online-raw-eval', action='store_true',
+                        help='Evaluate native train CAMs online without saving large per-image arrays (one GPU)')
+    parser.add_argument('--online-mask-dir', type=Path)
+    parser.add_argument('--online-output-dir', type=Path)
     parser.add_argument('--input_size', default=448, type=int, help='images input size')
     parser.add_argument('--min_size', default=448, type=int, help='images input size')
     parser.add_argument(
@@ -237,6 +241,11 @@ def _work_trainset_psa(process_id, model, dataset, args):
         num_workers=args.num_workers // n_gpus,
         pin_memory=True)
 
+    evaluator = None
+    if args.online_raw_eval:
+        from tools.evaluate_raw_cam_streaming import OnlineCamEvaluator
+        evaluator = OnlineCamEvaluator(args.online_mask_dir, args.train_list,
+                                       args.num_classes + 1, args.online_output_dir)
     with torch.no_grad(), cuda.device(process_id):
         model.cuda()
         model.eval()
@@ -247,7 +256,10 @@ def _work_trainset_psa(process_id, model, dataset, args):
             valid_cat = torch.nonzero(label)[:, 0] # get validate class->[#val_cls]
             
             if valid_cat.shape[0] == 0: # No validate category
-                np.save(osp.join(args.cam_out_dir, img_name + '.npy'), dict())
+                if evaluator is None:
+                    np.save(osp.join(args.cam_out_dir, img_name + '.npy'), dict())
+                else:
+                    evaluator.update(img_name, {})
                 continue
             try:
                 outputs = []
@@ -284,11 +296,18 @@ def _work_trainset_psa(process_id, model, dataset, args):
             for i, cls in enumerate(valid_cat):
                 cam_dict[cls] = upsample_cam[i]
                 
-            np.save(osp.join(args.cam_out_dir, img_name + '.npy'), cam_dict)
+            if evaluator is None:
+                np.save(osp.join(args.cam_out_dir, img_name + '.npy'), cam_dict)
+            else:
+                evaluator.update(img_name, cam_dict)
         
             progress_interval = max(1, len(databin) // 20)
             if process_id == n_gpus - 1 and iter_ % progress_interval == 0:
                 print(f"{(5 * iter_ + 1) // progress_interval} ", end='')
+
+
+    if evaluator is not None:
+        evaluator.finish()
 
 
 def _work_trainset_irn(process_id, model, dataset, args):
@@ -569,6 +588,9 @@ if __name__ == '__main__':
     
     print(f'Using {args.checkpoint} for making cams.')
     n_gpus = torch.cuda.device_count()
+    if args.online_raw_eval and (n_gpus != 1 or 'train' not in args.train_list
+                                or args.online_mask_dir is None or args.online_output_dir is None):
+        raise ValueError('Online evaluation requires one GPU, a train list, mask dir and output dir')
     dataset = torchutils.split_dataset(dataset, n_gpus)
     
     cam_type = 'psa'

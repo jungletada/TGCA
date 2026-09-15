@@ -1,5 +1,59 @@
 # TGCA Operational Handoff
 
+## 2026-09-15 COCO all-product setup
+
+User requested one COCO all-product run, without affinity. Plan:
+`docs/MCTformerPlus_C2P_All_Product_COCO.md`. Model computation unchanged;
+reuse existing all12 product helper with 80 classes. Match completed COCO GWRP
+baseline at `results/default_mctformerplus/20260912-voc-coco-s0-r2/COCO`:
+seed0, fresh DeiT-S, 45 epochs, 448, batch32, original optimizer/loss/augmentation.
+Necessary tests: 63 passed, including80-class AMP/backward/CAM and online/offline
+CAM evaluator equality. Environment tgca-repro; RTX A6000 idle,48505MiB free.
+Disk76GiB free versus baseline CAM dump249GiB. Do NOT delete source data;
+new full CAM pipeline accumulates confusion online with the SAME native generator.
+Smoke must confirm exact all60-threshold confusion parity against disk output.
+COCO classification evaluator now supports80 labels with same deterministic448
+transform; both frozen baseline and new macro-class AP measured under new root.
+Queue: tests -> smoke train/CAM parity/classification -> full train/nativeCAM ->
+classification/control comparison -> compact report. No refinement/segmentation.
+Command: `/home/peng/anaconda3/envs/tgca-repro/bin/python -u -m experiments.ablations.run_c2p_coco --output results/c2p_pooling/20260915-coco-all-product-s0`.
+At this setup checkpoint, queue not yet launched. Preserve clean checkout gate.
+
+## 2026-09-15 C2P affinity completion and comparison verified
+
+Queue completed 2026-09-15 02:29:52 JST; both full variants completed 45 epochs,
+1464 native CAMs, 1449 classification images and 1449-image before/after weight
+diagnostics (six PNG/PDF examples each). QUEUE_COMPLETE/VARIANT_COMPLETE exist,
+no QUEUE_FAILED; experiment tmux ended and GPU is idle. Code SHA `04aa6b8`.
+Read-only audit verified all 32 recorded source hashes unchanged, both new
+checkpoint hashes, optimizer/pretraining equality and model-spec difference
+limited to affinity=true. Test log: 66 passed. Results were not regenerated.
+Last3 checkpoint: `0cdb5a93faf201b2b0b5887f23148f3ffcdacb7891218a2ca85b426c209f4847`.
+All checkpoint: `431a0574282fbbfb3f611de3a05215881cb7a9abe29895f07e107ce48d8374e2`.
+
+Compared with corresponding product without affinity:
+- Last3 class/patch macro AP 93.2467/93.3587% (+.0262/+.0367 pp),
+  fixed .45 CAM 70.5312% (-1.1341 pp), best 70.5312% at .45;
+  fixed FG P/R 81.9028/84.0339% (-.9776/+.4840 pp).
+- All class/patch macro AP 93.1141/93.1688% (+.6721/+.3048 pp),
+  fixed .45 CAM 69.4062% (-2.9092 pp), best 69.7004% at .48;
+  fixed FG P/R 79.8355/85.6549% (-3.4826/+1.0005 pp).
+Thus both new runs worsen CAM despite comparable/improved classification.
+Best threshold does not remove the deficit. Existing all-product remains
+highest observed fixed CAM (72.3154%) among the seven seed0 runs.
+
+Within each NEW checkpoint, before -> after affinity readout (all val images,
+equal image weights): entropy .6020 -> .9776 (last3), .2938 -> .9719 (all);
+top1 mass .1341 -> .00656 and .4651 -> .01292. Positive-pair top10% Jaccard
+on 522 multi-label images decreases .2763 -> .1012 and .2858 -> .1238.
+Hence substantial spatial flattening, NOT increased top-support overlap.
+This is not a before/after-training comparison and does not prove semantic
+background leakage or a causal explanation for CAM degradation. Single seed;
+5000 paired-image readout bootstrap does not measure training-seed uncertainty.
+Compact sources: `results/c2p_pooling/20260914-voc-product-affinity-s0/comparison.csv`,
+`C2P_AFFINITY_REPORT.md`, each variant's `weight_diagnostics/summary.csv`.
+No experiments launched/restarted or source results changed in this status check.
+
 ## 2026-09-14 22:28 JST C2P affinity queue active
 
 Implementation SHA: `04aa6b870f14a807c5ffdb37c273d218cd5b9414` (local only).

@@ -64,7 +64,8 @@ def audit(spec):
 
 
 def experiment(spec, directory, smoke, patch_first=False, patch_pooling='gwrp',
-               c2p_pooling_layers='last3', c2p_pooling_reduction='mean', c2p_pooling_affinity=False):
+               c2p_pooling_layers='last3', c2p_pooling_reduction='mean', c2p_pooling_affinity=False,
+               online_raw_eval=False):
     directory.mkdir(exist_ok=False)
     train, val, cam = [spec[k] for k in ('train', 'val', 'cam')]
     if smoke:
@@ -98,13 +99,16 @@ def experiment(spec, directory, smoke, patch_first=False, patch_pooling='gwrp',
         directory, 'train')
     checkpoint = directory / 'mctformerplus_final.pth'
     (directory / 'checkpoint_sha256.txt').write_text(sha256_file(checkpoint) + '  ' + str(checkpoint) + '\n')
-    run([sys.executable, '-u', 'make_cam.py', *common, '--train_list', cam,
+    online_flags = (['--online-raw-eval', '--online-mask-dir', spec['masks'],
+                     '--online-output-dir', directory / 'raw_cam'] if online_raw_eval else [])
+    run([sys.executable, '-u', 'make_cam.py', *common, '--train_list', cam, *online_flags,
          '--input_size', '448', '--scales', '1.0,0.75,1.25',
          '--checkpoint', checkpoint, '--cam_out_dir', 'cam_train'], directory, 'cam')
-    run([sys.executable, '-u', '-m', 'tools.evaluate_raw_cam_streaming',
-         '--cam-dir', directory / 'cam_train', '--mask-dir', spec['masks'],
-         '--id-list', cam, '--num-classes', spec['classes'],
-         '--output-dir', directory / 'raw_cam'], directory, 'raw_cam_eval')
+    if not online_raw_eval:
+        run([sys.executable, '-u', '-m', 'tools.evaluate_raw_cam_streaming',
+             '--cam-dir', directory / 'cam_train', '--mask-dir', spec['masks'],
+             '--id-list', cam, '--num-classes', spec['classes'],
+             '--output-dir', directory / 'raw_cam'], directory, 'raw_cam_eval')
     (directory / 'RUN_COMPLETE').write_text('complete\n')
 
 
