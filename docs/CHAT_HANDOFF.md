@@ -1,5 +1,26 @@
 # TGCA Operational Handoff
 
+## 2026-09-15 11:04 JST COCO all-product full training active
+
+Live tmux: `mct-c2p-coco-all-product-20260915-r2`.
+Run: `results/c2p_pooling/20260915-coco-all-product-s0-r2`.
+Queue log: `results/c2p_pooling/20260915-coco-all-product-s0-r2.queue.log`.
+Execution SHA: `4de48f54ab7f6ed6241ace91a4b36e6e6aa4d7ab` (local, not pushed).
+Queue repeated **64 passing tests**. Smoke train/checkpoint/nativeCAM passed;
+online vs disk all60-threshold confusion arrays identical. Both new80-class
+and baseline80-class smoke classifications completed, including metadata.
+Full COCO train began11:03:37 JST; observed epoch0 batch60/2586 with finite
+decreasing losses, GPU100%, peak allocated18970MiB. Train82783/val40504;
+optimizer_spec and pretrained_load_report exactly match existing COCO baseline.
+Flags: c2p/all/product, affinity=false, patch_first=false, class_token_init=baseline.
+Native three-scale CAM formula unchanged; online metric sink avoids249GiB dump.
+After45 epochs: full nativeCAM train82783 online evaluation -> new/control frozen
+classification val40504 -> comparison.csv/C2P_COCO_REPORT.md/source hash audit.
+Existing baseline only evaluated, not retrained. No segmentation/CRF/new variants.
+Results are pending. Check QUEUE_COMPLETE/QUEUE_FAILED; do not restart or duplicate.
+Initial failed smoke root without-r2 remains preserved. This later handoff-only
+commit does not change the runner's frozen implementation SHA.
+
 ## 2026-09-15 COCO smoke metadata fix, preserved first attempt
 
 Initial code `85b1d06`, run `results/c2p_pooling/20260915-coco-all-product-s0`,
