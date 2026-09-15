@@ -201,6 +201,7 @@ The T-IP decision identified insufficient novelty, unclear technical explanation
 
 ## Repository and coding rules
 
+- Diagnostic probe runtime outputs must remain inside repository `results/` (including fixed-set caches and plots). Diagnostic integration must not modify `engine.py` or change the training objective; it is opt-in and must restore model modes and RNG states.
 - Treat this directory as the sole code Git repository and use its Git history for checkpoints.
 - Put reusable model code in `models/`, experiment entry points and configs in `experiments/`, deterministic tests in `tests/`, generated metrics in `results/`, documentation in `docs/`, and the paper in `paper/` if requested.
 - Do not create a nested `TGCA/` directory.

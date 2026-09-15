@@ -223,6 +223,9 @@ def get_args_parser():
 
     parser.add_argument('--seed', default=None, type=int)
 
+    from analysis.diagnostics.probe import add_probe_arguments
+    add_probe_arguments(parser)
+
     return parser
 
 
@@ -350,6 +353,8 @@ def main(args):
         'mctformerplus_tiny', 'mctformerplus', 'mctformerplus_base'
     }
     is_mctformerplus = args.model.lower() in mctformerplus_names
+    if getattr(args, 'probe', False) and not is_mctformerplus:
+        raise ValueError('--probe requires MCTformer+')
     if args.patch_first and not is_mctformerplus:
         raise ValueError('--patch-first requires MCTformer+')
     if args.patch_pooling != 'gwrp' and not is_mctformerplus:
@@ -709,6 +714,11 @@ def main(args):
     training_loop_started = time.perf_counter()
     maximum_training_allocated = 0
     maximum_training_reserved = 0
+    diagnostic_seconds = 0.0
+    probe = None
+    if getattr(args, 'probe', False):
+        from analysis.diagnostics.probe import from_training_args
+        probe = from_training_args(model, args, device)
     for epoch in range(args.start_epoch, args.epochs):
         if device.type == 'cuda':
             torch.cuda.reset_peak_memory_stats(device)
@@ -739,6 +749,10 @@ def main(args):
         else:
             training_peak_allocated = 0
             training_peak_reserved = 0
+
+        if probe is not None:
+            probe_stats = probe.run(epoch, (epoch + 1) * args.optimizer_updates_per_epoch)
+            diagnostic_seconds += probe_stats.get('probe_seconds', 0.0)
 
         lr_scheduler.step(epoch)
 
@@ -782,6 +796,8 @@ def main(args):
         checkpoint_payload(args.epochs - 1),
         work_space / f'{args.model}_final.pth',
     )
+    if probe is not None:
+        probe.close()
     total_training_seconds = sum(
         item['training_seconds'] for item in epoch_runtime
     )
@@ -816,6 +832,9 @@ def main(args):
         'training_peak_reserved_bytes': maximum_training_reserved,
         'epoch_measurements': epoch_runtime,
     }
+    if probe is not None:
+        runtime['diagnostic_probe_seconds'] = diagnostic_seconds
+        runtime['wall_seconds_includes_diagnostics'] = True
     (work_space / 'training_runtime.json').write_text(
         json.dumps(runtime, indent=2, sort_keys=True, allow_nan=False) + '\n',
         encoding='utf-8',
