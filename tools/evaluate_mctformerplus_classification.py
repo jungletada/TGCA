@@ -224,6 +224,7 @@ def execute(args):
         raise RuntimeError('CUDA is unavailable')
 
     num_classes = 80 if args.dataset == 'COCO' else 20
+    labels_path = args.voc_root / 'ImageLabel' / ('COCO_cls_labels.npy' if args.dataset == 'COCO' else 'cls_labels.npy')
     class_names = tuple(f'coco_label_index_{i}' for i in range(80)) if args.dataset == 'COCO' else CLASS_NAMES
     checkpoint = torch.load(args.checkpoint, map_location='cpu')
     validate_mctformerplus_patch_pooling_checkpoint(
@@ -513,10 +514,8 @@ def execute(args):
             'voc_root': str(args.voc_root.resolve()),
             'list_path': str(args.list_path.resolve()),
             'list_sha256': sha256_file(args.list_path),
-            'labels_path': str((args.voc_root / 'ImageLabel/cls_labels.npy').resolve()),
-            'labels_sha256': sha256_file(
-                args.voc_root / 'ImageLabel/cls_labels.npy'
-            ),
+            'labels_path': str(labels_path.resolve()),
+            'labels_sha256': sha256_file(labels_path),
             'python': platform.python_version(),
             'torch': torch.__version__,
             'cuda': torch.version.cuda,

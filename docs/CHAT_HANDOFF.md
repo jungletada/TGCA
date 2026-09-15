@@ -1,5 +1,18 @@
 # TGCA Operational Handoff
 
+## 2026-09-15 COCO smoke metadata fix, preserved first attempt
+
+Initial code `85b1d06`, run `results/c2p_pooling/20260915-coco-all-product-s0`,
+passed63 tests, smoke training/nativeCAM, and exact online/offline confusion
+parity at all60 thresholds. It then failed AFTER COCO classification inference,
+when provenance hashing used the VOC filename ImageLabel/cls_labels.npy.
+The correct file is ImageLabel/COCO_cls_labels.npy. No full training started.
+Initial queue is stopped with QUEUE_FAILED; all files/logs are preserved.
+Fixed only dataset-aware provenance path and added an end-to-end80-class
+classification test that writes metrics/metadata to catch this failure.
+Retry uses a fresh root `results/c2p_pooling/20260915-coco-all-product-s0-r2`
+and tmux `mct-c2p-coco-all-product-20260915-r2`; no source files overwritten.
+
 ## 2026-09-15 COCO all-product setup
 
 User requested one COCO all-product run, without affinity. Plan:

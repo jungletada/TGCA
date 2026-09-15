@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 import torch
+import sys
 from PIL import Image
 
 from models.mctformer_plus import build_mctformerplus, model_spec_from_instance, resolve_mctformerplus_checkpoint_variant
@@ -58,3 +59,28 @@ def test_coco_all_product_forward_gradient_cam(amp):
                               c2p_pooling_reduction='product').to(device).eval()
     cam.load_state_dict(checkpoint['model'], strict=True)
     assert torch.isfinite(cam(x)).all()
+
+
+def test_coco_classification_end_to_end_metadata(tmp_path, monkeypatch):
+    from tools.evaluate_mctformerplus_classification import execute, parse_args, sha256_file
+    root = tmp_path / 'coco'
+    (root / 'val2014').mkdir(parents=True)
+    (root / 'ImageLabel').mkdir()
+    Image.fromarray(np.full((32, 32, 3), 127, np.uint8)).save(root / 'val2014/a.jpg')
+    labels_path = root / 'ImageLabel/COCO_cls_labels.npy'
+    np.save(labels_path, {'a.jpg': np.ones(80, np.float32)})
+    id_list = root / 'val_id.txt'
+    id_list.write_text('a\n')
+    model = build_mctformerplus('small', input_size=32, num_classes=80, patch_pooling='c2p',
+                                c2p_pooling_layers='all', c2p_pooling_reduction='product')
+    checkpoint = tmp_path / 'model_final.pth'
+    torch.save({'model': model.state_dict(), 'model_spec': model_spec_from_instance(model)}, checkpoint)
+    output = tmp_path / 'classification'
+    monkeypatch.setattr(sys, 'argv', ['eval', '--checkpoint', str(checkpoint), '--model', 'mctformerplus',
+        '--dataset', 'COCO', '--data-root', str(root), '--list-path', str(id_list), '--input-size', '32',
+        '--device', 'cpu', '--num-workers', '0', '--bootstrap-resamples', '0', '--patch-pooling', 'c2p',
+        '--c2p-pooling-layers', 'all', '--c2p-pooling-reduction', 'product', '--output-dir', str(output)])
+    result = execute(parse_args())
+    assert result['num_images'] == 1 and len(result['class_names']) == 80
+    assert result['provenance']['labels_sha256'] == sha256_file(labels_path)
+    assert (output / 'CLASSIFICATION_COMPLETE').exists()
