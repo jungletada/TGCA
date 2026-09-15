@@ -1,5 +1,33 @@
 # TGCA Operational Handoff
 
+## 2026-09-15 11:13 JST authorized result cleanup completed
+
+Latest user instruction supersedes old immutability restrictions ONLY for this
+cleanup: remove per-image CAM/intermediates and all old smoke directories,
+but RETAIN non-smoke checkpoints. No model/training/evaluation code changed.
+Executed `python tools/cleanup_results_20260915.py apply` after reviewing its
+exact-file plan. Removed94,921 files:94,495 non-smoke per-image CAM NPY,
+424 smoke-related files (including their checkpoints/logs),2 raw positive
+attention NPZ. Removed all16 smoke roots (66 nested directories by empty rmdir).
+Logical removed bytes282,045,288,070 (~262.7GiB). results now~1.6GiB;
+filesystem available~364GiB (user also cleaned other space during the task).
+All18 non-smoke checkpoints preserved. All422 retained static file hashes and
+the6 live COCO source-dependency hashes verified unchanged after deletion.
+Final metrics/CSVs/reports/configs/commands/non-smoke logs and compact aggregate
+confusions/classification predictions/figures retained. No backup of deleted
+payloads; regenerate CAM/attention from retained checkpoints if needed.
+
+Audit: `results/cleanup/20260915-keep-checkpoints-final/summary_after.json`,
+`exact_plan.json.gz`, `deletions.jsonl.gz`. The two earlier cleanup-plan
+directories were dry-run inventories only, NOT executed. See cleanup/README.md.
+Historical result manifests remain unmodified; deleted CAM/attention/smoke
+paths intentionally no longer exist and old full-artifact audits will reflect
+this cleanup. Do NOT recreate them merely to satisfy an old manifest.
+Active COCO full training untouched: tmux `mct-c2p-coco-all-product-20260915-r2`,
+epoch0 at batch1510/2586 with finite losses at post-cleanup check.
+Its already-finished smoke folders were deleted after verifying the runner
+never reads them again; required baseline checkpoint/metadata remain protected.
+
 ## 2026-09-15 11:04 JST COCO all-product full training active
 
 Live tmux: `mct-c2p-coco-all-product-20260915-r2`.
