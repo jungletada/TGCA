@@ -1,0 +1,56 @@
+# Operational handoff — 2026-09-16
+
+Host: LHR. Repository: `/home/peng/code/TGCA`, branch `main`.
+Environment: `/home/peng/anaconda3/envs/tgca-repro/bin/python`.
+Implementation at cancellation: `dd4f370` (diagnostic probes: `5b66a3c`).
+
+## Current instruction: experiments stopped
+
+At the user's explicit request on 2026-09-16, stop the current experiment and
+all pending experiments, and remove intermediate large outputs. Do not restart
+or schedule further experiments without a new user request.
+
+The Diagnostic Probe queue process group `1026827` was terminated with SIGTERM
+at approximately 10:09 JST. Its tmux session exited. GPU compute-process listing
+was empty afterward; only the user's `codex-wsss-0` tmux session remains.
+The monitor had already exited after handing off the queue at 08:00 JST.
+
+Queue: `results/diagnostic_trajectory/20260916-voc-ab-s012`.
+
+- GWRP seed 0: completed 45 epochs; checkpoint and diagnostic results retained.
+- C2P all-product seed 0: interrupted during zero-based epoch 19 (20th epoch).
+  Existing best checkpoint and prior completed diagnostics retained; NOT a
+  completed matched experiment.
+- Seeds 1 and 2 for both poolings: cancelled before starting.
+- `QUEUE_CANCELLED`, `c2p_s0/RUN_CANCELLED` and monitor `HANDOFF_CANCELLED`
+  document cancellation. Historical launch records remain unchanged.
+
+## Completed COCO
+
+`results/c2p_pooling/20260915-coco-all-product-s0-r2` completed at 07:43 JST.
+Its `C2P_COCO_REPORT.md` and `comparison.csv` hold the final comparison.
+All-product final checkpoint severely degraded: fixed raw CAM mIoU 1.3944%
+versus GWRP 42.6674%; this is a completed run, not a positive method result.
+
+## Authorized cleanup
+
+Exact commands:
+
+```bash
+kill -TERM -- -1026827
+/home/peng/anaconda3/envs/tgca-repro/bin/python -m tools.cleanup_results_20260916 plan
+/home/peng/anaconda3/envs/tgca-repro/bin/python -m tools.cleanup_results_20260916 apply
+```
+
+Audit: `results/cleanup/20260916-stop-diagnostics/`.
+Deleted 9 per-image classification prediction NPZs, 50,097,096 bytes (47.78 MiB).
+969 retained files passed before/after SHA256 checks, including checkpoints,
+reports, numeric CSV/JSON results, aggregate confusion arrays and logs.
+No smoke directories or per-image CAM arrays remained at this cleanup:
+older CAM arrays were already removed; the latest COCO used online evaluation.
+No payload backup was made; deleted predictions require inference from retained
+checkpoints to regenerate. Existing result manifests are historical and were
+not rewritten to hide deletions. Compact diagnostic arrays and figures remain.
+
+`docs/design.md` is absent from this checkout; it was not recreated. This
+handoff records the current operational state rather than restoring old plans.
