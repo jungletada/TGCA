@@ -65,7 +65,7 @@ def audit(spec):
 
 def experiment(spec, directory, smoke, patch_first=False, patch_pooling='gwrp',
                c2p_pooling_layers='last3', c2p_pooling_reduction='mean', c2p_pooling_affinity=False,
-               online_raw_eval=False):
+               online_raw_eval=False, affinity_repair=None):
     directory.mkdir(exist_ok=False)
     train, val, cam = [spec[k] for k in ('train', 'val', 'cam')]
     if smoke:
@@ -91,6 +91,8 @@ def experiment(spec, directory, smoke, patch_first=False, patch_pooling='gwrp',
         common.extend(['--c2p-pooling-reduction', c2p_pooling_reduction])
     if c2p_pooling_affinity:
         common.append('--c2p-pooling-affinity')
+    if affinity_repair is not None:
+        common.extend(['--affinity-repair', json.dumps(affinity_repair, sort_keys=True)])
     run([sys.executable, '-u', 'train_model_v2.py', *common,
          '--train_list', train, '--val_list', val, '--input-size', '448',
          '--epochs', '1' if smoke else '45', '--batch_size', '32',

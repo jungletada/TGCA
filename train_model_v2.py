@@ -56,6 +56,8 @@ def get_args_parser():
     parser.add_argument('--c2p-pooling-layers', choices=('last3', 'all'), default='last3')
     parser.add_argument('--c2p-pooling-reduction', choices=('mean', 'product'), default='mean')
     parser.add_argument('--c2p-pooling-affinity', action='store_true')
+    parser.add_argument('--affinity-repair', type=json.loads, default=None,
+                        help='Registered six-field JSON for repaired training pooling only')
     parser.add_argument(
         '--accum-iter', default=1, type=int,
         help='number of micro-batches accumulated per optimizer update')
@@ -510,6 +512,7 @@ def main(args):
             'c2p_pooling_layers': args.c2p_pooling_layers,
             'c2p_pooling_reduction': args.c2p_pooling_reduction,
             'c2p_pooling_affinity': args.c2p_pooling_affinity,
+            'affinity_repair': args.affinity_repair,
         }
         if is_mctformerplus else {}
     )
@@ -732,6 +735,8 @@ def main(args):
             loss_scaler,
             args.clip_grad,
             args=args)
+        if args.affinity_repair is not None:
+            train_stats['affinity_zero_floor_rows_cumulative'] = model.affinity_fallback_rows
         if args.class_token_init == 'residual_cwp':
             train_stats['residual_cwp_alpha_end'] = float(
                 model.class_token_pooler.alpha.detach()

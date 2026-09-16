@@ -14,6 +14,18 @@ Full output: `results/artifact_probe/20260916-voc-s0`; tmux
 `mct-artifact-20260916`. Execution details and pending later-stage clarifications:
 `docs/Artifact_Affinity_Execution_Notes.md`.
 
+Artifact full run completed successfully at code `b04df6b`, all source hashes
+unchanged. GWRP passes all three gates; product and affinity fail overlap gate.
+Next queue: `experiments.ablations.run_affinity_repair`, output
+`results/affinity_repair/20260916-voc-s0`, tmux `mct-affinity-repair-20260916`.
+Queue order: unit tests -> small A1/A2 checks -> full A1 (72 fixed configs) ->
+A2/A3 (native and <=10 repair candidates) -> B only if fixed A2 mIoU beats the
+unrounded historical all-product reference. If gate fails, no training launches.
+The old Diagnostic Probe queue must NOT be restarted. New queue preserves all
+source checkpoints/results, uses online CAM evaluation, and records failures.
+Stage B, if reached, has minimal / A2-best / conservative, deduplicating identical
+configs; each is fresh seed0 45epochs with unchanged native CAM evaluation.
+
 ## Previous instruction: experiments stopped
 
 At the user's explicit request on 2026-09-16, stop the current experiment and

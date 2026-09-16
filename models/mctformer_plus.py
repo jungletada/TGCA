@@ -31,6 +31,67 @@ from models.class_token_pooling import (
     class_token_pooling_diagnostics,
 )
 
+
+def aggregate_p2p(attn_layers, n_class, p_layers='all', p_reduce='sum',
+                  p_alpha=1., p_sym=False, eps=1e-8, patch_slice=None):
+    """Query i receives key j. FP32 accumulation, float64 for reference tests.
+
+    Sequential sum exactly preserves the historical pooling-affinity path.
+    ``patch_slice`` also preserves the existing patch-first behavior.
+    """
+    if p_layers not in {'all', 'last3', 'last6'} or p_reduce not in {'sum', 'mean', 'rownorm_mean'}:
+        raise ValueError('Invalid P2P layer/reduction setting')
+    if p_alpha <= 0 or not attn_layers:
+        raise ValueError('Positive alpha and nonempty attention required')
+    records = attn_layers if p_layers == 'all' else attn_layers[-int(p_layers[4:]):]
+    patch_slice = slice(n_class, None) if patch_slice is None else patch_slice
+    dtype = torch.float64 if records[0].dtype == torch.float64 else torch.float32
+    with torch.autocast(records[0].device.type, enabled=False):
+        result = None
+        for record in records:
+            matrix = record[:, :, patch_slice, patch_slice].to(dtype).mean(1)
+            if p_reduce == 'rownorm_mean':
+                matrix = matrix / matrix.sum(-1, keepdim=True).clamp_min(eps)
+            result = matrix if result is None else result + matrix
+        if p_reduce != 'sum':
+            result = result / len(records)
+        if p_alpha != 1:
+            result = result / result.sum(-1, keepdim=True).clamp_min(eps)
+            result = result.clamp_min(0).pow(p_alpha)
+        if p_sym:
+            result = .5 * (result + result.transpose(-1, -2))
+    return result
+
+
+def propagate_c2p_weights(w, P, floor='none', beta=1., eps=1e-8, return_fallback=False):
+    """Normalize w @ P.T, remove spatial floor, optionally mix with w.
+
+    A removed-floor zero row falls back to original w; return its explicit mask
+    for audit counting. Legacy floor=none keeps its original clamp behavior.
+    """
+    if floor not in {'none', 'min', 'mean'} or not 0 <= beta <= 1:
+        raise ValueError('Invalid floor/beta')
+    with torch.autocast(w.device.type, enabled=False):
+        dtype = torch.float64 if w.dtype == torch.float64 else torch.float32
+        w, P = w.to(dtype), P.to(dtype)
+        if beta == 0:
+            fallback = torch.zeros_like(w[..., 0], dtype=torch.bool)
+            return (w, fallback) if return_fallback else w
+        r = torch.bmm(w, P.transpose(-1, -2))
+        if floor == 'min':
+            r = r - r.amin(-1, keepdim=True)
+        elif floor == 'mean':
+            r = (r - r.mean(-1, keepdim=True)).clamp_min(0)
+        mass = r.sum(-1, keepdim=True)
+        fallback = (mass.squeeze(-1) < eps) & (floor != 'none')
+        r = r / mass.clamp_min(eps)
+        if floor != 'none':
+            r = torch.where(fallback[..., None], w, r)
+        if beta < 1:
+            r = (1 - beta) * w + beta * r
+            r = r / r.sum(-1, keepdim=True).clamp_min(eps)
+    return (r, fallback) if return_fallback else r
+
 __all__ = [
     'ClassStableLastPooler',
     'ClassWiseWeightedPooling',
@@ -480,7 +541,7 @@ class MCTformerPlus(VisionTransformer):
             class_token_init='baseline', token_interaction='joint',
             decoupled_variant='full', patch_first=False, patch_pooling='gwrp',
             c2p_pooling_layers='last3',
-            c2p_pooling_reduction='mean', c2p_pooling_affinity=False,
+            c2p_pooling_reduction='mean', c2p_pooling_affinity=False, affinity_repair=None,
             *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.patch_first = bool(patch_first)
@@ -488,6 +549,24 @@ class MCTformerPlus(VisionTransformer):
         self.c2p_pooling_layers = c2p_pooling_layers
         self.c2p_pooling_reduction = c2p_pooling_reduction
         self.c2p_pooling_affinity = bool(c2p_pooling_affinity)
+        self.affinity_repair = deepcopy(affinity_repair)
+        self.affinity_fallback_rows = 0
+        if affinity_repair is not None:
+            if (not self.c2p_pooling_affinity or self.embed_dim != 384
+                    or class_token_init != 'baseline' or patch_first
+                    or self.attention_normalization != 'vanilla'
+                    or final_norm or patch_final_norm):
+                raise ValueError('Affinity repair requires ordinary class-first Small C2P product affinity')
+            keys = {'p_layers', 'p_reduce', 'p_alpha', 'p_sym', 'floor', 'beta'}
+            if not isinstance(affinity_repair, dict) or set(affinity_repair) != keys:
+                raise ValueError('affinity_repair must specify all six registered fields')
+            if (affinity_repair['p_layers'] not in {'all', 'last3', 'last6'}
+                    or affinity_repair['p_reduce'] not in {'sum', 'mean', 'rownorm_mean'}
+                    or affinity_repair['p_alpha'] not in {1., 2., 4.}
+                    or not isinstance(affinity_repair['p_sym'], bool)
+                    or affinity_repair['floor'] not in {'none', 'min', 'mean'}
+                    or affinity_repair['beta'] not in {1., .5, .3, .1}):
+                raise ValueError('Affinity repair outside registered settings')
         if self.c2p_pooling_affinity and (patch_pooling != 'c2p' or c2p_pooling_reduction != 'product'):
             raise ValueError('c2p_pooling_affinity requires c2p product pooling')
         if c2p_pooling_reduction not in {'mean', 'product'}:
@@ -1219,7 +1298,7 @@ class MCTformerPlus(VisionTransformer):
         a = responses.mean(dim=(0, 2))
         return a / a.sum(dim=-1, keepdim=True).clamp_min(1e-8)
 
-    def c2p_affinity_weights(self, weights, attention_records, patch_count):
+    def c2p_affinity_weights(self, weights, attention_records, patch_count, **repair):
         """One native-direction P2P propagation of weights, not logits.
 
         P[i,j] collects key j into query i. Sum all layers' head-mean P2P;
@@ -1229,12 +1308,16 @@ class MCTformerPlus(VisionTransformer):
         patch_slice = slice(0, patch_count) if self.patch_first else self._patch_slice(patch_count)
         with torch.autocast(device_type=weights.device.type, enabled=False):
             dtype = torch.float64 if weights.dtype == torch.float64 else torch.float32
-            affinity = None
-            for attention in attention_records:
-                layer = attention[:, :, patch_slice, patch_slice].to(dtype).mean(dim=1)
-                affinity = layer if affinity is None else affinity + layer
-            propagated = torch.bmm(weights.to(dtype), affinity.transpose(-1, -2))
-            return propagated / propagated.sum(dim=-1, keepdim=True).clamp_min(1e-8)
+            if not repair and self.affinity_repair is not None:
+                repair = self.affinity_repair.copy()
+            floor, beta = repair.pop('floor', 'none'), repair.pop('beta', 1.)
+            affinity = aggregate_p2p(attention_records, self.num_classes,
+                                     patch_slice=patch_slice, **repair)
+            result, fallback = propagate_c2p_weights(weights.to(dtype), affinity, floor=floor,
+                                                    beta=beta, return_fallback=True)
+            if self.affinity_repair is not None:
+                self.affinity_fallback_rows += int(fallback.sum().detach())
+            return result
 
     def c2p_pool(self, class_map, attention_records):
         logits = class_map.flatten(2)
@@ -1796,11 +1879,13 @@ def model_spec_from_instance(model):
         'c2p_pooling_layers': model.c2p_pooling_layers,
         'c2p_pooling_reduction': model.c2p_pooling_reduction,
         'c2p_pooling_affinity': model.c2p_pooling_affinity,
+        **({'affinity_repair': deepcopy(model.affinity_repair)} if model.affinity_repair is not None else {}),
     }
 
 
 def validate_mctformerplus_patch_pooling_checkpoint(
-        checkpoint, expected, expected_layers='last3', expected_reduction='mean', expected_affinity=False):
+        checkpoint, expected, expected_layers='last3', expected_reduction='mean', expected_affinity=False,
+        expected_repair=None):
     observed = checkpoint.get('model_spec', {}).get('patch_pooling', 'gwrp')
     if observed != expected:
         raise ValueError(f'Checkpoint patch_pooling={observed!r} does not match CLI {expected!r}')
@@ -1813,6 +1898,9 @@ def validate_mctformerplus_patch_pooling_checkpoint(
     affinity = checkpoint.get('model_spec', {}).get('c2p_pooling_affinity', False)
     if affinity != expected_affinity:
         raise ValueError(f'Checkpoint c2p_pooling_affinity={affinity!r} does not match CLI {expected_affinity!r}')
+    repair = checkpoint.get('model_spec', {}).get('affinity_repair')
+    if repair != expected_repair:
+        raise ValueError(f'Checkpoint affinity_repair={repair!r} does not match CLI {expected_repair!r}')
 
 
 def validate_mctformerplus_patch_first_checkpoint(checkpoint, expected):
