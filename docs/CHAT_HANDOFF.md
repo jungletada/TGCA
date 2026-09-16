@@ -4,6 +4,27 @@ Host: LHR. Repository: `/home/peng/code/TGCA`, branch `main`.
 Environment: `/home/peng/anaconda3/envs/tgca-repro/bin/python`.
 Implementation at cancellation: `dd4f370` (diagnostic probes: `5b66a3c`).
 
+## Current request — VOC epoch archives (2026-09-16)
+
+Starting from main `137b156`, the user requested four fresh matched VOC runs:
+GWRP seed0 -> all-product seed0 -> GWRP seed11 -> all-product seed11.
+Each uses the unchanged 45-epoch recipe, with a new opt-in
+`--save-every-epoch` archive (180 full-run snapshots in total).
+No beta1 sweep or old cancelled diagnostic queue is included.
+Implementation/tests are committed before launching the queue; the manifest
+records the exact implementation SHA. The pre-existing untracked
+`docs/MCTformerPlus_A2_Beta1_Sweep.md` remains untouched and uncommitted.
+
+Runner: `experiments.ablations.run_voc_epoch_checkpoints`.
+Scheduled tmux: `mct-voc-epochs-s0-s11-20260916`.
+Output: `results/voc_epoch_checkpoints/20260916-gwrp-all-product-s0-s11`.
+Queue log: same path plus `.queue.log`.
+Protocol: `docs/VOC_Epoch_Checkpoint_Runs.md`.
+Queue first repeats 32 focused tests, then two 2-epoch smoke runs, including
+loading epoch002 for classification/CAM, and only then starts full training.
+Consult live markers/logs to distinguish planned, active and completed stages.
+Do not launch a duplicate queue. Source checkpoints/results remain immutable.
+
 ## New request — Artifact / affinity plan (2026-09-16 10:17 JST)
 
 User explicitly requested execution of

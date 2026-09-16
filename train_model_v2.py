@@ -202,6 +202,8 @@ def get_args_parser():
     parser.add_argument('--resume', default='', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
+    parser.add_argument('--save-every-epoch', action='store_true',
+                        help='Keep immutable model/optimizer/scheduler/scaler/RNG snapshots after every epoch')
     parser.add_argument('--eval', action='store_true', help='Perform evaluation only')
     parser.add_argument('--num_workers', default=10, type=int)
     parser.add_argument('--pin-mem', action='store_true',
@@ -719,6 +721,10 @@ def main(args):
     maximum_training_reserved = 0
     diagnostic_seconds = 0.0
     probe = None
+    epoch_writer = None
+    if args.save_every_epoch:
+        from tools.epoch_checkpoints import EpochCheckpointWriter
+        epoch_writer = EpochCheckpointWriter(work_space, args.model)
     if getattr(args, 'probe', False):
         from analysis.diagnostics.probe import from_training_args
         probe = from_training_args(model, args, device)
@@ -790,6 +796,11 @@ def main(args):
         log_stats = {'epoch': epoch,
                      **{f'train_{k}': v for k, v in train_stats.items()},
                      **{f'test_{k}': v for k, v in test_stats.items()},}
+
+        if epoch_writer is not None:
+            epoch_path = epoch_writer.save(checkpoint_payload(epoch), optimizer, lr_scheduler,
+                                           loss_scaler, log_stats, args, max_accuracy)
+            logger.info(f'Saved immutable epoch checkpoint: {epoch_path}')
 
         if utils.is_main_process():
             logger.info(
