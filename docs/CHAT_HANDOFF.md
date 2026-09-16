@@ -25,9 +25,23 @@ The old Diagnostic Probe queue must NOT be restarted. New queue preserves all
 source checkpoints/results, uses online CAM evaluation, and records failures.
 Stage B, if reached, has minimal / A2-best / conservative, deduplicating identical
 configs; each is fresh seed0 45epochs with unchanged native CAM evaluation.
-At10:36 JST, A1 is complete (72 configs,47 pass the band,10 selected); A2/A3 full
-CAM screening is active. Local tests71 passed; smoke native CAM error0.
-No Stage B training has started. See execution notes for measured A1 statistics.
+Completion verified at14:38 JST: queue ended successfully at14:32:39, with
+`QUEUE_COMPLETE`, no failure markers, no experiment tmux or GPU compute process.
+A1 completed72 configs (47 passing,10 selected); A2/A3 completed. Local broad
+tests71 passed; the queue's selected suite51 passed.
+Stage B completed two distinct45-epoch runs: minimal and conservative; A2-best
+aliases minimal, so no duplicate third training was performed. Both have final
+checkpoint hashes verified, CAM1464 and classification1449 coverage. Fixed CAM
+mIoU is71.782743% /71.781563%, below original all-product72.315445%.
+IMPORTANT: the A2 gate used a strict greater-than against the historical native
+value and admitted a numerical-scale difference. Minimal minus same-run native
+is only0.0000042947 percentage points, with paired95% CI containing0; this is
+not meaningful evidence that inference repair improves CAM. Stage B did run,
+but the recorded `gate_passed=True` must not be interpreted as scientific success.
+The root `ARTIFACT_AFFINITY_REPORT.md` is a short completion summary; detailed
+numbers are in `stage_b_comparison.csv` and `a2/comparison.csv`. Existing reports
+and decision JSONs were not rewritten during this read-only result audit.
+Source hashes for queue/A1/A2 and both new checkpoints were reverified unchanged.
 
 ## Previous instruction: experiments stopped
 
