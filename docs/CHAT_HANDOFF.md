@@ -4,7 +4,17 @@ Host: LHR. Repository: `/home/peng/code/TGCA`, branch `main`.
 Environment: `/home/peng/anaconda3/envs/tgca-repro/bin/python`.
 Implementation at cancellation: `dd4f370` (diagnostic probes: `5b66a3c`).
 
-## Current instruction: experiments stopped
+## New request — Artifact / affinity plan (2026-09-16 10:17 JST)
+
+User explicitly requested execution of
+`docs/MCTformerPlus_Artifact_and_Affinity_Repair_Plan.md` in order.
+This authorizes only that new plan; the old Diagnostic Probe queue stays cancelled.
+First stage: `analysis/artifact_probe.py`, tests `tests/test_artifact_probe.py`.
+Full output: `results/artifact_probe/20260916-voc-s0`; tmux
+`mct-artifact-20260916`. Execution details and pending later-stage clarifications:
+`docs/Artifact_Affinity_Execution_Notes.md`.
+
+## Previous instruction: experiments stopped
 
 At the user's explicit request on 2026-09-16, stop the current experiment and
 all pending experiments, and remove intermediate large outputs. Do not restart
