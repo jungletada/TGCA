@@ -4,6 +4,25 @@ Host: LHR. Repository: `/home/peng/code/TGCA`, branch `main`.
 Environment: `/home/peng/anaconda3/envs/tgca-repro/bin/python`.
 Implementation at cancellation: `dd4f370` (diagnostic probes: `5b66a3c`).
 
+## Appended request — all-epoch evaluation (2026-09-16)
+
+The user authorized classification and raw CAM evaluation of all180 archived
+checkpoints after the four runs finish, followed by epoch curves and per-checkpoint
+cleanup of disposable evaluation artifacts. Checkpoints remain retained.
+No training/model code is changed for this task; the running queue is untouched.
+Live inspection: first three runs finished, all-product seed11 at epoch36/45
+(one-based) during preparation. Training completion must be read from live markers.
+
+New CPU-waiting tmux: `mct-voc-epoch-eval-20260916`.
+Runner: `experiments.ablations.evaluate_voc_epoch_trajectory`.
+Output: `results/voc_epoch_evaluation/20260916-gwrp-all-product-s0-s11`.
+Log: output path plus `.queue.log`. Poll interval60 seconds; no GPU inference
+until the training queue's `QUEUE_COMPLETE` exists. Then two small GPU checks,
+followed by all180 evaluations and progressive CSV/SVG/PNG curves.
+Protocol/command/cleanup scope: `docs/VOC_Epoch_Evaluation_Protocol.md`.
+CPU tests12 passed. GPU smoke and full trajectory evaluation are pending,
+not yet completed. Do not launch a duplicate watcher or restart training.
+
 ## Current request — VOC epoch archives (2026-09-16)
 
 Starting from main `137b156`, the user requested four fresh matched VOC runs:
