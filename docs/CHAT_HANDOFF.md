@@ -29,6 +29,13 @@ was intentionally terminated early in GWRP seed0 training: a read-only metadata
 comparison revealed legacy model_spec files omit newer default pooling flags.
 The runner now canonicalizes only those documented defaults before comparison.
 Initial outputs/logs are preserved; r2 starts fresh with no checkpoint reuse.
+Live verification at approximately16:54 JST: r2 launched with implementation
+`dc52762` at16:51;33 tests passed and both smoke runs completed, including CAM
+and classification from archived epoch002. GWRP seed0 completed epoch001 and
+entered epoch002. The first full-run snapshot exists with model, optimizer,
+scaler and CUDA RNG states; its SHA256 was independently verified. Remaining
+three full runs are queued, not completed. Model/pretrained/optimizer metadata
+match the historical GWRP recipe after canonicalizing known legacy defaults.
 
 ## New request — Artifact / affinity plan (2026-09-16 10:17 JST)
 
