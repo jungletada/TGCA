@@ -16,7 +16,7 @@ Launch from clean tracked `main` in `tgca-repro`, under tmux:
 OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 \
 /home/peng/anaconda3/envs/tgca-repro/bin/python -u \
   -m experiments.ablations.run_voc_epoch_checkpoints \
-  --output results/voc_epoch_checkpoints/20260916-gwrp-all-product-s0-s11 \
+  --output results/voc_epoch_checkpoints/20260916-gwrp-all-product-s0-s11-r2 \
   --execute
 ```
 
@@ -56,5 +56,8 @@ config/environment/commands/logs and SHA256 indices provide the final evidence.
 `QUEUE_COMPLETE` means all four finished; `QUEUE_FAILED` means inspect the log.
 At implementation commit time these are planned runs, not completed results.
 
-Prelaunch validation: 32 tests passed (13 dependency warnings), saved at
+Initial validation: 32 tests passed (13 dependency warnings), saved at
 `results/epoch_checkpoint_validation/20260916-code-v1/tests.log`.
+The initial queue passed both smoke runs but was stopped early in full GWRP
+training to fix historical metadata default comparisons. Its outputs remain
+untouched. The r2 queue includes one additional metadata-compatibility test.

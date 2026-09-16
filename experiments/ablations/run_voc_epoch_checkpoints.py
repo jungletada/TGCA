@@ -19,6 +19,14 @@ REFERENCES = {
 }
 
 
+def canonical_model_spec(spec):
+    # Older baseline records predate these flags. Fill only their known legacy
+    # defaults, without changing source metadata or hiding non-default values.
+    defaults = dict(patch_first=False, patch_pooling='gwrp', c2p_pooling_layers='last3',
+                    c2p_pooling_reduction='mean', c2p_pooling_affinity=False)
+    return {**defaults, **spec}
+
+
 def pooling_flags(method):
     return ['--patch-pooling', 'gwrp'] if method == 'gwrp' else [
         '--patch-pooling', 'c2p', '--c2p-pooling-layers', 'all', '--c2p-pooling-reduction', 'product']
@@ -140,6 +148,9 @@ def main():
                 if filename == 'optimizer_spec.json':
                     assert actual.pop('seed') == seed
                     baseline.pop('seed')
+                if filename == 'model_spec.json':
+                    actual = canonical_model_spec(actual)
+                    baseline = canonical_model_spec(baseline)
                 assert actual == baseline, filename
             evaluate(spec, directory, method)
             rows.append(result(directory, method, seed))

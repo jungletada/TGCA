@@ -78,6 +78,16 @@ def test_cli_opt_in():
     assert parser.parse_args(['--save-every-epoch']).save_every_epoch is True
 
 
+def test_historical_metadata_defaults_do_not_hide_method_changes():
+    from experiments.ablations.run_voc_epoch_checkpoints import canonical_model_spec
+    legacy = dict(model_name='mctformerplus')
+    current = dict(legacy, patch_first=False, patch_pooling='gwrp', c2p_pooling_layers='last3',
+                   c2p_pooling_reduction='mean', c2p_pooling_affinity=False)
+    assert canonical_model_spec(legacy) == canonical_model_spec(current)
+    assert canonical_model_spec(dict(current, patch_pooling='c2p')) != canonical_model_spec(legacy)
+    assert canonical_model_spec(dict(current, c2p_pooling_affinity=True)) != canonical_model_spec(current)
+
+
 def test_queue_matrix_and_recipe(tmp_path):
     from experiments.ablations.run_voc_epoch_checkpoints import MATRIX, training_command
     from experiments.baselines.run_default_voc_coco import dataset_spec

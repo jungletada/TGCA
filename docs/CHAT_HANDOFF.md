@@ -16,14 +16,19 @@ records the exact implementation SHA. The pre-existing untracked
 `docs/MCTformerPlus_A2_Beta1_Sweep.md` remains untouched and uncommitted.
 
 Runner: `experiments.ablations.run_voc_epoch_checkpoints`.
-Scheduled tmux: `mct-voc-epochs-s0-s11-20260916`.
-Output: `results/voc_epoch_checkpoints/20260916-gwrp-all-product-s0-s11`.
+Scheduled tmux: `mct-voc-epochs-s0-s11-20260916-r2`.
+Output: `results/voc_epoch_checkpoints/20260916-gwrp-all-product-s0-s11-r2`.
 Queue log: same path plus `.queue.log`.
 Protocol: `docs/VOC_Epoch_Checkpoint_Runs.md`.
-Queue first repeats 32 focused tests, then two 2-epoch smoke runs, including
+Queue first repeats 33 focused tests, then two 2-epoch smoke runs, including
 loading epoch002 for classification/CAM, and only then starts full training.
 Consult live markers/logs to distinguish planned, active and completed stages.
 Do not launch a duplicate queue. Source checkpoints/results remain immutable.
+The initial non-r2 queue at code `215afce` passed tests and both smoke runs but
+was intentionally terminated early in GWRP seed0 training: a read-only metadata
+comparison revealed legacy model_spec files omit newer default pooling flags.
+The runner now canonicalizes only those documented defaults before comparison.
+Initial outputs/logs are preserved; r2 starts fresh with no checkpoint reuse.
 
 ## New request — Artifact / affinity plan (2026-09-16 10:17 JST)
 
