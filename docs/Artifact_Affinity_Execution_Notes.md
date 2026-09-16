@@ -31,6 +31,11 @@ All-product = .005396/.063604/.007630; affinity = .016951/.088546/.066659.
 Both product checkpoints fail the overlap gate. No register implemented.
 Source checkpoint/data-list/label hashes unchanged. Ten probe tests passed.
 
+M6 top1%-norm gradient ratios are1.8153 /1.4841 /1.1306, respectively.
+They are NOT below1: the proposed flat/low-information-location explanation is
+not supported by this aggregate proxy. Passing GWRP's three gates is only the
+predefined register-interest decision, not proof of the proposed semantic story.
+
 ## Stage A preregistration / explicit interpretation
 
 The plan lists 72 A1 configurations but its full Cartesian product has648.
@@ -67,3 +72,31 @@ global factor and cancels under normalized propagation (except epsilon effects).
 Row-dependent group mass, operator orientation, spatial structure and post-CAM
 normalization must be distinguished. Inference screening alone does not prove
 a causal training mechanism or independent generalization improvement.
+
+## Execution status at 2026-09-16 10:36 JST
+
+Code checkpoints: artifact `b04df6b`, affinity queue `2da4242`.
+Local regression suite:71 passed (including CUDA AMP). Queue's selected suite
+also passed; A1/A2 smoke complete. Native CAM reconstruction max absolute error
+was0 for both checkpoints on all three smoke scales. No original files changed.
+
+A1 completed1449 images,72 configs,47 passing the band. Selected10 including
+the forced minimal control that fails the band. `a1/screening.json` records this
+distinction. Root: `results/affinity_repair/20260916-voc-s0`.
+
+| Weight readout on frozen all-product | Entropy | Top1 mass | DC share | Positive-pair top10% Jaccard |
+|---|---:|---:|---:|---:|
+| Before propagation | .40065 | .32495 | ~0 | .22024 |
+| Original all/sum propagation | .96803 | .01064 | .39524 | .11302 |
+| Minimal floor=min | .92132 | .01657 | 0 | .11302 |
+| Registered conservative configuration | .60952 | .23210 | .00066 | .15860 |
+
+These are image-weighted means (pairs only on522 multi-label images), with5000
+paired image CIs in `a1/summary.csv`. This frozen all-product checkpoint is NOT
+the affinity-trained checkpoint underlying the older .294-before figure.
+Removing a constant floor does not change ranks, so unchanged Jaccard in the
+minimal arm is expected. No claim about localization improvement follows yet.
+
+A2/A3 full1464 native multiscale CAM screening is running in tmux
+`mct-affinity-repair-20260916`; B has not started. Queue log:
+`results/affinity_repair/20260916-voc-s0.queue.log`. Future B is gate-controlled.

@@ -25,6 +25,9 @@ The old Diagnostic Probe queue must NOT be restarted. New queue preserves all
 source checkpoints/results, uses online CAM evaluation, and records failures.
 Stage B, if reached, has minimal / A2-best / conservative, deduplicating identical
 configs; each is fresh seed0 45epochs with unchanged native CAM evaluation.
+At10:36 JST, A1 is complete (72 configs,47 pass the band,10 selected); A2/A3 full
+CAM screening is active. Local tests71 passed; smoke native CAM error0.
+No Stage B training has started. See execution notes for measured A1 statistics.
 
 ## Previous instruction: experiments stopped
 
