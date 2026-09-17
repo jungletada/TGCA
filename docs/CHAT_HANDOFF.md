@@ -22,6 +22,13 @@ Log: output path plus `.queue.log`. Unit tests pass before local commit/launch;
 two training/inference smoke gates precede full training. See live markers for
 actual progress; no new full result is claimed at implementation time.
 Both pre-existing untracked user plan documents are preserved, not committed.
+Live launch verified at approximately10:24 JST: implementation `a77dda8`,
+tmux active. Local broader suite60 passed; queue suite48 passed. Both detach/A1
+2-epoch smokes passed training, archive verification, classification, CAM and
+artifact diagnostics. Disposable per-image classification outputs were cleaned
+with recorded hashes; smoke checkpoints retained. Full detach seed0 has begun;
+epoch001 is saved and independently hash-verified. Other three trainings and
+all full trajectory evaluations/diagnostics remain queued, not completed.
 
 ## Appended request — all-epoch evaluation (2026-09-16)
 
