@@ -37,6 +37,7 @@ from models.mctformer_plus import (  # noqa: E402
     validate_mctformerplus_final_norm_checkpoint,
     validate_mctformerplus_token_interaction_checkpoint,
     validate_mctformerplus_patch_pooling_checkpoint,
+    validate_detach_channel_checkpoint,
 )
 
 
@@ -71,6 +72,8 @@ def parse_args():
     parser.add_argument('--c2p-pooling-layers', choices=('last3', 'all'), default='last3')
     parser.add_argument('--c2p-pooling-reduction', choices=('mean', 'product'), default='mean')
     parser.add_argument('--c2p-pooling-affinity', action='store_true')
+    parser.add_argument('--detach-weights', action='store_true')
+    parser.add_argument('--channel-agg', action='store_true')
     parser.add_argument('--affinity-repair', type=json.loads, default=None)
     parser.add_argument(
         '--class-token-init', default='baseline',
@@ -228,6 +231,7 @@ def execute(args):
     labels_path = args.voc_root / 'ImageLabel' / ('COCO_cls_labels.npy' if args.dataset == 'COCO' else 'cls_labels.npy')
     class_names = tuple(f'coco_label_index_{i}' for i in range(80)) if args.dataset == 'COCO' else CLASS_NAMES
     checkpoint = torch.load(args.checkpoint, map_location='cpu')
+    validate_detach_channel_checkpoint(checkpoint, args.detach_weights, args.channel_agg)
     validate_mctformerplus_patch_pooling_checkpoint(
         checkpoint, args.patch_pooling, args.c2p_pooling_layers, args.c2p_pooling_reduction,
         args.c2p_pooling_affinity, args.affinity_repair)
@@ -281,6 +285,8 @@ def execute(args):
         c2p_pooling_layers=args.c2p_pooling_layers,
         c2p_pooling_reduction=args.c2p_pooling_reduction,
         c2p_pooling_affinity=args.c2p_pooling_affinity,
+        detach_weights=args.detach_weights,
+        channel_agg=args.channel_agg,
         affinity_repair=args.affinity_repair,
     )
     state = checkpoint.get('model', checkpoint)

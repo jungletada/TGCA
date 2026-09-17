@@ -25,6 +25,7 @@ from models.persistent_semantic import (
 )
 
 from models.cti_bgt import cti_bgt_maps, validate_cti_bgt
+from models.channel_aggregation import ChannelAggregator
 from models.class_token_pooling import (
     ClassWiseWeightedPooling,
     ResidualClassWiseWeightedPooling,
@@ -542,6 +543,7 @@ class MCTformerPlus(VisionTransformer):
             decoupled_variant='full', patch_first=False, patch_pooling='gwrp',
             c2p_pooling_layers='last3',
             c2p_pooling_reduction='mean', c2p_pooling_affinity=False, affinity_repair=None,
+            detach_weights=False, channel_agg=False,
             *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.patch_first = bool(patch_first)
@@ -549,6 +551,20 @@ class MCTformerPlus(VisionTransformer):
         self.c2p_pooling_layers = c2p_pooling_layers
         self.c2p_pooling_reduction = c2p_pooling_reduction
         self.c2p_pooling_affinity = bool(c2p_pooling_affinity)
+        self.detach_weights = bool(detach_weights)
+        self.channel_aggregator = ChannelAggregator(self.embed_dim, enabled=channel_agg)
+        if detach_weights or channel_agg:
+            if (self.embed_dim != 384 or len(self.blocks) != 12 or self.num_classes != 20
+                    or self.attention_normalization != 'vanilla' or class_token_init != 'baseline'
+                    or token_interaction != 'joint' or patch_first or final_norm or patch_final_norm
+                    or bcss_variant != 'e0' or psl_variant != 'baseline' or cti_bgt
+                    or last_mct or class_stable_last or c2p_pooling_affinity or affinity_repair is not None):
+                raise ValueError('Detach/A1 experiments require ordinary VOC Small, no optional variants')
+            if detach_weights and (patch_pooling != 'c2p' or c2p_pooling_layers != 'all'
+                                   or c2p_pooling_reduction != 'product' or channel_agg):
+                raise ValueError('Detach experiment requires all-product without A1')
+            if channel_agg and patch_pooling != 'gwrp':
+                raise ValueError('A1 experiment requires the GWRP host')
         self.affinity_repair = deepcopy(affinity_repair)
         self.affinity_fallback_rows = 0
         if affinity_repair is not None:
@@ -1259,6 +1275,13 @@ class MCTformerPlus(VisionTransformer):
             return result + (auxiliary,)
         return result
     
+    def no_weight_decay(self):
+        return super().no_weight_decay() | ({'channel_aggregator.theta'}
+                                            if self.channel_aggregator.enabled else set())
+
+    def class_readout(self, tokens):
+        return self.channel_aggregator(tokens)
+
     def gwrp(self, x_patch):
         x_patch_flattened = x_patch.view(x_patch.shape[0], x_patch.shape[1], -1).permute(0, 2, 1)
         sorted_patch_token, indices = torch.sort(x_patch_flattened, -2, descending=True)
@@ -1324,6 +1347,8 @@ class MCTformerPlus(VisionTransformer):
         weights = self.c2p_spatial_weights(attention_records, logits.shape[-1])
         if self.c2p_pooling_affinity:
             weights = self.c2p_affinity_weights(weights, attention_records, logits.shape[-1])
+        if self.detach_weights:
+            weights = weights.detach()
         return (weights * logits).sum(dim=-1)
 
     def last_low_pass(self, patch_tokens):
@@ -1444,7 +1469,7 @@ class MCTformerPlus(VisionTransformer):
                     sorted_patch_token * weights.unsqueeze(0).unsqueeze(-1),
                     dim=-2,
                 ) / weights.sum()
-        x_cls_logits = x_cls.mean(-1)
+        x_cls_logits = self.class_readout(x_cls)
 
         output = []
         output.append(x_cls_logits)
@@ -1607,7 +1632,7 @@ class MCTformerPlusCam(MCTformerPlus):
         b, _, w, h = x.shape
         x_cls_last, x_patch_tokens, attn_weights, _, auxiliary = self.forward_features(
             x, active_labels=active_labels, return_aux=True)
-        cls_logits = x_cls_last.mean(-1) # [B, K]
+        cls_logits = self.class_readout(x_cls_last) # [B, K]
         if self.last_mct:
             pooled_token, _, _ = self.last_aggregate(x_patch_tokens)
             x_logits = self.last_classify(pooled_token)
@@ -1702,7 +1727,7 @@ class MCTformerPlusCam(MCTformerPlus):
             class_to_patch = attn_weights[-self.n_layers:].mean(0)[
                 :, self._foreground_slice(), patch_slice]
         result = {
-            'class_logits': x_cls.mean(-1),
+            'class_logits': self.class_readout(x_cls),
             'patch_cam': F.relu(patch_cam[:, self._foreground_slice()]),
             'class_to_patch': class_to_patch.reshape(
                 x_cls.shape[0], self.num_classes, hp, wp),
@@ -1879,6 +1904,8 @@ def model_spec_from_instance(model):
         'c2p_pooling_layers': model.c2p_pooling_layers,
         'c2p_pooling_reduction': model.c2p_pooling_reduction,
         'c2p_pooling_affinity': model.c2p_pooling_affinity,
+        **({'detach_weights': True} if model.detach_weights else {}),
+        **({'channel_agg': True} if model.channel_aggregator.enabled else {}),
         **({'affinity_repair': deepcopy(model.affinity_repair)} if model.affinity_repair is not None else {}),
     }
 
@@ -1907,6 +1934,13 @@ def validate_mctformerplus_patch_first_checkpoint(checkpoint, expected):
     observed = checkpoint.get('model_spec', {}).get('patch_first', False)
     if not isinstance(observed, bool) or observed != bool(expected):
         raise ValueError(f'Checkpoint patch_first={observed!r} does not match CLI {expected!r}')
+
+
+def validate_detach_channel_checkpoint(checkpoint, detach_weights=False, channel_agg=False):
+    spec = checkpoint.get('model_spec', {})
+    for key, expected in [('detach_weights', detach_weights), ('channel_agg', channel_agg)]:
+        if spec.get(key, False) != expected:
+            raise ValueError(f'Checkpoint {key} does not match CLI')
 
 
 def _checkpoint_state_dict(checkpoint):
@@ -2425,6 +2459,9 @@ def adapt_deit_checkpoint_for_mctformerplus(checkpoint, model, num_classes=20):
     if model.class_token_init in {'baseline', 'residual_cwp'}:
         derived['cls_token'] = repeated_cls_token
     random_keys = {'head.weight', 'head.bias'}
+    if model.channel_aggregator.enabled:
+        # Task-specific zero initialization, never imported from DeiT.
+        random_keys.add('channel_aggregator.theta')
     if model.class_token_init in {'cwp', 'residual_cwp'}:
         random_keys.add('class_token_pooler.class_queries')
     if model.class_token_init == 'residual_cwp':
@@ -2495,7 +2532,9 @@ def adapt_deit_checkpoint_for_mctformerplus(checkpoint, model, num_classes=20):
         ),
         'loaded_key_count': len(adapted) - len(random_keys),
         'loaded_numel': int(loaded_numel),
-        'randomly_initialized_keys': sorted(random_keys),
+        'randomly_initialized_keys': sorted(random_keys - {'channel_aggregator.theta'}),
+        **({'zero_initialized_keys': ['channel_aggregator.theta']}
+           if model.channel_aggregator.enabled else {}),
         'ignored_source_classifier_keys': sorted(
             key for key in source if key in ignored_classifier_keys
         ),

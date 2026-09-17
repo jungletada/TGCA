@@ -56,6 +56,9 @@ def get_args_parser():
     parser.add_argument('--c2p-pooling-layers', choices=('last3', 'all'), default='last3')
     parser.add_argument('--c2p-pooling-reduction', choices=('mean', 'product'), default='mean')
     parser.add_argument('--c2p-pooling-affinity', action='store_true')
+    parser.add_argument('--detach-weights', action='store_true')
+    parser.add_argument('--channel-agg', action='store_true')
+    parser.add_argument('--channel-agg-lr-mult', type=float, choices=(1., 10.), default=1.)
     parser.add_argument('--affinity-repair', type=json.loads, default=None,
                         help='Registered six-field JSON for repaired training pooling only')
     parser.add_argument(
@@ -204,6 +207,8 @@ def get_args_parser():
                         help='start epoch')
     parser.add_argument('--save-every-epoch', action='store_true',
                         help='Keep immutable model/optimizer/scheduler/scaler/RNG snapshots after every epoch')
+    parser.add_argument('--epoch20-classification-warning', action='store_true',
+                        help='E1/E4 only: record FP32 macro-class AP at epoch20, without stopping training')
     parser.add_argument('--eval', action='store_true', help='Perform evaluation only')
     parser.add_argument('--num_workers', default=10, type=int)
     parser.add_argument('--pin-mem', action='store_true',
@@ -363,6 +368,11 @@ def main(args):
         raise ValueError('--patch-first requires MCTformer+')
     if args.patch_pooling != 'gwrp' and not is_mctformerplus:
         raise ValueError('--patch-pooling c2p requires MCTformer+')
+    if (args.detach_weights or args.channel_agg) and not is_mctformerplus:
+        raise ValueError('Detach/channel aggregation require MCTformer+')
+    if args.epoch20_classification_warning and (not args.save_every_epoch
+                                               or not (args.detach_weights or args.channel_agg)):
+        raise ValueError('Epoch20 warning requires E1/E4 and epoch checkpoints')
     if (args.final_norm or args.patch_final_norm or args.last_mct
             or args.class_stable_last or args.class_token_init != 'baseline') \
             and not is_mctformerplus:
@@ -515,6 +525,8 @@ def main(args):
             'c2p_pooling_reduction': args.c2p_pooling_reduction,
             'c2p_pooling_affinity': args.c2p_pooling_affinity,
             'affinity_repair': args.affinity_repair,
+            'detach_weights': args.detach_weights,
+            'channel_agg': args.channel_agg,
         }
         if is_mctformerplus else {}
     )
@@ -583,8 +595,16 @@ def main(args):
     )
     args.lr = linear_scaled_lr
     optimizer = create_optimizer(args, model)
+    if args.channel_agg:
+        from models.channel_aggregation import configure_channel_optimizer
+        configure_channel_optimizer(optimizer, model, args.channel_agg_lr_mult)
+    elif args.channel_agg_lr_mult != 1.:
+        raise ValueError('Channel LR multiplier requires --channel-agg')
     loss_scaler = NativeScaler()
     lr_scheduler, _ = create_scheduler(args, optimizer)
+    if args.channel_agg:
+        from models.channel_aggregation import scale_channel_lr
+        scale_channel_lr(optimizer)
     work_space = Path(args.work_space)
     work_space.mkdir(parents=True, exist_ok=True)
     model_spec = model_spec_from_instance(model) if is_mctformerplus else None
@@ -649,6 +669,8 @@ def main(args):
         'warmup_epochs': args.warmup_epochs,
         'minimum_lr': args.min_lr,
         **training_spec,
+        **({'channel_agg_lr_mult': args.channel_agg_lr_mult, 'channel_theta_weight_decay': 0.}
+           if args.channel_agg else {}),
     }
     (work_space / 'optimizer_spec.json').write_text(
         json.dumps(optimizer_spec, indent=2, sort_keys=True) + '\n',
@@ -766,6 +788,8 @@ def main(args):
             diagnostic_seconds += probe_stats.get('probe_seconds', 0.0)
 
         lr_scheduler.step(epoch)
+        if args.channel_agg:
+            scale_channel_lr(optimizer)
 
         evaluation_started = time.perf_counter()
         test_stats = evaluate(data_loader_val, model, device)
@@ -796,11 +820,16 @@ def main(args):
         log_stats = {'epoch': epoch,
                      **{f'train_{k}': v for k, v in train_stats.items()},
                      **{f'test_{k}': v for k, v in test_stats.items()},}
+        if args.channel_agg:
+            log_stats.update(model.channel_aggregator.diagnostics())
 
         if epoch_writer is not None:
             epoch_path = epoch_writer.save(checkpoint_payload(epoch), optimizer, lr_scheduler,
                                            loss_scaler, log_stats, args, max_accuracy)
             logger.info(f'Saved immutable epoch checkpoint: {epoch_path}')
+            if args.epoch20_classification_warning and epoch == 19:
+                from analysis.detach_channel_diagnostics import epoch20_warning
+                epoch20_warning(args, epoch_path)
 
         if utils.is_main_process():
             logger.info(

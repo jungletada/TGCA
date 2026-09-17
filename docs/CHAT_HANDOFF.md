@@ -4,6 +4,25 @@ Host: LHR. Repository: `/home/peng/code/TGCA`, branch `main`.
 Environment: `/home/peng/anaconda3/envs/tgca-repro/bin/python`.
 Implementation at cancellation: `dd4f370` (diagnostic probes: `5b66a3c`).
 
+## Current request — E1 detach / E4 A1 (2026-09-17)
+
+Previous VOC four-run training and180-epoch evaluation queues are COMPLETE;
+last evaluation ended approximately05:57 JST. No experiment GPU process or
+experiment tmux remained at new-task startup. Baseline files are read-only.
+
+New plan read completely: `docs/MCTformerPlus_Detach_and_ChannelAgg_Plan.md`.
+Scope: detach all-product s0/s11, then A1-a GWRP s0/s11,45epochs each; preserve
+all epoch checkpoints; classification/CAM and frozen all-epoch diagnostics.
+No automatic ambiguous conditional extension; non-blocking user question sent.
+Execution rationale/command: `docs/Detach_Channel_Execution_Notes.md`.
+Runner: `experiments.ablations.run_detach_channel`.
+Planned tmux: `mct-detach-channel-20260917`.
+Output: `results/detach_channel/20260917-voc-s0-s11`.
+Log: output path plus `.queue.log`. Unit tests pass before local commit/launch;
+two training/inference smoke gates precede full training. See live markers for
+actual progress; no new full result is claimed at implementation time.
+Both pre-existing untracked user plan documents are preserved, not committed.
+
 ## Appended request — all-epoch evaluation (2026-09-16)
 
 The user authorized classification and raw CAM evaluation of all180 archived

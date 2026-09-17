@@ -213,6 +213,8 @@ def create_cam_model(args):
             c2p_pooling_layers=getattr(args, 'c2p_pooling_layers', 'last3'),
             c2p_pooling_reduction=getattr(args, 'c2p_pooling_reduction', 'mean'),
             c2p_pooling_affinity=getattr(args, 'c2p_pooling_affinity', False),
+            detach_weights=getattr(args, 'detach_weights', False),
+            channel_agg=getattr(args, 'channel_agg', False),
             affinity_repair=getattr(args, 'affinity_repair', None),
             cti_bgt=getattr(args, 'cti_bgt', False),
             cti_bgt_weight=getattr(args, 'cti_bgt_weight', 0.1),
