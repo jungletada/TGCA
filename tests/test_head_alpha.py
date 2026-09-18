@@ -4,7 +4,7 @@ import torch
 from analysis.alpha_sweep import blend,native_blend,ALPHAS
 from analysis.head_heatmap import head_statistics
 from analysis.head_alpha_statistics import stratified_hash_folds,paired_ci,crossfit,miou,sufficient
-from analysis.head_alpha import seed_for,propagate,normalize,extract,configs_for
+from analysis.head_alpha import seed_for,propagate,normalize,extract,configs_for,alpha_crossfit_summary
 from models.mctformer_plus import build_mctformerplus
 
 
@@ -107,3 +107,9 @@ def test_configs_no_trainable_or_oracle_topm():
     ranking=dict(kappa=list(range(72)),gamma=list(reversed(range(72))))
     top=configs_for('topm',ranking)
     assert len(top)==15 and top[1]['cells']==[0] and top[8]['cells']==[71]
+
+
+def test_alpha_crossfit_metadata_preserves_numeric_reference():
+    r=alpha_crossfit_summary(toy_confusions(),np.arange(10)%2,configs_for('alpha')[:3],reps=120)
+    assert isinstance(r['reference'],float) and isinstance(r['reference_description'],str)
+    assert len(r['selected_alphas'])==2

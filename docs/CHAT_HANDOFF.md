@@ -34,6 +34,12 @@ Plan ambiguities (epsilon/native, crossfit weighting, rownorm multi-view effects
 unlabeled ranking direction and multiplicity limitations) are resolved explicitly
 in the execution notes before inspecting scan outcomes.
 
+Initial smoke at `49bdcd8` completed both hosts/all8 inference stages; official
+native CAM max error0. Report rendering exposed a metadata key collision:
+the numeric crossfit reference was overwritten by its description. This is
+fixed without changing inference/statistics. Preserve original smoke results.
+Retry paths: `smoke-r2`, then `full`; full did NOT start after failed smoke.
+
 ## Current request — all-product FP16 precision repair (2026-09-18)
 
 Startup main HEAD: `3e7ae75`. Live state supersedes older launch notes below:

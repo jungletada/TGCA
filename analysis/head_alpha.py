@@ -30,6 +30,14 @@ from experiments.baselines.run_default_voc_coco import run
 ROOT = REPO/'data/VOCdevkit/VOC2012'
 
 
+def alpha_crossfit_summary(fixed, folds, configs, reps=5000):
+    result=crossfit(fixed,folds,reps=reps)
+    result['selected_alphas']=[configs[k]['alpha'] for k in result['selected_candidate_indices']]
+    result['stable_within_one_step']=abs(result['selected_alphas'][0]-result['selected_alphas'][1])<=.05000001
+    result['reference_description']='EXACT native alpha.5 without floor; reselect alpha per bootstrap draw'
+    return result
+
+
 def configs_for(stage, ranking=None, head_rows=None):
     native=[dict(id='native', kind='native')]
     if stage=='alpha':
@@ -205,10 +213,7 @@ def scan(host, stage, output, configs, folds, limit=0):
             curve.append(dict(id=config['id'],threshold=threshold,miou_percent=float(100*m['mean_iou'][t])))
     pd.DataFrame(curve).to_csv(output/'threshold_curves.csv',index=False)
     if stage=='alpha':
-        result=crossfit(fixed,folds[:n])
-        result['selected_alphas']=[configs[k]['alpha'] for k in result['selected_candidate_indices']]
-        result['stable_within_one_step']=abs(result['selected_alphas'][0]-result['selected_alphas'][1])<=.05000001
-        result['reference']='EXACT native alpha.5 without floor; reselect alpha per bootstrap draw'
+        result=alpha_crossfit_summary(fixed,folds[:n],configs)
         # The literal clamped alpha.5 reference is reported separately too.
         with_clamped_ref=fixed.copy()
         with_clamped_ref[0]=fixed[1+ALPHAS.index(.5)]
