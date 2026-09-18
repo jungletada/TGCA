@@ -39,6 +39,8 @@ does not use these weights. Gate PASSED; not proof every training epoch is clean
 - H keeps alpha native and P native:72 cells+native. Kappa/Gini average over
   positive classes inside images; gamma averages positive pairs inside images,
   excludes single-label/undefined images rather than treating them as zero.
+  Cosine uses mass-normalized rows before L2 normalization to avoid squaring
+  tiny raw probabilities into FP32 zeros; its mathematical definition is unchanged.
 - Freeze ascending-kappa and ascending-gamma ranks on VOCval image labels,
   WITHOUT semantic masks, before head mIoU evaluation. Evaluate both prespecified
   top-m lists1,2,4,8,16,32,72. No mIoU-ranked oracles. m72 equals an all-layer,
@@ -57,8 +59,8 @@ does not use these weights. Gate PASSED; not proof every training epoch is clean
 ## Commands and status
 
 ```sh
-OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 /home/peng/anaconda3/envs/tgca-repro/bin/python -u -m analysis.head_alpha --preflight results/head_alpha/20260918-voc/preflight --output results/head_alpha/20260918-voc/smoke --limit 4
-OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 /home/peng/anaconda3/envs/tgca-repro/bin/python -u -m analysis.head_alpha --preflight results/head_alpha/20260918-voc/preflight --output results/head_alpha/20260918-voc/full
+OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 /home/peng/anaconda3/envs/tgca-repro/bin/python -u -m analysis.head_alpha --preflight results/head_alpha/20260918-voc/preflight --output results/head_alpha/20260918-voc/smoke-r3 --limit 4
+OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 /home/peng/anaconda3/envs/tgca-repro/bin/python -u -m analysis.head_alpha --preflight results/head_alpha/20260918-voc/preflight --output results/head_alpha/20260918-voc/full-r2
 ```
 
 The smoke must finish before full inference. Results are not complete until

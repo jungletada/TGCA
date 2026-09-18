@@ -32,6 +32,16 @@ def test_head_stats_uniform_distinct_single_label():
     assert out[1,1,0]==.25 and out[1,1,1]==.75
 
 
+def test_head_cosine_stays_scale_invariant_for_tiny_probabilities():
+    a=torch.tensor([[[[1.,2.,3.,4.],[4.,3.,2.,1.]]]])
+    labels=torch.ones(1,2)
+    reference=head_statistics(a,labels)
+    tiny=a*torch.tensor([1e-30,1e-32]).reshape(1,1,2,1)
+    actual=head_statistics(tiny,labels)
+    assert torch.isfinite(actual).all()
+    torch.testing.assert_close(actual,reference)
+
+
 def test_native_head_extraction_and_propagation_equivalence():
     torch.manual_seed(2)
     m=build_mctformerplus('small',input_size=32,num_classes=20,cam=True).eval()

@@ -40,6 +40,13 @@ the numeric crossfit reference was overwritten by its description. This is
 fixed without changing inference/statistics. Preserve original smoke results.
 Retry paths: `smoke-r2`, then `full`; full did NOT start after failed smoke.
 
+Smoke-r2 at `19be6f6` subsequently completed all stages/reports/integrity checks.
+Full started but was explicitly stopped early in GWRP alpha (before head stage)
+after a synthetic tiny-map test found FP32 L2-norm underflow in gamma. Fix:
+mass-normalize before cosine (mathematically scale-invariant). No source data
+changed. Keep partial `full`/log and cancellation marker; new clean run paths
+`smoke-r3` then `full-r2`. No training or other experiment was stopped.
+
 ## Current request — all-product FP16 precision repair (2026-09-18)
 
 Startup main HEAD: `3e7ae75`. Live state supersedes older launch notes below:

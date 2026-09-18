@@ -28,7 +28,9 @@ def head_statistics(a, labels):
     count = valid.sum(-1)
     def average(x):
         return (x*valid).sum(-1).div(count.clamp_min(1)).masked_fill(count==0, float('nan'))
-    unit = a / a.norm(dim=-1, keepdim=True).clamp_min(torch.finfo(a.dtype).tiny)
+    # Cosine is invariant to positive row scaling. Normalize mass BEFORE
+    # squaring: raw1e-30 probabilities otherwise have zero FP32 L2 norm.
+    unit = p / p.norm(dim=-1, keepdim=True).clamp_min(torch.finfo(a.dtype).tiny)
     cosine = unit @ unit.transpose(-1,-2)
     pair = valid[..., :, None] & valid[..., None, :]
     pair &= ~torch.eye(a.shape[-2], device=a.device, dtype=torch.bool)
