@@ -1,5 +1,69 @@
 # Operational handoff — 2026-09-18
 
+### Archive interfaces complete; NEW numerics still pending (2026-09-18)
+
+Supersedes the earlier interface-pending entry below. User approved factory
+names, cls->class->register order, generic graph only, separate bootstrap
+estimands, plain records and optional pandas. All these are now implemented
+in packages/vitprobe. No old model/experiment function changed.
+Full package suite146 passed with source parity; standalone31 passed/115
+source-parity skips. No failed parity or tolerance change. Non-semantic layout
+smoke and blocked-repository/pandas import smoke passed.336 protected file hashes
+unchanged;8 evidence copies match originals byte-for-byte. No checkpoints used.
+MIGRATION/docs/templates added; manifest template checked for JSON/internal refs,
+not externally schema-validated. New callback framework is synthetic-tested only.
+Latest commands/status: packages/vitprobe/docs/VALIDATION_INTERFACES.json.
+Source and implementation hashes: packages/vitprobe/implementation_manifest.json.
+Logs: results/vitprobe_archive/20260918-interfaces/.
+Still pending explicit NEW numerics policy (zero rows, eps, FP64), Phase3 and
+final whole-plan acceptance. Existing graph FP64 behavior was preserved as source
+mathematics, not used to assume authorization for new numerics algorithms.
+No training, experiment tmux, local commit or push. Existing user tmux untouched.
+
+### Archive extraction — partial, awaiting interface decisions (2026-09-18)
+
+User approved Phase0 inventory and three choices: package in
+`packages/vitprobe/`, source mathematics takes precedence, historical numbers
+and evidence limits preserved. No source model/experiment code changed.
+Extracted stats, relations, artifacts, spectral and isolated state context.
+Editable installed in tgca-repro with --no-deps --no-build-isolation.
+Tests:19 passed with TGCA_PATH; standalone8 passed/11 source-parity skips.
+FP32 parity atol1e-7/rtol0; no tolerance relaxation or failed parity.
+Eight compact source files (123434 bytes) copied byte-identically; no checkpoint.
+Evidence manifest: `packages/vitprobe/evidence_manifest.json`.
+Commands/tests: `packages/vitprobe/docs/VALIDATION.json`.
+Logs: `results/vitprobe_archive/20260918-extraction/`.
+335 source hashes matched before this additive handoff update.
+Outstanding user questions: layout factory/order/search exception, graph scope,
+separate bootstrap estimands, records/optional pandas return, new numerics
+zero-row/clamp/FP64 policy. These paths are NOT implemented pending confirmation.
+No experiment launched; only existing user tmux remains. No commit/push this task.
+Archive progress and unresolved phases: `docs/ARCHIVE_LOG.md`.
+
+### Completion verified — Head/alpha (2026-09-18)
+
+Supersedes the active-queue notes below. `full-r2/COMPLETE` timestamp13:55:22
+JST; all8 stages finished, no experiment tmux/GPU process remains. Full CAM
+coverage1464/config and unlabeled val1449/host verified; fixed confusion sums
+match aggregate threshold.45 for all22/73/7/15 configs per host.27 broader
+tests passed before launch; queue suite11 passed. Reports and3 PNG/SVG plots
+exist. All1471 recorded source hashes were independently recomputed unchanged.
+Experiment implementation SHA=`08c8dda`; current main=`7edd58d` adds only the
+three user plan documents, not research code. No push performed by this audit.
+
+Results root: `results/head_alpha/20260918-voc/full-r2`.
+Native fixed mIoU GWRP70.063173 / all-product72.315662. Best single heads:
+L11H4=69.0073 / L11H2=71.9734, neither beats native. Kappa-top32:
+GWRP+0.107685pp (CI[-0.432552,0.631534]); all-product+0.514868pp
+(CI[0.118407,0.888940]). All-product kappa-top16 reaches72.963917,
+but GWRP at the same m drops0.056330pp. These are exploratory m sweeps.
+Alpha crossfit selects[.60,.65] / [.50,.55]; alpha positive gate fails.
+IMPORTANT: clamped alpha.5 on all-product=71.593919 vs exact native72.315662
+(−0.721743pp). Thus crossfit delta−0.7371pp vs native is confounded by the
+registered epsilon floor; vs clamped alpha.5 delta is−0.049415pp,
+CI[-0.328735,0.069565]. Report both, never attribute the whole decline to alpha.
+Source reports were not altered; no new experiment, training or method launched.
+
 ### Live verified state (2026-09-18 13:18 JST)
 
 Current inference code: `08c8dda` (head/alpha).27 focused tests passed.

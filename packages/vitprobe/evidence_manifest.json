@@ -1,0 +1,86 @@
+{
+  "source_git_sha": "7edd58d89d30b3b91b1bd700f40f195c79fec266",
+  "source_git_sha_is_not_training_sha": true,
+  "files": [
+    {
+      "source": "results/artifact_probe/20260916-voc-s0/decision.md",
+      "copy": "evidence/decision.md",
+      "bytes": 1302,
+      "sha256": "8820309afdc508885cbc4696e1a691a7acfc2b79c30fb7411404d945fdb50393"
+    },
+    {
+      "source": "results/affinity_repair/20260916-voc-s0/ARTIFACT_AFFINITY_REPORT.md",
+      "copy": "evidence/ARTIFACT_AFFINITY_REPORT.md",
+      "bytes": 598,
+      "sha256": "a7b0a3c19cf35e1061219decf393f032c31bce872f90f03f107de349997bc44d"
+    },
+    {
+      "source": "results/affinity_repair/20260916-voc-s0/a2/AFFINITY_SCREENING_REPORT.md",
+      "copy": "evidence/AFFINITY_SCREENING_REPORT.md",
+      "bytes": 5440,
+      "sha256": "df6db4fd25c545ea9cb2b4e7e79ec14db781e10abc2cff82ef77f9442477bfa3"
+    },
+    {
+      "source": "results/affinity_repair/20260916-voc-s0/stage_b_comparison.csv",
+      "copy": "evidence/stage_b_comparison.csv",
+      "bytes": 552,
+      "sha256": "dc87821abb2d451590b30c2982d04e625cc8ad162fe0f254cea8a0ae0eac9011"
+    },
+    {
+      "source": "docs/MCTformerPlus_C2P_Product_Affinity_Design_and_Results.md",
+      "copy": "evidence/MCTformerPlus_C2P_Product_Affinity_Design_and_Results.md",
+      "bytes": 18596,
+      "sha256": "a3019a80164667ded91019f4fd5cab68b947ef4b4d0d54d66e52aa4f884b1417"
+    },
+    {
+      "source": "results/voc_epoch_evaluation/20260916-gwrp-all-product-s0-s11/epoch_metrics.csv",
+      "copy": "evidence/epoch_metrics.csv",
+      "bytes": 89894,
+      "sha256": "7da4622d6cb74be6a48ecdd874c2b2377f87c8b748c92d80508d7385967e92f8"
+    },
+    {
+      "source": "docs/C2P_FP32_Precision_Repair.md",
+      "copy": "evidence/C2P_FP32_Precision_Repair.md",
+      "bytes": 2387,
+      "sha256": "1167a6e18343fc340fe77ad0382e331cb574c0c60185b625c1aa14f79943706f"
+    },
+    {
+      "source": "docs/Head_Alpha_Execution_Notes.md",
+      "copy": "evidence/Head_Alpha_Execution_Notes.md",
+      "bytes": 4665,
+      "sha256": "86919b0e59c65c4e911495328f0ca43e274f66fdc85bae7a3f8a272e86533c31"
+    }
+  ],
+  "source_code": [
+    {
+      "source": "analysis/diagnostics/metrics.py",
+      "sha256": "666feb64664c4c1e3da7bba6c9ef915ac3ea66e6b5400b10ec04ca907690dc81"
+    },
+    {
+      "source": "analysis/diagnostics/spectral.py",
+      "sha256": "f1bfe595f8eb0d1f585357a245577b26deca78aef6cd39a7dd5b4a3ee0406f10"
+    },
+    {
+      "source": "analysis/diagnostics/state.py",
+      "sha256": "75c580d34dd411148954e4b997060e25473b10ce7da1fb2ca02e197e723be49b"
+    },
+    {
+      "source": "analysis/artifact_probe.py",
+      "sha256": "b9d2fb429fae660cf637666adc31a07f40e5fdf56beb3d4a95b72cff6082ed9b"
+    },
+    {
+      "source": "analysis/head_heatmap.py",
+      "sha256": "e6d4ec82b57d4c8b3210dfd1ff80bc57370f80e4122cb5a9a751561e0aeaf25e"
+    },
+    {
+      "source": "analysis/affinity_repair.py",
+      "sha256": "710f73efe2fd44d186ca5a279f1e61fbff592b9a722d9afd824916e4d69d47a4"
+    },
+    {
+      "source": "analysis/weight_stats.py",
+      "sha256": "e29c09906d1273b0ec10eb2a28571d7d1da861fa30dc95154c5b5631491c01f0"
+    }
+  ],
+  "historical_metrics_recomputed": false,
+  "checkpoint_payloads_copied": false
+}

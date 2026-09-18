@@ -1,0 +1,47 @@
+{
+  "source_git_sha": "7edd58d89d30b3b91b1bd700f40f195c79fec266",
+  "implementation_committed": false,
+  "package_sha256": {
+    "pyproject.toml": "5f2f2d17366908b5ffa613a4298ec259c9a38a860c4a9e698882c55a90fef4bf",
+    "src/vitprobe/__init__.py": "a1b74c40eb3dee6195dcf6193949a19c41d24bf63131b5605c917147e0bccb25",
+    "src/vitprobe/artifacts.py": "691a06691f04e7559a15bfc7078aa562fee5b0919a22ab6c803d4435f502cbc0",
+    "src/vitprobe/bootstrap.py": "e1fb1b5823f2cb41d2aef06df2c3d4bd5fc51fd59283d3fef2cf90ccb2b4f133",
+    "src/vitprobe/graph.py": "f7984be816a316297d9abbf929370cd1a0fbd1e299f2850d37d286fddddc1dc5",
+    "src/vitprobe/layout.py": "d202e4f71a69b156a8324696bbc451f2d89cd88747bcbb2dc76090328c3b30f5",
+    "src/vitprobe/relations.py": "4cf770af6197069282cc2d692394e443ccd34bceb6586f31ad2cccf3027b932b",
+    "src/vitprobe/spectral.py": "a64a6dd29d0ae610b9b6f2a77a6d9370ee26ed487e6bf074123278ce02366755",
+    "src/vitprobe/state.py": "75c580d34dd411148954e4b997060e25473b10ce7da1fb2ca02e197e723be49b",
+    "src/vitprobe/stats.py": "f71af483c1e8925d064236c5c85f1a854f8144aa4f4f5c1cd3ce6b20b92ed253",
+    "src/vitprobe/sweep.py": "e6ccd2b6a6774ddff2dcf74a535b2e49a357cc18d6c6a4861996b51af0b9e526",
+    "templates/gates.yaml": "7e44d97b05816e01ae75d308213c2d2b82fcb38217ed7e16ff6eabfab0c669b9",
+    "templates/manifest.schema.json": "970762f21a6224b4d1257653caa36216f76ee1194f2b78e56ce7bb982afdf0ef",
+    "tests/conftest.py": "c0016c64849f40d439828011d37451df5b1ff631bce2e8ac303ac3bde42bd21c",
+    "tests/test_archive.py": "cf30dc7266ef81e1d163836090be5298f02143311dddf3251a6179cd35c36dee",
+    "tests/test_diagnostics.py": "08b3aa3f792cbe04a0f33cffbbcd252e4ea7ca49fd348147798a55ca6282f3cb",
+    "tests/test_layout_graph.py": "0ba9c49133fc9eca8bba3b577f1606614e41ed8b3d9891ecef520b7753a8a94e",
+    "tests/test_parity_tgca.py": "c55c21f5ac08a513429d13b06c6c8da28790d9b983aa0b5c6acae3bdebb95a82",
+    "tests/test_portable_smoke.py": "0ffe0d8013ff87a2ee92c14d10afa27bdae926c5b0ab300bf5069ab3dff98b2a",
+    "tests/test_sweep_bootstrap.py": "bc502a318f03da406c5b7b7cde5c59abac1d36eed7f71d0035715b6905c1c59f"
+  },
+  "source_sha256": {
+    "models/mctformer_plus.py": "27c1e29296a983830a93a45d053ca2b63f53f6ae693cafbd0e50709810e49f8f",
+    "analysis/c2p_pooling_attention.py": "426ec1eab7dc2ac77c45e4bd150483ef6e25f7b70995a107d360c1fb0bf02854",
+    "analysis/affinity_repair.py": "710f73efe2fd44d186ca5a279f1e61fbff592b9a722d9afd824916e4d69d47a4",
+    "tools/evaluate_cam_threshold_grid.py": "e79eead0c8e733e638bcfacca3b915785834000d1896c49ee5b2dd5c7ecd441f",
+    "analysis/diagnostics/metrics.py": "666feb64664c4c1e3da7bba6c9ef915ac3ea66e6b5400b10ec04ca907690dc81",
+    "analysis/diagnostics/spectral.py": "f1bfe595f8eb0d1f585357a245577b26deca78aef6cd39a7dd5b4a3ee0406f10",
+    "analysis/diagnostics/state.py": "75c580d34dd411148954e4b997060e25473b10ce7da1fb2ca02e197e723be49b",
+    "analysis/artifact_probe.py": "b9d2fb429fae660cf637666adc31a07f40e5fdf56beb3d4a95b72cff6082ed9b",
+    "analysis/head_heatmap.py": "e6d4ec82b57d4c8b3210dfd1ff80bc57370f80e4122cb5a9a751561e0aeaf25e",
+    "analysis/weight_stats.py": "e29c09906d1273b0ec10eb2a28571d7d1da861fa30dc95154c5b5631491c01f0"
+  },
+  "evidence_originals_match": true,
+  "environment": {
+    "python": "3.9.25",
+    "torch": "2.1.0",
+    "numpy": "1.26.3",
+    "pytest": "8.4.2",
+    "pandas": "1.5.3",
+    "setuptools": "80.9.0"
+  }
+}

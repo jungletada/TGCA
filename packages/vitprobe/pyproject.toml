@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vitprobe"
+version = "0.1.0"
+description = "Portable, parity-tested transformer diagnostics"
+requires-python = ">=3.9"
+dependencies = ["torch>=2.0", "numpy"]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+dataframe = ["pandas"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

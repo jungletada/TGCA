@@ -1,0 +1,23 @@
+{
+  "status": "approved_interfaces_complete_new_numerics_pending",
+  "source_git_sha": "7edd58d89d30b3b91b1bd700f40f195c79fec266",
+  "implementation_manifest": "../implementation_manifest.json",
+  "implementation_committed": false,
+  "tests_with_source": {"passed": 146, "failed": 0, "skipped": 0},
+  "tests_without_source": {"passed": 31, "failed": 0, "skipped": 115},
+  "skip_reason": "Original-source parity requires TGCA_PATH; new framework tests and synthetic smoke did run",
+  "parity": {"atol": 1e-7, "rtol": 0, "equal_nan": true, "bootstrap_repetitions": 5000, "tolerance_relaxed": false},
+  "protected_files_unchanged": 336,
+  "historical_metrics_recomputed": false,
+  "checkpoint_payloads_copied": false,
+  "core_imports_work_with_repository_and_pandas_blocked": true,
+  "domain_name_search_exceptions": ["TokenLayout.mctformer_plus"],
+  "new_framework_status": "synthetic_behavior_tests_only_not_validated_against_historical_runs",
+  "manifest_schema_validation": "JSON syntax and internal-reference checks; no external JSON Schema validator was installed",
+  "pending": ["new numerics zero-row/epsilon/FP64 policy", "Phase 3 implementation and its tests", "full final acceptance including numerics"],
+  "commands": [
+    {"cwd": "/home/peng/code/TGCA", "command": "/home/peng/anaconda3/envs/tgca-repro/bin/python -m pip install --no-deps --no-build-isolation -e packages/vitprobe", "exit_code": 0, "log": "results/vitprobe_archive/20260918-interfaces/install.log"},
+    {"cwd": "/home/peng/code/TGCA", "command": "TGCA_PATH=/home/peng/code/TGCA OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 /home/peng/anaconda3/envs/tgca-repro/bin/python -m pytest packages/vitprobe/tests -x -q --junitxml=results/vitprobe_archive/20260918-interfaces/final_with_source.xml", "exit_code": 0, "log": "results/vitprobe_archive/20260918-interfaces/final_with_source.log"},
+    {"cwd": "/home/peng/code/TGCA/packages/vitprobe", "command": "env -u TGCA_PATH OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 /home/peng/anaconda3/envs/tgca-repro/bin/python -m pytest tests -x -q --junitxml=/home/peng/code/TGCA/results/vitprobe_archive/20260918-interfaces/final_standalone.xml", "exit_code": 0, "log": "results/vitprobe_archive/20260918-interfaces/final_standalone.log"}
+  ]
+}

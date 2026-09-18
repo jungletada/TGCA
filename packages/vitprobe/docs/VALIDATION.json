@@ -1,0 +1,21 @@
+{
+  "status": "partial_extraction_awaiting_interface_and_numerics_decisions",
+  "source_git_sha": "7edd58d89d30b3b91b1bd700f40f195c79fec266",
+  "implementation_committed": false,
+  "python": "/home/peng/anaconda3/envs/tgca-repro/bin/python",
+  "environment": {"python": "3.9", "torch": "2.1.0", "numpy": "1.26.3"},
+  "parity": {"dtype": "float32", "atol": 1e-7, "rtol": 0, "equal_nan": true, "synthetic_seed": 20260916},
+  "tests_with_source": {"passed": 19, "failed": 0, "skipped": 0},
+  "tests_without_source": {"passed": 8, "failed": 0, "skipped": 11, "skip_reason": "TGCA_PATH unset; original-source parity unavailable"},
+  "source_hashes_checked_unchanged_before_handoff_update": 335,
+  "evidence_files": 8,
+  "evidence_total_bytes": 123434,
+  "checkpoint_payloads_copied": 0,
+  "training_or_dataset_inference": false,
+  "commands": [
+    {"cwd": "/home/peng/code/TGCA", "command": "/home/peng/anaconda3/envs/tgca-repro/bin/python -m pip install --no-deps --no-build-isolation -e packages/vitprobe", "exit_code": 0, "log": "results/vitprobe_archive/20260918-extraction/install.log"},
+    {"cwd": "/home/peng/code/TGCA", "command": "TGCA_PATH=/home/peng/code/TGCA OMP_NUM_THREADS=2 /home/peng/anaconda3/envs/tgca-repro/bin/python -m pytest packages/vitprobe/tests -x -q --junitxml=results/vitprobe_archive/20260918-extraction/with_source.xml", "exit_code": 0, "log": "results/vitprobe_archive/20260918-extraction/with_source.log"},
+    {"cwd": "/home/peng/code/TGCA/packages/vitprobe", "command": "env -u TGCA_PATH OMP_NUM_THREADS=2 /home/peng/anaconda3/envs/tgca-repro/bin/python -m pytest tests -x -q --junitxml=/home/peng/code/TGCA/results/vitprobe_archive/20260918-extraction/standalone.xml", "exit_code": 0, "log": "results/vitprobe_archive/20260918-extraction/standalone.log"}
+  ],
+  "not_yet_implemented": ["TokenLayout", "numerics", "graph", "sweep", "bootstrap", "templates", "full_migration_smoke"]
+}

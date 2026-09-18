@@ -1,0 +1,37 @@
+# Structured example, not thresholds validated for a new host or dataset.
+# No gate automatically launches training or another experiment.
+schema_version: 1
+scope: example_only
+sampling_unit: image
+aggregation: equal_image_mean_after_within_image_reduction
+decision: all_conditions_required_per_checkpoint
+source: evidence/decision.md
+gates:
+  - id: high_norm_fraction
+    metric: M2
+    operator: ge
+    threshold: 0.005
+    units: proportion
+    threshold_source: historical_pre_registered_artifact_probe
+    on_pass: record_pass
+    on_fail: record_no_go
+  - id: attractor_mass
+    metric: M4
+    operator: ge
+    threshold: 0.05
+    units: proportion
+    threshold_source: historical_pre_registered_artifact_probe
+    on_pass: record_pass
+    on_fail: record_no_go
+  - id: symptom_overlap
+    metric: M5
+    operator: ge
+    threshold: 0.2
+    units: jaccard
+    threshold_source: historical_pre_registered_artifact_probe
+    on_pass: record_pass
+    on_fail: record_no_go
+warnings:
+  - These thresholds do not transfer automatically to another setting.
+  - RGB low information is not a semantic background label.
+  - Gate success is not evidence of statistical or causal success.
