@@ -17,10 +17,17 @@ checkpoint metadata and evaluation validation distinguish repaired runs.
 65 focused unit tests passed before implementation commit.
 Runner: `experiments.ablations.validate_c2p_fp32` (frozen seed0/11 epoch12 probe,
 then64-image two-epoch smoke, checkpoint reload,4-image classification,2-image CAM).
-Planned output: `results/c2p_fp32_validation/20260918-all-product-r1`.
+Output: `results/c2p_fp32_validation/20260918-all-product-r2`.
 Planned tmux: `mct-c2p-fp32-check-20260918`. No full matched retraining.
 Completion/integrity evidence must be read from `VALIDATION_COMPLETE` and
 `manifest.json`; the integration run is pending at this implementation commit.
+
+Initial r1 at `9fe02e5` passed65 tests, the frozen probe, smoke training,
+checkpoint verification and classification. CAM invocation failed because the
+smoke list lacked `train` in its filename (required by the existing evaluator).
+No model failure. Preserve r1 logs/results; r2 corrects only this list filename.
+An additional user plan `docs/MCTformerPlus_HeadAxis_and_Alpha_Plan.md` appeared
+during this task; it is untracked and untouched, and has not been executed.
 
 Host: LHR. Repository: `/home/peng/code/TGCA`, branch `main`.
 Environment: `/home/peng/anaconda3/envs/tgca-repro/bin/python`.

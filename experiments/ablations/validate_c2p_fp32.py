@@ -135,7 +135,8 @@ def main():
     smoke = output / 'smoke'
     smoke.mkdir()
     for key, count in [('train', 64), ('val', 4), ('cam', 2)]:
-        (smoke / (key + '_id.txt')).write_text('\n'.join(spec[key].read_text().splitlines()[:count]) + '\n')
+        name = 'cam_train_id.txt' if key == 'cam' else key + '_id.txt'
+        (smoke / name).write_text('\n'.join(spec[key].read_text().splitlines()[:count]) + '\n')
     flags = [*pooling_flags('all_product'), '--c2p-pooling-fp32']
     run([*training_command(spec, smoke, 'all_product', 0, smoke/'train_id.txt',
                            smoke/'val_id.txt', epochs=2, workers=4), '--c2p-pooling-fp32'], smoke, 'train')
@@ -152,7 +153,7 @@ def main():
          '--list-path', smoke/'val_id.txt', '--input-size', '448', '--batch-size', '4',
          '--num-workers', '2', '--bootstrap-resamples', '0', '--output-dir', smoke/'classification', *flags], smoke, 'classification')
     run([sys.executable, '-u', 'make_cam.py', '--dataset', 'VOC12', '--model', 'mctformerplus',
-         '--voc12_root', spec['root'], '--work_space', smoke, '--train_list', smoke/'cam_id.txt',
+         '--voc12_root', spec['root'], '--work_space', smoke, '--train_list', smoke/'cam_train_id.txt',
          '--input_size', '448', '--scales', '1.0,0.75,1.25', '--checkpoint', checkpoint,
          '--cam_out_dir', 'cam_train', '--online-raw-eval', '--online-mask-dir', spec['masks'],
          '--online-output-dir', smoke/'raw_cam', *flags], smoke, 'cam')

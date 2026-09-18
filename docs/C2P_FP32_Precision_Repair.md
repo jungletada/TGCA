@@ -27,7 +27,7 @@ to claim a newly trained method's performance. GWRP is untouched.
 ## Validation command
 
 ```sh
-OMP_NUM_THREADS=2 /home/peng/anaconda3/envs/tgca-repro/bin/python -u -m experiments.ablations.validate_c2p_fp32 --output results/c2p_fp32_validation/20260918-all-product-r1
+OMP_NUM_THREADS=2 /home/peng/anaconda3/envs/tgca-repro/bin/python -u -m experiments.ablations.validate_c2p_fp32 --output results/c2p_fp32_validation/20260918-all-product-r2
 ```
 
 The runner requires tracked-clean Git and a new output directory. It logs exact
