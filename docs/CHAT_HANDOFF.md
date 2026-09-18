@@ -1,5 +1,23 @@
 # Operational handoff — 2026-09-18
 
+### Live verified state (2026-09-18 13:18 JST)
+
+Current inference code: `08c8dda` (head/alpha).27 focused tests passed.
+Preflight COMPLETE/gate passed. `smoke-r3/SMOKE_COMPLETE` verified, all11
+source hashes unchanged, native CAM max absolute error0, all reports rendered.
+Full queue STARTED, not complete: tmux `mct-head-alpha-20260918-r3`,
+runner `analysis.head_alpha`, currently first host's alpha scan.
+Canonical full output: `results/head_alpha/20260918-voc/full-r2/`.
+Log: `results/head_alpha/20260918-voc/full-r2.queue.log`.
+Final reports will be `HEAD_ALPHA_REPORT.md`, `ALPHA_SWEEP_REPORT.md`,
+`HEAD_AXIS_REPORT.md`, `NEXT_EXPERIMENT_DECISION.md` inside that directory.
+Do not mistake original smoke/full partial directories for completed science.
+No training is active or authorized; no follow-up queue after these scans.
+Source checkpoints, masks, lists and user plans are hashed and read-only.
+The three untracked user plans remain untouched. GPU queue should be inspected
+read-only; do not duplicate it. Completion requires `full-r2/COMPLETE` plus
+`manifest.json` source-integrity equality and full image counts.
+
 ## Current request — Head-axis / alpha plan (2026-09-18)
 
 Plan read in full: `docs/MCTformerPlus_HeadAxis_and_Alpha_Plan.md`.
