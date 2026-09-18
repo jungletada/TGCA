@@ -22,6 +22,18 @@ Code audit: native C2P=head mean then last3 mean; seed=sqrt(ReLU(M)*a);
 P=sum all12 head means; sum upsampled/unflipped views then class min-max.
 Later A/H scans are pending, not completed. `docs/design.md` remains absent.
 
+Stage0 completed at `95447b4`, gate PASSED: all-product image TV0.0001501707,
+pooled TV0.0001472097; no all-zero positive rows, all source hashes unchanged.
+Implementation/pre-registration: `docs/Head_Alpha_Execution_Notes.md`.
+Runner `analysis.head_alpha`; smoke then full under
+`results/head_alpha/20260918-voc/{smoke,full}`. All forwards FP32/autocastOFF/
+TF32OFF; no training. Core9 unit tests passed before integration launch.
+Main reports will be `full/HEAD_ALPHA_REPORT.md`, `ALPHA_SWEEP_REPORT.md`,
+`HEAD_AXIS_REPORT.md`, `NEXT_EXPERIMENT_DECISION.md` when full is complete.
+Plan ambiguities (epsilon/native, crossfit weighting, rownorm multi-view effects,
+unlabeled ranking direction and multiplicity limitations) are resolved explicitly
+in the execution notes before inspecting scan outcomes.
+
 ## Current request — all-product FP16 precision repair (2026-09-18)
 
 Startup main HEAD: `3e7ae75`. Live state supersedes older launch notes below:
