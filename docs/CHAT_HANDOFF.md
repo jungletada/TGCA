@@ -1,4 +1,26 @@
-# Operational handoff — 2026-09-16
+# Operational handoff — 2026-09-18
+
+## Current request — all-product FP16 precision repair (2026-09-18)
+
+Startup main HEAD: `3e7ae75`. Live state supersedes older launch notes below:
+the four VOC baseline trainings/180 evaluations and detach/A1 trainings/180
+evaluations plus360 frozen diagnostics are COMPLETE. No experiment was running;
+only the user's `codex-wsss-0` tmux session remained. `docs/design.md` remains absent.
+Two untracked user plans remain untouched. No full training is authorized by
+this bounded repair task, and none is being launched.
+
+Request: verify and repair the FP16 attention boundary in all-product pooling.
+New opt-in `--c2p-pooling-fp32` reads head-mean C2P probabilities BEFORE the
+normalizer casts to FP16; native attention/V, token updates, CCT and CAM retain
+their original path. No engine/loss/scaler/seed changes. Legacy default is false;
+checkpoint metadata and evaluation validation distinguish repaired runs.
+65 focused unit tests passed before implementation commit.
+Runner: `experiments.ablations.validate_c2p_fp32` (frozen seed0/11 epoch12 probe,
+then64-image two-epoch smoke, checkpoint reload,4-image classification,2-image CAM).
+Planned output: `results/c2p_fp32_validation/20260918-all-product-r1`.
+Planned tmux: `mct-c2p-fp32-check-20260918`. No full matched retraining.
+Completion/integrity evidence must be read from `VALIDATION_COMPLETE` and
+`manifest.json`; the integration run is pending at this implementation commit.
 
 Host: LHR. Repository: `/home/peng/code/TGCA`, branch `main`.
 Environment: `/home/peng/anaconda3/envs/tgca-repro/bin/python`.

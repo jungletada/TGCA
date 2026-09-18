@@ -56,6 +56,8 @@ def get_args_parser():
     parser.add_argument('--c2p-pooling-layers', choices=('last3', 'all'), default='last3')
     parser.add_argument('--c2p-pooling-reduction', choices=('mean', 'product'), default='mean')
     parser.add_argument('--c2p-pooling-affinity', action='store_true')
+    parser.add_argument('--c2p-pooling-fp32', action='store_true',
+                        help='Read all-product pooling probabilities before the AMP attention cast')
     parser.add_argument('--detach-weights', action='store_true')
     parser.add_argument('--channel-agg', action='store_true')
     parser.add_argument('--channel-agg-lr-mult', type=float, choices=(1., 10.), default=1.)
@@ -524,6 +526,7 @@ def main(args):
             'c2p_pooling_layers': args.c2p_pooling_layers,
             'c2p_pooling_reduction': args.c2p_pooling_reduction,
             'c2p_pooling_affinity': args.c2p_pooling_affinity,
+            'c2p_pooling_fp32': args.c2p_pooling_fp32,
             'affinity_repair': args.affinity_repair,
             'detach_weights': args.detach_weights,
             'channel_agg': args.channel_agg,

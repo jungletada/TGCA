@@ -175,7 +175,7 @@ class Attention(nn.Module):
         )
         return self._attention_output(weights, value), weights
 
-    def forward(self, x):
+    def forward(self, x, c2p_fp32=None):
         B, N, C = x.shape  # Here N = #patches + #class-tokens
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2] 
@@ -184,7 +184,14 @@ class Attention(nn.Module):
         query_group_ids, key_group_ids = build_mctformer_groups(
             self.num_classes, N - self.num_classes, device=attn.device
         )
-        attn = self.normalizer(attn, key_group_ids, query_group_ids)
+        if c2p_fp32 is None:
+            attn = self.normalizer(attn, key_group_ids, query_group_ids)
+        else:
+            probabilities = self.normalizer(attn, key_group_ids, query_group_ids, return_fp32=True)
+            # Pooling branches BEFORE the lossy cast, including its backward
+            # path. Keep only [B,C,Npatch], not another full NxN record.
+            c2p_fp32.append(probabilities[:, :, :self.num_classes, self.num_classes:].mean(1))
+            attn = probabilities.to(attn.dtype)
         weights = attn
 
         attn = self.attn_drop(attn)
@@ -216,8 +223,11 @@ class Block(nn.Module):
                     act_layer=act_layer, 
                     drop=drop)
 
-    def forward(self, x):
-        o, weights = self.attn(self.norm1(x))
+    def forward(self, x, c2p_fp32=None):
+        if c2p_fp32 is None:
+            o, weights = self.attn(self.norm1(x))
+        else:
+            o, weights = self.attn(self.norm1(x), c2p_fp32=c2p_fp32)
         x = x + self.drop_path(o)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x, weights

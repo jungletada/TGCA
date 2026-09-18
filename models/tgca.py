@@ -90,11 +90,13 @@ def token_group_normalize(
     gamma: float = 1.0,
     split_weights: Optional[Sequence[float]] = None,
     relation_bias: Optional[Tensor] = None,
+    return_fp32: bool = False,
 ) -> Tensor:
     """Normalize attention logits over heterogeneous key-token groups.
 
     All corrections and softmax accumulation are performed in float32. The
     returned probabilities use the input logit's dtype and are pre-dropout.
+    Vanilla callers may retain the pre-cast FP32 probabilities for a readout.
     """
     if logits.ndim != 4:
         raise ValueError("logits must have shape [B, H, Nq, Nk]")
@@ -102,6 +104,8 @@ def token_group_normalize(
         raise TypeError("logits must use a floating-point dtype")
     if mode not in SUPPORTED_MODES:
         raise ValueError(f"Unknown attention normalization mode: {mode!r}")
+    if return_fp32 and mode != 'vanilla':
+        raise ValueError('FP32 pooling readout is supported only for vanilla attention')
 
     batch_size, num_heads, num_queries, num_keys = logits.shape
     key_group_ids = _expand_group_ids(
@@ -128,7 +132,7 @@ def token_group_normalize(
 
     if mode == "vanilla":
         probabilities = _masked_softmax(logits_fp32, valid_mask)
-        return probabilities.to(dtype=logits.dtype)
+        return probabilities if return_fp32 else probabilities.to(dtype=logits.dtype)
 
     key_membership = torch.nn.functional.one_hot(
         key_group_ids, num_classes=num_key_groups
@@ -253,6 +257,7 @@ class TokenGroupNormalizer(nn.Module):
         key_group_ids: Tensor,
         query_group_ids: Optional[Tensor] = None,
         key_valid_mask: Optional[Tensor] = None,
+        return_fp32: bool = False,
     ) -> Tensor:
         return token_group_normalize(
             logits=logits,
@@ -263,6 +268,7 @@ class TokenGroupNormalizer(nn.Module):
             gamma=self.gamma,
             split_weights=self.split_weights,
             relation_bias=self.relation_bias,
+            return_fp32=return_fp32,
         )
 
     def extra_repr(self) -> str:

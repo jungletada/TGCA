@@ -38,6 +38,7 @@ from models.mctformer_plus import (  # noqa: E402
     validate_mctformerplus_token_interaction_checkpoint,
     validate_mctformerplus_patch_pooling_checkpoint,
     validate_detach_channel_checkpoint,
+    validate_c2p_precision_checkpoint,
 )
 
 
@@ -72,6 +73,7 @@ def parse_args():
     parser.add_argument('--c2p-pooling-layers', choices=('last3', 'all'), default='last3')
     parser.add_argument('--c2p-pooling-reduction', choices=('mean', 'product'), default='mean')
     parser.add_argument('--c2p-pooling-affinity', action='store_true')
+    parser.add_argument('--c2p-pooling-fp32', action='store_true')
     parser.add_argument('--detach-weights', action='store_true')
     parser.add_argument('--channel-agg', action='store_true')
     parser.add_argument('--affinity-repair', type=json.loads, default=None)
@@ -232,6 +234,7 @@ def execute(args):
     class_names = tuple(f'coco_label_index_{i}' for i in range(80)) if args.dataset == 'COCO' else CLASS_NAMES
     checkpoint = torch.load(args.checkpoint, map_location='cpu')
     validate_detach_channel_checkpoint(checkpoint, args.detach_weights, args.channel_agg)
+    validate_c2p_precision_checkpoint(checkpoint, args.c2p_pooling_fp32)
     validate_mctformerplus_patch_pooling_checkpoint(
         checkpoint, args.patch_pooling, args.c2p_pooling_layers, args.c2p_pooling_reduction,
         args.c2p_pooling_affinity, args.affinity_repair)
@@ -285,6 +288,7 @@ def execute(args):
         c2p_pooling_layers=args.c2p_pooling_layers,
         c2p_pooling_reduction=args.c2p_pooling_reduction,
         c2p_pooling_affinity=args.c2p_pooling_affinity,
+        c2p_pooling_fp32=args.c2p_pooling_fp32,
         detach_weights=args.detach_weights,
         channel_agg=args.channel_agg,
         affinity_repair=args.affinity_repair,
@@ -484,6 +488,7 @@ def execute(args):
             'c2p_pooling_layers': args.c2p_pooling_layers,
             'c2p_pooling_reduction': args.c2p_pooling_reduction,
             'c2p_pooling_affinity': args.c2p_pooling_affinity,
+            'c2p_pooling_fp32': args.c2p_pooling_fp32,
             'affinity_repair': args.affinity_repair,
             'macro_definition': f'mean of {num_classes} dataset-level one-vs-rest class AP values',
             'micro_definition': 'AP over flattened image-class pairs',

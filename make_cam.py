@@ -33,6 +33,7 @@ from models.mctformer_plus import (
     validate_mctformerplus_patch_first_checkpoint,
     validate_mctformerplus_patch_pooling_checkpoint,
     validate_detach_channel_checkpoint,
+    validate_c2p_precision_checkpoint,
 )
 
 
@@ -51,6 +52,7 @@ def get_args_parser():
     parser.add_argument('--c2p-pooling-layers', choices=('last3', 'all'), default='last3')
     parser.add_argument('--c2p-pooling-reduction', choices=('mean', 'product'), default='mean')
     parser.add_argument('--c2p-pooling-affinity', action='store_true')
+    parser.add_argument('--c2p-pooling-fp32', action='store_true')
     parser.add_argument('--detach-weights', action='store_true')
     parser.add_argument('--channel-agg', action='store_true')
     parser.add_argument('--affinity-repair', type=json.loads, default=None)
@@ -498,6 +500,7 @@ if __name__ == '__main__':
         )
         validate_mctformerplus_patch_first_checkpoint(checkpoint, args.patch_first)
         validate_detach_channel_checkpoint(checkpoint, args.detach_weights, args.channel_agg)
+        validate_c2p_precision_checkpoint(checkpoint, args.c2p_pooling_fp32)
         validate_mctformerplus_patch_pooling_checkpoint(
             checkpoint, args.patch_pooling, args.c2p_pooling_layers, args.c2p_pooling_reduction,
             args.c2p_pooling_affinity, args.affinity_repair)

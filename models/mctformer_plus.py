@@ -543,7 +543,7 @@ class MCTformerPlus(VisionTransformer):
             decoupled_variant='full', patch_first=False, patch_pooling='gwrp',
             c2p_pooling_layers='last3',
             c2p_pooling_reduction='mean', c2p_pooling_affinity=False, affinity_repair=None,
-            detach_weights=False, channel_agg=False,
+            detach_weights=False, channel_agg=False, c2p_pooling_fp32=False,
             *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.patch_first = bool(patch_first)
@@ -551,6 +551,13 @@ class MCTformerPlus(VisionTransformer):
         self.c2p_pooling_layers = c2p_pooling_layers
         self.c2p_pooling_reduction = c2p_pooling_reduction
         self.c2p_pooling_affinity = bool(c2p_pooling_affinity)
+        self.c2p_pooling_fp32 = bool(c2p_pooling_fp32)
+        if self.c2p_pooling_fp32 and (
+                patch_pooling != 'c2p' or c2p_pooling_layers != 'all' or c2p_pooling_reduction != 'product'
+                or self.attention_normalization != 'vanilla' or token_interaction != 'joint'
+                or bcss_variant != 'e0' or psl_variant != 'baseline' or cti_bgt or patch_first
+                or c2p_pooling_affinity or affinity_repair is not None):
+            raise ValueError('FP32 C2P readout requires vanilla class-first all-product without optional attention variants')
         self.detach_weights = bool(detach_weights)
         self.channel_aggregator = ChannelAggregator(self.embed_dim, enabled=channel_agg)
         if detach_weights or channel_agg:
@@ -1193,9 +1200,10 @@ class MCTformerPlus(VisionTransformer):
         x = self.pos_drop(x)
         attn_weights = []
         all_x_cls = []
+        c2p_fp32 = [] if self.c2p_pooling_fp32 else None
 
         for i, blk in enumerate(self.blocks):
-            x, weights_i = blk(x)
+            x, weights_i = blk(x) if c2p_fp32 is None else blk(x, c2p_fp32=c2p_fp32)
             attn_weights.append(weights_i)
             all_x_cls.append(
                 x[:, patch_count:] if self.patch_first
@@ -1219,6 +1227,7 @@ class MCTformerPlus(VisionTransformer):
             x_patch = self.norm(x_patch)
         auxiliary = {
             'variant': self.bcss_variant,
+            **({'c2p_pooling_fp32_records': c2p_fp32} if c2p_fp32 is not None else {}),
             'patch_count': patch_count,
             'final_norm': self.final_norm,
             'patch_final_norm': self.patch_final_norm,
@@ -1342,9 +1351,15 @@ class MCTformerPlus(VisionTransformer):
                 self.affinity_fallback_rows += int(fallback.sum().detach())
             return result
 
-    def c2p_pool(self, class_map, attention_records):
+    def c2p_pool(self, class_map, attention_records, fp32_c2p=None):
         logits = class_map.flatten(2)
-        weights = self.c2p_spatial_weights(attention_records, logits.shape[-1])
+        if self.c2p_pooling_fp32:
+            if fp32_c2p is None:
+                raise ValueError('FP32 pooling requires the pre-cast C2P records from forward_features')
+            a_layers = torch.stack(fp32_c2p)
+            weights = a_layers.clamp_min(torch.finfo(a_layers.dtype).tiny).log().sum(0).softmax(-1)
+        else:
+            weights = self.c2p_spatial_weights(attention_records, logits.shape[-1])
         if self.c2p_pooling_affinity:
             weights = self.c2p_affinity_weights(weights, attention_records, logits.shape[-1])
         if self.detach_weights:
@@ -1452,7 +1467,7 @@ class MCTformerPlus(VisionTransformer):
                     original_class_map=x_patch[:, self._foreground_slice()],
                 )
             elif self.patch_pooling == 'c2p':
-                x_patch_logits = self.c2p_pool(x_patch, attentions)
+                x_patch_logits = self.c2p_pool(x_patch, attentions, auxiliary.get('c2p_pooling_fp32_records'))
             else:
                 x_patch_flattened = x_patch.view(
                     x_patch.shape[0], x_patch.shape[1], -1
@@ -1651,7 +1666,7 @@ class MCTformerPlusCam(MCTformerPlus):
         x_patch = self.head(x_patch)
 
         if self.patch_pooling == 'c2p':
-            x_logits = self.c2p_pool(x_patch, attn_weights)
+            x_logits = self.c2p_pool(x_patch, attn_weights, auxiliary.get('c2p_pooling_fp32_records'))
         _, attn_weights = self._stack_attention_records(attn_weights)
         if isinstance(attn_weights, Mapping):
             attn_weights = {
@@ -1904,6 +1919,7 @@ def model_spec_from_instance(model):
         'c2p_pooling_layers': model.c2p_pooling_layers,
         'c2p_pooling_reduction': model.c2p_pooling_reduction,
         'c2p_pooling_affinity': model.c2p_pooling_affinity,
+        **({'c2p_pooling_fp32': True} if model.c2p_pooling_fp32 else {}),
         **({'detach_weights': True} if model.detach_weights else {}),
         **({'channel_agg': True} if model.channel_aggregator.enabled else {}),
         **({'affinity_repair': deepcopy(model.affinity_repair)} if model.affinity_repair is not None else {}),
@@ -1941,6 +1957,12 @@ def validate_detach_channel_checkpoint(checkpoint, detach_weights=False, channel
     for key, expected in [('detach_weights', detach_weights), ('channel_agg', channel_agg)]:
         if spec.get(key, False) != expected:
             raise ValueError(f'Checkpoint {key} does not match CLI')
+
+
+def validate_c2p_precision_checkpoint(checkpoint, expected=False):
+    observed = checkpoint.get('model_spec', {}).get('c2p_pooling_fp32', False)
+    if observed != expected:
+        raise ValueError('Checkpoint c2p_pooling_fp32 does not match CLI; legacy and repaired runs must be explicit')
 
 
 def _checkpoint_state_dict(checkpoint):
