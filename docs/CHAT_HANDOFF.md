@@ -1,5 +1,27 @@
 # Operational handoff — 2026-09-18
 
+## Current request — Head-axis / alpha plan (2026-09-18)
+
+Plan read in full: `docs/MCTformerPlus_HeadAxis_and_Alpha_Plan.md`.
+This new authorization is INFERENCE ONLY, two frozen seed0 hosts; no training,
+learnable heads, register, Gram, COCO, extra seeds or automatic follow-up.
+Previous FP32 repair validation r2 COMPLETE at `92ace1a`:65 tests, frozen probe,
+two-epoch smoke, checkpoint verification, classification4/CAM2; all7 source
+hashes unchanged. Actual smoke AdamW steps3/4, default scale65536->32768;
+this does not establish that all AMP overflow or the seed gap is resolved.
+At startup only user tmux `codex-wsss-0`; GPU idle. Three user plans preserved.
+
+Step0 runner: `analysis.head_alpha_preflight`, output
+`results/head_alpha/20260918-voc/preflight`. Full FP32 VOCval1449 epoch45
+seed0 GWRP/all-product; isolate probability-cast error by FP16 round-trip of
+the SAME FP32 forward probabilities. No autocast or TF32; no GT segmentation.
+Before seeing results, interpret requested1e-4-order TV gate as BOTH image-mean
+and pooled-positive-class mean TV <1e-3 for all-product. GWRP product-TV is
+hypothetical, not its classification path. Stop if the prerequisite fails.
+Code audit: native C2P=head mean then last3 mean; seed=sqrt(ReLU(M)*a);
+P=sum all12 head means; sum upsampled/unflipped views then class min-max.
+Later A/H scans are pending, not completed. `docs/design.md` remains absent.
+
 ## Current request — all-product FP16 precision repair (2026-09-18)
 
 Startup main HEAD: `3e7ae75`. Live state supersedes older launch notes below:
